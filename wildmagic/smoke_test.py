@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 
 from .actions import GameSession
+from .models import FIRE, RUBBLE, SLICK_ICE, VINES
 from .replay import run_replay, save_replay
 from .wild_magic import MockWildMagicProvider
 
@@ -60,7 +61,11 @@ def main() -> None:
     assert rich_session.engine.state.flags.get("future_debt") is True
     assert not rich_session.engine.state.event_timers
     assert rich_session.engine.state.player.resistances.get("poison", 0) >= 25
-    assert any(enemy.name == "debt collector" for enemy in rich_session.engine.living_enemies())
+    assert any(
+        e.name in ("wild echo", "debt collector", "summoned creature")
+        for e in rich_session.engine.state.entities.values()
+        if e.kind == "actor" and e.hp > 0
+    )
 
     conjure_session = GameSession(seed=7, scenario="test_chamber", provider=MockWildMagicProvider())
     teeth = conjure_session.execute_command('cast "the goblin teeth turn to glass and fall out"')
@@ -77,6 +82,123 @@ def main() -> None:
         if enemy.name == "ant swarm" and "ant" in enemy.tags
     ]
     assert len(ant_swarms) >= 1
+
+    behavior_session = GameSession(seed=7, scenario="test_chamber", provider=MockWildMagicProvider())
+    behavior_engine = behavior_session.engine
+    behavior_player = behavior_engine.state.player
+    behavior_goblin = next(enemy for enemy in behavior_engine.living_enemies() if enemy.name == "test goblin")
+    ward = behavior_engine.spawn_actor(
+        "burning ward",
+        "w",
+        behavior_goblin.x - 1,
+        behavior_goblin.y,
+        hp=5,
+        attack=0,
+        defense=1,
+        faction="ally",
+        ai=None,
+        tags=set(),
+    )
+    assert "stationary" in ward.tags
+    assert "aura_burn_2" in ward.tags
+    assert "pacifist" in ward.tags
+    behavior_engine._process_entity_behaviors()
+    assert "burning" in behavior_goblin.statuses
+
+    enemy_font = behavior_engine.spawn_actor(
+        "poison font",
+        "p",
+        behavior_player.x + 1,
+        behavior_player.y,
+        hp=5,
+        attack=0,
+        defense=1,
+        faction="enemy",
+        ai="simple",
+        tags=set(),
+    )
+    assert "stationary" in enemy_font.tags
+    assert "aura_poison_2" in enemy_font.tags
+    assert "pacifist" in enemy_font.tags
+    behavior_engine._process_entity_behaviors()
+    assert "poisoned" in behavior_player.statuses
+
+    line_session = GameSession(seed=7, scenario="test_chamber", provider=MockWildMagicProvider())
+    line_engine = line_session.engine
+    line_engine.apply_wild_magic_resolution(
+        {
+            "accepted": True,
+            "severity": "minor",
+            "outcome_text": "Ice draws a straight answer.",
+            "effects": [
+                {
+                    "type": "create_tiles",
+                    "shape": "line",
+                    "origin": "player",
+                    "target": "nearest_enemy",
+                    "tile": "slick_ice",
+                    "duration": 5,
+                }
+            ],
+            "costs": [],
+            "rejected_reason": None,
+        }
+    )
+    assert line_engine.tile_at(6, 7) == SLICK_ICE
+
+    shape_session = GameSession(seed=7, scenario="test_chamber", provider=MockWildMagicProvider())
+    shape_engine = shape_session.engine
+    shape_engine.apply_wild_magic_resolution(
+        {
+            "accepted": True,
+            "severity": "minor",
+            "outcome_text": "Shapes learn to hold terrain.",
+            "effects": [
+                {"type": "create_tiles", "shape": "wall", "target": "nearest_enemy", "tile": "rubble", "radius": 2},
+                {"type": "create_tiles", "shape": "cone", "origin": "player", "target": "nearest_enemy", "tile": "fire", "radius": 3},
+                {"type": "create_tiles", "shape": "scatter", "target": "nearest_enemy", "tile": "vines", "radius": 4, "count": 3},
+            ],
+            "costs": [],
+            "rejected_reason": None,
+        }
+    )
+    flattened_tiles = [tile for row in shape_engine.state.tiles for tile in row]
+    assert flattened_tiles.count(RUBBLE) >= 1
+    assert flattened_tiles.count(FIRE) >= 1
+    assert flattened_tiles.count(VINES) >= 1
+
+    trigger_session = GameSession(seed=7, scenario="test_chamber", provider=MockWildMagicProvider())
+    trigger_engine = trigger_session.engine
+    trigger_goblin = next(enemy for enemy in trigger_engine.living_enemies() if enemy.name == "test goblin")
+    trigger_engine.apply_wild_magic_resolution(
+        {
+            "accepted": True,
+            "severity": "moderate",
+            "outcome_text": "The next wound will answer.",
+            "effects": [
+                {
+                    "type": "create_trigger",
+                    "name": "thorn-blood answer",
+                    "trigger": "on_player_hit",
+                    "target": "player",
+                    "charges": 1,
+                    "duration": 6,
+                    "effects": [
+                        {"type": "damage", "target": "trigger_source", "amount": 4, "damage_type": "physical"},
+                        {"type": "add_status", "target": "trigger_source", "status": "bleeding", "duration": 2},
+                    ],
+                }
+            ],
+            "costs": [],
+            "rejected_reason": None,
+        }
+    )
+    assert trigger_engine.state.triggers
+    hp_before_trigger = trigger_goblin.hp
+    trigger_engine.attack(trigger_goblin, trigger_engine.state.player)
+    assert trigger_goblin.hp < hp_before_trigger
+    assert "bleeding" in trigger_goblin.statuses
+    assert not trigger_engine.state.triggers
 
     with tempfile.TemporaryDirectory() as temp_dir:
         replay_path = Path(temp_dir) / "smoke_replay.json"

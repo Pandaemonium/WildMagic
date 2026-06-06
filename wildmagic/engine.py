@@ -4,6 +4,7 @@ from collections import deque
 from dataclasses import dataclass, field
 import math
 import random
+import re
 from typing import Any
 
 from .models import (
@@ -158,6 +159,7 @@ class GameState:
     tile_tags: dict[str, list[str]] = field(default_factory=dict)
     tile_durations: dict[str, int] = field(default_factory=dict)
     event_timers: list[dict[str, Any]] = field(default_factory=list)
+    triggers: list[dict[str, Any]] = field(default_factory=list)
     game_over: bool = False
     victory: bool = False
     rng_seed: int | None = None
@@ -416,6 +418,13 @@ class GameEngine:
         resistances: dict[str, int] | None = None,
         weaknesses: dict[str, int] | None = None,
     ) -> Entity:
+        faction = normalize_faction(faction, default="ally")
+        actor_tags = {
+            normalize_id(str(tag))
+            for tag in (tags or set())
+            if str(tag).strip()
+        }
+        actor_tags = infer_behavior_tags(name, actor_tags)
         entity = Entity(
             id=self.next_entity_id("actor"),
             name=name,
@@ -430,7 +439,7 @@ class GameEngine:
             blocks=True,
             faction=faction,
             ai=ai,
-            tags=set(tags or ()),
+            tags=actor_tags,
             resistances=dict(resistances or {}),
             weaknesses=dict(weaknesses or {}),
         )
@@ -596,6 +605,7 @@ class GameEngine:
             return False
         player.x = target_x
         player.y = target_y
+        moved = True
         self.pick_up_items_at_player()
         self._apply_tile_entry(player)
         self.update_fov()
@@ -609,6 +619,8 @@ class GameEngine:
                 player.y = slide_y
                 self.state.add_message("You slide on the ice!")
                 self._apply_tile_entry(player)
+        if moved:
+            self._fire_triggers("on_player_move", {"target": player, "source": player})
         self.finish_player_turn()
         return True
 
@@ -824,11 +836,11 @@ class GameEngine:
         base = max(1, attacker.attack - defender.defense + self.rng.randint(0, 2))
         bonus = 2 if ("berserk" in attacker.statuses or "empowered" in attacker.statuses) else 0
         amount = base + bonus
-        self.damage_entity(defender, amount, "physical")
+        actual = self.damage_entity(defender, amount, "physical", source=attacker)
         if "berserk" in attacker.statuses:
-            self.damage_entity(attacker, 1, "blood")
+            self.damage_entity(attacker, 1, "blood", source=attacker)
         if defender.hp > 0:
-            self.state.add_message(f"{attacker.name} hits {defender.name} for {amount}.")
+            self.state.add_message(f"{attacker.name} hits {defender.name} for {actual}.")
             # Spider webs on hit
             if "spider" in attacker.tags and "webbed" not in defender.statuses and self.rng.random() < 0.5:
                 defender.statuses["webbed"] = 2
@@ -840,7 +852,7 @@ class GameEngine:
         else:
             self.state.add_message(f"{attacker.name} drops {defender.name}.")
 
-    def damage_entity(self, entity: Entity, amount: int, damage_type: str) -> int:
+    def damage_entity(self, entity: Entity, amount: int, damage_type: str, source: Entity | None = None) -> int:
         if entity.kind == "item" or entity.hp <= 0:
             return 0
         damage_type = normalize_id(damage_type)
@@ -851,11 +863,14 @@ class GameEngine:
         if "warded" in entity.statuses and damage_type not in {"blood"}:
             amount = max(0, amount - 2)
         actual = self._modified_damage(entity, amount, damage_type)
+        hp_before = entity.hp
         entity.hp -= actual
         if entity.id == self.state.player_id:
             self.state.stats.damage_taken += actual
         elif entity.kind == "actor":
             self.state.stats.damage_dealt += actual
+        if actual > 0:
+            self._fire_damage_triggers(entity, source, actual, damage_type)
         if entity.hp <= 0:
             # Undead entities have a 30% chance to reform at 1 HP rather than dying.
             if ("undead" in entity.tags and entity.kind == "actor" and entity.id != self.state.player_id
@@ -881,6 +896,9 @@ class GameEngine:
                 if not self.living_enemies():
                     self.state.victory = True
                     self.state.add_message("For a breath, the floor is yours.")
+                # Death-effect tags.
+                self._on_entity_death(entity)
+                self._fire_death_triggers(entity, source, hp_before, damage_type)
         elif damage_type == "fire":
             if "bleeding" in entity.statuses:
                 entity.statuses.pop("bleeding")
@@ -1000,9 +1018,11 @@ class GameEngine:
         self._tick_environment()
         self._tick_tile_durations()
         self._tick_event_timers()
+        self._tick_triggers()
         self.update_fov()
         self._enemy_turns()
         self._ally_turns()
+        self._process_entity_behaviors()
         self._regenerate_player()
         self._ambient_sounds()
 
@@ -1270,8 +1290,8 @@ class GameEngine:
         elif event_type in {"summon", "spawn"}:
             player = self.state.player
             x, y = self.find_open_tile_near(player.x, player.y)
-            faction = str(event.get("faction") or "enemy")
-            name = str(event.get("name") or "debt collector")
+            faction = normalize_faction(event.get("faction"), default="ally", neutral_is_ally=True)
+            name = str(event.get("name") or "summoned creature")
             count = clamp_int(event.get("count") or event.get("quantity") or 1, 1, 6)
             for _ in range(count):
                 if not self.can_occupy(x, y):
@@ -1309,6 +1329,129 @@ class GameEngine:
         elif event_type == "curse":
             self._apply_cost({"type": "curse", **event})
 
+    def _tick_triggers(self) -> None:
+        remaining: list[dict[str, Any]] = []
+        for trigger in self.state.triggers:
+            expires_turn = trigger.get("expires_turn")
+            if expires_turn is not None:
+                if self.state.turn <= clamp_int(expires_turn, 0, 999999):
+                    remaining.append(trigger)
+                else:
+                    name = str(trigger.get("name") or "A waiting spell").strip()
+                    self.state.add_message(f"{name} fades.")
+                continue
+            duration = trigger.get("duration", trigger.get("turns"))
+            if duration in {None, "permanent"}:
+                remaining.append(trigger)
+                continue
+            turns = clamp_int(duration, 0, 999) - 1
+            if turns > 0:
+                trigger = dict(trigger)
+                trigger["duration"] = turns
+                remaining.append(trigger)
+            else:
+                name = str(trigger.get("name") or "A waiting spell").strip()
+                self.state.add_message(f"{name} fades.")
+        self.state.triggers = remaining
+
+    def _fire_damage_triggers(
+        self,
+        target: Entity,
+        source: Entity | None,
+        amount: int,
+        damage_type: str,
+    ) -> None:
+        event = {"target": target, "source": source, "amount": amount, "damage_type": damage_type}
+        names = ["on_damaged", "on_actor_damaged"]
+        if target.id == self.state.player_id:
+            names.extend(["on_player_damaged", "on_player_hit"])
+        elif target.faction == "enemy":
+            names.extend(["on_enemy_damaged", "on_enemy_hit"])
+        self._fire_triggers(names, event)
+
+    def _fire_death_triggers(
+        self,
+        target: Entity,
+        source: Entity | None,
+        previous_hp: int,
+        damage_type: str,
+    ) -> None:
+        event = {"target": target, "source": source, "amount": previous_hp, "damage_type": damage_type}
+        names = ["on_death", "on_actor_death"]
+        if target.id == self.state.player_id:
+            names.append("on_player_death")
+        elif target.faction == "enemy":
+            names.append("on_enemy_death")
+        self._fire_triggers(names, event)
+
+    def _fire_triggers(self, names: str | list[str], event: dict[str, Any] | None = None) -> list[str]:
+        if isinstance(names, str):
+            wanted = {normalize_trigger_name(names)}
+        else:
+            wanted = {normalize_trigger_name(name) for name in names}
+        event = event or {}
+        messages: list[str] = []
+        remaining: list[dict[str, Any]] = []
+        original_triggers = list(self.state.triggers)
+        self.state.triggers = []
+        for trigger in original_triggers:
+            trigger_name = normalize_trigger_name(str(trigger.get("trigger") or trigger.get("on") or ""))
+            if trigger_name not in wanted or not self._trigger_matches_target(trigger, event):
+                remaining.append(trigger)
+                continue
+            name = str(trigger.get("name") or "A waiting spell").strip()
+            self.state.add_message(f"{name} triggers.")
+            messages.append(f"{name} triggers.")
+            effects = coerce_list(trigger.get("effects") or trigger.get("effect"))
+            for raw_effect in effects[:8]:
+                if not isinstance(raw_effect, dict):
+                    continue
+                effect = dict(raw_effect)
+                self._fill_trigger_effect_defaults(effect, event)
+                for message in self._apply_effect(effect):
+                    self.state.add_message(message)
+                    messages.append(message)
+            charges = clamp_int(trigger.get("charges"), 1, 99) - 1
+            if charges > 0:
+                trigger = dict(trigger)
+                trigger["charges"] = charges
+                remaining.append(trigger)
+        self.state.triggers = remaining + self.state.triggers
+        return messages
+
+    def _trigger_matches_target(self, trigger: dict[str, Any], event: dict[str, Any]) -> bool:
+        raw_target = trigger.get("target")
+        if raw_target in {None, "", "any"}:
+            return True
+        target = event.get("target")
+        source = event.get("source")
+        if not isinstance(target, Entity):
+            return True
+        trigger_target = normalize_id(str(raw_target))
+        if trigger_target in {"player", "self", "you"}:
+            return target.id == self.state.player_id
+        if trigger_target in {"enemy", "nearest_enemy", "all_enemies", "enemies"}:
+            return target.faction == "enemy"
+        if trigger_target in {"source", "attacker", "caster"}:
+            return isinstance(source, Entity)
+        return target.id == trigger_target or trigger_target in target.tags or trigger_target in normalize_id(target.name).split("_")
+
+    def _fill_trigger_effect_defaults(self, effect: dict[str, Any], event: dict[str, Any]) -> None:
+        target = event.get("target")
+        source = event.get("source")
+        if not isinstance(target, Entity):
+            return
+        if effect.get("target") == "trigger_target":
+            effect["target"] = target.id
+        elif effect.get("target") == "trigger_source":
+            effect["target"] = source.id if isinstance(source, Entity) else target.id
+        elif "target" not in effect:
+            effect["target"] = target.id
+        if effect.get("origin") == "trigger_target":
+            effect["origin"] = target.id
+        elif effect.get("origin") == "trigger_source" and isinstance(source, Entity):
+            effect["origin"] = source.id
+
     def _enemy_turns(self) -> None:
         player = self.state.player
         for enemy in list(self.living_enemies()):
@@ -1326,6 +1469,8 @@ class GameEngine:
         return
 
     def _enemy_single_action(self, enemy: Entity, player: Entity) -> None:
+        if "pacifist" in enemy.tags or "noncombatant" in enemy.tags:
+            return
         if "frightened" in enemy.statuses and self.distance(enemy, player) <= 8:
             step = self._flee_step(enemy, player.x, player.y)
             if step is not None:
@@ -1364,11 +1509,53 @@ class GameEngine:
         for ally in allies:
             if any(s in ally.statuses for s in ["stunned", "frozen"]):
                 continue
-            if any(s in ally.statuses for s in ["slowed"]) and self.state.turn % 2 == 1:
+            if "slowed" in ally.statuses and self.state.turn % 2 == 1:
+                continue
+            if "pacifist" in ally.tags or "noncombatant" in ally.tags:
                 continue
             enemies = self.living_enemies()
+            # Stationary entities never move; guardian entities only act within their territory.
+            if "stationary" in ally.tags:
+                nearby = [e for e in enemies if self.distance(ally, e) <= 1.5]
+                if nearby:
+                    self.attack(ally, min(nearby, key=lambda e: self.distance(ally, e)))
+                continue
+            if "guardian" in ally.tags:
+                guard_range = 3.0
+                nearby = [e for e in enemies if self.distance(ally, e) <= guard_range]
+                if nearby:
+                    target = min(nearby, key=lambda e: self.distance(ally, e))
+                    if self.distance(ally, target) <= 1.5:
+                        self.attack(ally, target)
+                    elif not any(s in ally.statuses for s in ["rooted", "webbed"]):
+                        step = self.next_path_step(ally, target.x, target.y)
+                        if step is not None:
+                            ally.x, ally.y = step
+                            self._apply_tile_entry(ally)
+                continue
             if not enemies:
                 continue
+            # Ranged allies attack from distance without closing in.
+            if "ranged" in ally.tags:
+                ranged_range = 7
+                los_enemies = [
+                    e for e in enemies
+                    if self.distance(ally, e) <= ranged_range
+                    and self.has_line_of_sight(ally.x, ally.y, e.x, e.y)
+                ]
+                if los_enemies:
+                    target = min(los_enemies, key=lambda e: self.distance(ally, e))
+                    self.attack(ally, target)
+                    continue
+                # No target in range — advance toward nearest enemy.
+                if not any(s in ally.statuses for s in ["rooted", "webbed"]):
+                    closest = min(enemies, key=lambda e: self.distance(ally, e))
+                    step = self.next_path_step(ally, closest.x, closest.y)
+                    if step is not None:
+                        ally.x, ally.y = step
+                        self._apply_tile_entry(ally)
+                continue
+            # Default: chase and melee.
             target = min(enemies, key=lambda e: self.distance(ally, e))
             if self.distance(ally, target) <= 1.5:
                 self.attack(ally, target)
@@ -1377,6 +1564,114 @@ class GameEngine:
                 if step is not None:
                     ally.x, ally.y = step
                     self._apply_tile_entry(ally)
+
+    _AURA_RE = re.compile(r"^aura_([a-z]+)(?:_(\d+))?$")
+
+    def _process_entity_behaviors(self) -> None:
+        """Process per-turn behavior tags on all living actors."""
+        player = self.state.player
+        for entity in list(self.state.entities.values()):
+            if entity.kind not in {"actor", "player"} or entity.hp <= 0:
+                continue
+            for tag in list(entity.tags):
+                m = self._AURA_RE.match(tag)
+                if not m:
+                    continue
+                aura_type = m.group(1)
+                radius = int(m.group(2)) if m.group(2) else 2
+                nearby = [
+                    e for e in self.entities_in_radius(entity.x, entity.y, radius)
+                    if e.kind in {"actor", "player"} and e.hp > 0 and e.id != entity.id
+                ]
+                offensive_targets, beneficial_targets = self._behavior_targets(entity, nearby)
+                if aura_type in {"burn", "fire"}:
+                    for t in offensive_targets:
+                        t.statuses["burning"] = max(status_duration(t.statuses.get("burning")), 2)
+                elif aura_type in {"heal", "healing"}:
+                    for t in beneficial_targets:
+                        self.heal_entity(t, 1)
+                elif aura_type in {"fear", "dread"}:
+                    for t in offensive_targets:
+                        t.statuses["frightened"] = max(status_duration(t.statuses.get("frightened")), 2)
+                elif aura_type in {"slow", "sluggish", "weight"}:
+                    for t in offensive_targets:
+                        t.statuses["slowed"] = max(status_duration(t.statuses.get("slowed")), 2)
+                elif aura_type in {"poison", "toxic", "plague"}:
+                    for t in offensive_targets:
+                        t.statuses["poisoned"] = max(status_duration(t.statuses.get("poisoned")), 3)
+                elif aura_type in {"bleed", "bleeding", "wound"}:
+                    for t in offensive_targets:
+                        t.statuses["bleeding"] = max(status_duration(t.statuses.get("bleeding")), 2)
+                elif aura_type in {"reveal", "sight", "detect"}:
+                    for t in nearby:
+                        t.statuses["revealed"] = max(status_duration(t.statuses.get("revealed")), 2)
+                elif aura_type in {"mana", "arcane", "font"}:
+                    dist = math.hypot(entity.x - player.x, entity.y - player.y)
+                    if dist <= radius and player.mana < player.max_mana:
+                        player.mana = min(player.max_mana, player.mana + 1)
+                elif aura_type in {"damage", "harm", "pain"}:
+                    for t in offensive_targets:
+                        self.damage_entity(t, 1, "arcane")
+                elif aura_type in {"confuse", "confusion"}:
+                    for t in offensive_targets:
+                        t.statuses["confused"] = max(status_duration(t.statuses.get("confused")), 2)
+                elif aura_type in {"berserk", "rage"}:
+                    for t in beneficial_targets:
+                        t.statuses["berserk"] = max(status_duration(t.statuses.get("berserk")), 2)
+                elif aura_type in {"regen", "regenerate"}:
+                    for t in beneficial_targets:
+                        self.heal_entity(t, 1)
+
+    def _behavior_targets(self, source: Entity, nearby: list[Entity]) -> tuple[list[Entity], list[Entity]]:
+        player_side = {"ally", "player"}
+        if source.faction == "enemy":
+            offensive = [e for e in nearby if e.faction in player_side or e.id == self.state.player_id]
+            beneficial = [e for e in nearby if e.faction == "enemy"]
+        elif source.faction in player_side or source.id == self.state.player_id:
+            offensive = [e for e in nearby if e.faction == "enemy"]
+            beneficial = [e for e in nearby if e.faction in player_side or e.id == self.state.player_id]
+        else:
+            offensive = nearby
+            beneficial = [e for e in nearby if e.faction == source.faction]
+        return offensive, beneficial
+
+    def _on_entity_death(self, entity: Entity) -> None:
+        """Fire death-effect tags when an entity dies."""
+        if "explode_on_death" in entity.tags or "bomb" in entity.tags:
+            radius = 3
+            for t in self.entities_in_radius(entity.x, entity.y, radius):
+                if t.hp > 0 and t.id != entity.id:
+                    self.damage_entity(t, 5, "fire")
+            for tx, ty in self.points_in_radius(entity.x, entity.y, radius):
+                self.set_tile(tx, ty, FIRE, duration=3)
+            self.state.add_message(f"{entity.name} explodes in a gout of flame!")
+        if "shatter_on_death" in entity.tags or "glass" in entity.tags and "fragile" in entity.tags:
+            for t in self.entities_in_radius(entity.x, entity.y, 2):
+                if t.hp > 0 and t.id != entity.id:
+                    self.damage_entity(t, 3, "physical")
+            self.state.add_message(f"{entity.name} shatters in a shower of shards!")
+        if "poison_cloud_on_death" in entity.tags or "plague_on_death" in entity.tags:
+            for tx, ty in self.points_in_radius(entity.x, entity.y, 3):
+                self.set_tile(tx, ty, POISON_CLOUD, duration=6)
+            self.state.add_message(f"{entity.name} dissolves into toxic vapor!")
+        if "freeze_on_death" in entity.tags or "ice_burst_on_death" in entity.tags:
+            for t in self.entities_in_radius(entity.x, entity.y, 2):
+                if t.hp > 0 and t.id != entity.id:
+                    t.statuses["frozen"] = max(status_duration(t.statuses.get("frozen")), 3)
+            for tx, ty in self.points_in_radius(entity.x, entity.y, 2):
+                self.set_tile(tx, ty, SLICK_ICE, duration=5)
+            self.state.add_message(f"{entity.name} bursts in a spray of ice!")
+        if "spawn_on_death" in entity.tags:
+            for _ in range(2):
+                sx, sy = self.find_open_tile_near(entity.x, entity.y)
+                if self.can_occupy(sx, sy):
+                    self.spawn_actor(
+                        f"spawn of {entity.name}", "s", sx, sy,
+                        hp=max(1, entity.max_hp // 3), attack=max(1, entity.attack - 1),
+                        defense=0, faction=entity.faction, ai=entity.ai or "simple",
+                        tags={"summoned"},
+                    )
+            self.state.add_message(f"{entity.name} bursts open — something crawls out!")
 
     def enemy_can_sense_player(self, enemy: Entity) -> bool:
         player = self.state.player
@@ -1519,6 +1814,7 @@ class GameEngine:
             "curses": [curse.to_public_dict() for curse in self.state.curses.values()],
             "world_flags": self.state.flags,
             "event_timers": self.state.event_timers,
+            "triggers": self.state.triggers,
             "visible_tile_count": len(self.state.visible),
             "explored_tile_count": len(self.state.explored),
             "nearby_entities": nearby_entities,
@@ -1552,6 +1848,7 @@ class GameEngine:
                 "add_weakness",
                 "set_flag",
                 "schedule_event",
+                "create_trigger",
                 "message",
             ],
             "supported_costs": ["mana", "health", "max_health", "max_mana", "item", "status", "curse"],
@@ -1643,6 +1940,9 @@ class GameEngine:
         if outcome_text:
             self.state.add_message(outcome_text)
             messages.append(outcome_text)
+
+        for message in self._fire_triggers("on_next_spell", {"target": self.state.player, "source": self.state.player}):
+            messages.append(message)
 
         for effect in coerce_list(resolution.get("effects")):
             for message in self._apply_effect(effect):
@@ -1897,11 +2197,17 @@ class GameEngine:
                 radius = clamp_int(effect.get("radius"), 0, 99)
                 hollow = bool(effect.get("hollow") or effect.get("ring") or effect.get("perimeter"))
                 inner_radius = max(0, radius - 1) if hollow else -1
-                for tx, ty in self.points_in_radius(x, y, radius)[:200]:
-                    if hollow and math.hypot(tx - x, ty - y) <= inner_radius:
-                        continue
-                    if self.set_tile(tx, ty, tile, duration, tags):
-                        changed += 1
+                shape = normalize_id(str(effect.get("shape") or effect.get("pattern") or ""))
+                if shape in {"line", "beam", "path", "corridor", "ray", "bridge", "wall", "barrier", "cone", "fan", "scatter", "spray"}:
+                    for tx, ty in self.shape_points(effect, x, y)[:200]:
+                        if self.set_tile(tx, ty, tile, duration, tags):
+                            changed += 1
+                else:
+                    for tx, ty in self.points_in_radius(x, y, radius)[:200]:
+                        if hollow and math.hypot(tx - x, ty - y) <= inner_radius:
+                            continue
+                        if self.set_tile(tx, ty, tile, duration, tags):
+                            changed += 1
             return [f"Terrain changes to {TILE_NAMES.get(tile, 'strange')} on {changed} tile(s)."]
         if effect_type == "add_status":
             target_str = normalize_id(str(effect.get("target") or "nearest_enemy"))
@@ -1950,7 +2256,7 @@ class GameEngine:
             return [f"All statuses leave {target.name}."]
         if effect_type == "summon":
             name = str(effect.get("name") or effect.get("creature") or effect.get("creature_type") or "borrowed thing")
-            faction = str(effect.get("faction") or "ally")
+            faction = normalize_faction(effect.get("faction"), default="ally", neutral_is_ally=True)
             count = clamp_int(effect.get("count") or effect.get("quantity") or 1, 1, 6)
             char = str(effect.get("char") or ("a" if faction == "ally" else "e"))[:1]
             hp = clamp_int(effect.get("hp") or 5, 1, 20)
@@ -2024,7 +2330,7 @@ class GameEngine:
             if "char" in effect:
                 target.char = str(effect["char"])[:1] or target.char
             if "faction" in effect:
-                target.faction = str(effect["faction"])[:24]
+                target.faction = normalize_faction(effect["faction"], default=target.faction)
             if "material" in effect:
                 target.material = str(effect["material"])[:32]
             target.max_hp = clamp_int(effect.get("max_hp", target.max_hp), 1, 99)
@@ -2039,9 +2345,7 @@ class GameEngine:
             target = self.resolve_target(str(effect.get("target") or "nearest_enemy"))
             if not target or target.kind == "item":
                 return []
-            new_faction = str(effect.get("faction") or "neutral")[:24]
-            if new_faction == "player" and target.id != self.state.player_id:
-                new_faction = "ally"
+            new_faction = normalize_faction(effect.get("faction"), default="neutral")
             target.faction = new_faction
             target.ai = None if target.faction in {"ally", "player"} else target.ai
             return [f"{target.name} now belongs to {target.faction}."]
@@ -2083,12 +2387,83 @@ class GameEngine:
             event["event_type"] = str(effect.get("event_type") or event.get("event_type") or "message")
             self.state.event_timers.append(event)
             return [f"Something has been scheduled in {event['turns']} turn(s)."]
+        if effect_type in {"create_trigger", "trigger", "ward"}:
+            trigger_name = normalize_trigger_name(str(effect.get("trigger") or effect.get("on") or "on_next_spell"))
+            effects = coerce_list(effect.get("effects") or effect.get("effect"))
+            if not effects:
+                return ["The trigger has nothing to do and collapses."]
+            trigger = {
+                "id": self.next_entity_id("trigger"),
+                "name": sanitize_name(str(effect.get("name") or "A waiting spell"), "A waiting spell"),
+                "trigger": trigger_name,
+                "target": effect.get("target", "any"),
+                "charges": clamp_int(effect.get("charges"), 1, 9),
+                "duration": effect.get("duration", effect.get("turns", 6)),
+                "effects": [dict(raw) for raw in effects[:8] if isinstance(raw, dict)],
+            }
+            if trigger["duration"] != "permanent":
+                trigger["expires_turn"] = self.state.turn + clamp_int(trigger["duration"], 1, 999)
+            self.state.triggers.append(trigger)
+            return [f"{trigger['name']} waits for {trigger_name.replace('_', ' ')}."]
         if effect_type == "add_curse":
             message = self._apply_cost({"type": "curse", **effect})
             return [message] if message else []
         if effect_type == "message":
             text = str(effect.get("text") or "").strip()
             return [text] if text else []
+        return []
+
+    def shape_points(self, effect: dict[str, Any], fallback_x: int, fallback_y: int) -> list[tuple[int, int]]:
+        shape = normalize_id(str(effect.get("shape") or effect.get("pattern") or ""))
+        origin = self.resolve_target(str(effect.get("origin") or effect.get("from") or "player")) or self.state.player
+        target = self.resolve_target(str(effect.get("target") or effect.get("to") or "nearest_enemy"))
+        end_x, end_y = (target.x, target.y) if target else (fallback_x, fallback_y)
+        width = clamp_int(effect.get("width"), 0, 3)
+        radius = clamp_int(effect.get("radius"), 1, 12)
+        points: list[tuple[int, int]] = []
+
+        if shape in {"line", "beam", "path", "corridor", "ray", "bridge"}:
+            for lx, ly in bresenham_line(origin.x, origin.y, end_x, end_y)[1:31]:
+                points.extend(self.points_in_radius(lx, ly, width))
+            return unique_points(points)
+
+        if shape in {"wall", "barrier"}:
+            dx = sign(end_x - origin.x)
+            dy = sign(end_y - origin.y)
+            if dx == 0 and dy == 0:
+                dx = 1
+            px, py = -dy, dx
+            half = clamp_int(effect.get("length"), 1, 12) if "length" in effect else radius
+            for step in range(-half, half + 1):
+                wx = end_x + px * step
+                wy = end_y + py * step
+                points.extend(self.points_in_radius(wx, wy, width))
+            return unique_points([(px, py) for px, py in points if self.in_bounds(px, py)])
+
+        if shape in {"cone", "fan"}:
+            vx = end_x - origin.x
+            vy = end_y - origin.y
+            if vx == 0 and vy == 0:
+                vx, vy = 1, 0
+            mag = max(0.001, math.hypot(vx, vy))
+            ux, uy = vx / mag, vy / mag
+            min_dot = 0.35
+            for tx, ty in self.points_in_radius(origin.x, origin.y, radius):
+                if tx == origin.x and ty == origin.y:
+                    continue
+                qx = tx - origin.x
+                qy = ty - origin.y
+                qmag = max(0.001, math.hypot(qx, qy))
+                if (qx / qmag) * ux + (qy / qmag) * uy >= min_dot:
+                    points.append((tx, ty))
+            return unique_points(points)
+
+        if shape in {"scatter", "spray"}:
+            count = clamp_int(effect.get("count") or effect.get("quantity") or 8, 1, 40)
+            candidates = self.points_in_radius(fallback_x, fallback_y, radius)
+            self.rng.shuffle(candidates)
+            return candidates[:count]
+
         return []
 
     def effect_position(self, effect: dict[str, Any]) -> tuple[int, int]:
@@ -2159,7 +2534,7 @@ class GameEngine:
         template = creature_template(str(effect.get("template") or effect.get("creature_type") or "small_beast"))
         count = clamp_int(effect.get("count") or effect.get("quantity") or 1, 1, template.max_count)
         name = sanitize_name(str(effect.get("name") or template.id.replace("_", " ")), template.id.replace("_", " "))
-        faction = sanitize_name(str(effect.get("faction") or "ally"), "ally", 24)
+        faction = normalize_faction(effect.get("faction"), default="ally", neutral_is_ally=True)
         char = sanitize_char(str(effect.get("char") or template.char), template.char)
         tags = set(template.tags)
         tags.update(normalize_id(str(tag)) for tag in coerce_list(effect.get("tags")) if str(tag).strip())
@@ -2282,6 +2657,17 @@ def bresenham_line(x1: int, y1: int, x2: int, y2: int) -> list[tuple[int, int]]:
             y += sy
 
 
+def unique_points(points: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    seen: set[tuple[int, int]] = set()
+    result: list[tuple[int, int]] = []
+    for point in points:
+        if point in seen:
+            continue
+        seen.add(point)
+        result.append(point)
+    return result
+
+
 def clamp_int(value: Any, minimum: int, maximum: int) -> int:
     try:
         parsed = int(value)
@@ -2315,6 +2701,97 @@ def parse_tile_key(key: str) -> tuple[int, int]:
 
 def normalize_id(value: str) -> str:
     return value.lower().strip().replace(" ", "_").replace("-", "_")
+
+
+def normalize_faction(value: Any, default: str = "ally", neutral_is_ally: bool = False) -> str:
+    normalized = normalize_id(str(value or default))
+    aliases = {
+        "player": "ally",
+        "self": "ally",
+        "you": "ally",
+        "friendly": "ally",
+        "friend": "ally",
+        "friends": "ally",
+        "companion": "ally",
+        "summoned": "ally",
+        "hostile": "enemy",
+        "hostiles": "enemy",
+        "foe": "enemy",
+        "foes": "enemy",
+        "monster": "enemy",
+        "monsters": "enemy",
+    }
+    if normalized == "neutral" and neutral_is_ally:
+        return "ally"
+    if normalized in aliases:
+        return aliases[normalized]
+    if normalized in {"ally", "enemy", "neutral"}:
+        return normalized
+    return normalize_faction(default, default="ally")
+
+
+def normalize_trigger_name(value: str) -> str:
+    normalized = normalize_id(value)
+    aliases = {
+        "next_spell": "on_next_spell",
+        "on_spell": "on_next_spell",
+        "when_i_cast": "on_next_spell",
+        "player_hit": "on_player_hit",
+        "when_hit": "on_player_hit",
+        "on_hit": "on_player_hit",
+        "player_damaged": "on_player_damaged",
+        "on_damaged": "on_damaged",
+        "enemy_hit": "on_enemy_hit",
+        "enemy_damaged": "on_enemy_damaged",
+        "enemy_death": "on_enemy_death",
+        "on_kill": "on_enemy_death",
+        "on_enemy_killed": "on_enemy_death",
+        "player_move": "on_player_move",
+        "on_move": "on_player_move",
+    }
+    if normalized in aliases:
+        return aliases[normalized]
+    if not normalized.startswith("on_"):
+        normalized = f"on_{normalized}"
+    return normalized
+
+
+def infer_behavior_tags(name: str, tags: set[str]) -> set[str]:
+    tag_set = {normalize_id(str(tag)) for tag in tags if str(tag).strip()}
+    name_text = normalize_id(name).replace("_", " ")
+
+    def has_name_word(*words: str) -> bool:
+        return any(word in name_text for word in words)
+
+    def has_tag(*words: str) -> bool:
+        return any(word in tag_set for word in words)
+
+    def missing(prefix: str) -> bool:
+        return not any(tag.startswith(prefix) for tag in tag_set)
+
+    if has_name_word("archer", "ranger", "shooter", "bowman", "sniper", "gunner", "crossbow") or has_tag("archer", "shooter", "bowman"):
+        tag_set.add("ranged")
+    if has_name_word("ward", "totem", "beacon", "font", "pillar", "obelisk", "turret", "emanation", "radiator", "anchor") or has_tag("immobile", "passive", "ward", "totem"):
+        tag_set.add("stationary")
+    if has_name_word("guardian", "sentinel", "warden", "protector") and "stationary" not in tag_set:
+        tag_set.add("guardian")
+    if has_name_word("bomb", "explosive", "volatile", "detonator") or has_tag("bomb", "explosive", "volatile"):
+        tag_set.add("explode_on_death")
+
+    aura_rules = [
+        ("aura_burn_2", "aura_burn", ("fire", "burning", "flaming", "flame", "hot", "infernal", "scorching"), ("burn", "fire", "flame", "scorch", "ember", "inferno", "blaze")),
+        ("aura_heal_2", "aura_heal", ("heal", "healing", "restorative", "regenerative", "life", "mending"), ("heal", "healing", "medic", "cleric", "life", "restore", "mend")),
+        ("aura_poison_2", "aura_poison", ("poison", "toxic", "plague", "venomous", "venom", "miasma"), ("poison", "toxic", "plague", "miasma", "venom", "pestilence")),
+        ("aura_fear_2", "aura_fear", ("fear", "terror", "dread", "horror", "frightening", "terrifying"), ("fear", "dread", "terror", "horror", "despair")),
+        ("aura_slow_2", "aura_slow", ("slow", "sluggish", "leaden", "weight", "heavy", "torpor"), ("slow", "sluggish", "leaden", "weight", "torpor")),
+        ("aura_bleed_2", "aura_bleed", ("bleed", "bleeding", "hemorrhage", "thorn", "barbed"), ("bleed", "thorn", "shard", "barb", "needle")),
+    ]
+    for aura_tag, prefix, tag_words, name_words in aura_rules:
+        if missing(prefix) and (has_tag(*tag_words) or has_name_word(*name_words)):
+            tag_set.add(aura_tag)
+    if "stationary" in tag_set and any(tag.startswith("aura_") for tag in tag_set):
+        tag_set.add("pacifist")
+    return tag_set
 
 
 def singular_target_tag(value: str) -> str:

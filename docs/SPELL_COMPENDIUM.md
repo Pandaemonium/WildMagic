@@ -1,0 +1,797 @@
+# Wild Magic Spell Compendium
+
+A collection of spells to try. These are suggestions and starting points — the LLM interprets
+freeform text, so variation and creativity are encouraged. The same spell typed differently may
+produce different results.
+
+---
+
+## Wild Stream
+
+- make the nearest enemy remember the worst staircase it ever climbed
+- turn the air between us into wet blue glass
+- borrow tomorrow's gravity and spend it all right now
+- make my shadow stand up and point at danger
+- convince the floor that enemies are rain
+- pull a brass door out of the nearest wall and make it angry
+- make every loose tooth in the room sing my name
+- pour moonlight into my wounds until it hardens
+- turn the nearest enemy's left hand into a locked box
+- summon a tiny court of whispering candles to judge this fight
+- make the next attack against me arrive yesterday and miss
+- give the goblin a crown made of beeswax and bad decisions
+- make the walls cough up whatever they have been hiding
+- turn all fear within three steps into little silver nails
+- ask the nearest weapon what it wants and let it answer
+- make the enemy's shadow lag three seconds behind them
+- call down a rain of keys, one of which unlocks pain
+- turn my blood into a marching song for one turn
+- make the nearest enemy allergic to its own courage
+- fold the corridor like paper so the far enemy is suddenly near
+- summon a polite guillotine made of moonbeams
+- replace the next sound with a knife
+- make the floor under the enemy become a shallow lake of mirrors
+- give my mana a mouth and let it bargain
+- turn the nearest curse inside out and wear it as armor
+- make every door nearby briefly jealous of open space
+- ask the dungeon to blink
+- make my footsteps leave hot iron punctuation
+- turn the nearest enemy's armor into apologetic bread
+- summon a lantern that only illuminates lies
+- make a ring of salt that remembers the ocean
+- tell the nearest stone it was once a bird
+- turn the enemy's next breath into paper cranes
+- grow a staircase out of my fear
+- make all visible blood crawl toward the strongest enemy
+- call a debt collector from the future, but only if I deserve it
+- make the nearest enemy's name too heavy to carry
+- turn my last mistake into a small shield
+- make the ceiling briefly believe in falling
+- summon an invisible choir that pushes enemies away when it harmonizes
+- turn one enemy bone into chalk and write a warning with it
+- make the nearest flame cold and the nearest ice hungry
+- pour a river through a keyhole in reality
+- turn the next enemy step into a confession
+- make the room forget which direction is north
+- summon a moth made of old maps to scout ahead
+- give the nearest enemy a second shadow that hates the first one
+- make every coin in my pack scream at danger
+- turn my mana into blue thread and stitch the wound closed
+- ask the nearest wall to become a window for one heartbeat
+- make an enemy's teeth become tiny bells and fall out
+- call up a fog that knows my enemies by scent
+- make the stairs hum until something answers below
+- turn every hostile intention nearby into static electricity
+- make the next corpse stand up only long enough to point
+- summon a little sun with terrible manners
+- turn the nearest enemy's weapon into a fishhook of ice
+- make the dungeon write one secret on the floor in ash
+- borrow a heartbeat from every enemy and spend them as thunder
+- turn my fear into black vines under hostile feet
+- ask the nearest corpse what killed it and weaponize the answer
+- make a mirror copy of me that runs in the wrong direction
+- turn the enemy's courage into a candle and snuff it
+- summon a loyal cupboard full of knives
+- make all nearby dust remember being stone
+- turn a patch of floor into yesterday's pond
+- make the next enemy to hit me taste winter
+- persuade the nearest door to bite
+- turn my missing mana into a flock of sparks
+- make the enemy's boots root into the floor and grow leaves
+- summon a chalk circle that refuses to be crossed
+- give my shadow permission to detach and trip someone
+- make the closest enemy hear the ocean inside its skull
+- turn the nearest wall into a curtain of saltwater
+- ask the dungeon for a weapon and accept the terms
+- make the room briefly rotate around my left hand
+- turn the next enemy spell into a moth-eaten sock
+- summon a rusted halo that protects badly but dramatically
+- make every enemy in sight blink in alphabetical order
+- turn my breath into frost needles
+- make the nearest enemy's reflection attack first
+- call a rain of warm nails onto hostile ground
+- make a puddle that shows where the next threat will stand
+- turn one curse into a lantern and set it down
+- give the nearest ally a borrowed spine of silver wire
+- make the enemy's anger too loud to aim
+- summon a swarm of punctuation marks that bites
+- turn the room's echoes into little pushing hands
+- make my next wound bloom into thorns
+- ask the nearest item to become useful in the weirdest possible way
+- turn hostile footprints into fire for three turns
+- make the nearest enemy's thoughts slippery
+- summon a cupboard under the floor and hide inside it for a breath
+- turn the nearest goblet, bone, tooth, or coin into a tiny oracle
+- make the nearest enemy briefly believe it is made of smoke
+- pull a rope from the ceiling that rings a bell underground
+- turn my hunger into a dog-sized shadow with no leash
+- make all nearby water climb the walls
+- ask the floor to keep one secret enemy still
+- make the next enemy that moves leave its skeleton behind for a second
+- summon a glass apple that explodes if ignored
+- turn the nearest enemy's skin to bark and call termites from the walls
+- make my mana smell like rain and call vines to it
+- fold my cloak into a shield of night
+- make the nearest hostile shadow become a bear trap
+- turn the next curse into a visible wound on the world
+- summon a soft chair under the enemy at combat speed
+- make every stair on this floor point toward danger
+- turn the enemy's scream into a gust of knives
+- call forth the ghost of the last torch that burned here
+- make my hands forget pain and remember lightning
+- convince the nearest enemy that gravity has doubled only for them
+- turn loose pebbles into little orbiting moons
+- ask the ceiling to lend me one stalactite
+- make an enemy's helmet fill with harmless but distracting soup
+- summon a candle that heals anything its smoke likes
+- turn the space behind me into a locked blue door
+- make the next hostile attack cost the attacker a memory
+- call a circle of patient stones around the nearest enemy
+- turn my pulse into a drumbeat that frightens weak hearts
+- make the nearest pile of rubble assemble into a rude assistant
+- ask my inventory what it wants to sacrifice
+- turn the nearest enemy's shadow into spilled ink
+- make my next step happen twice
+- summon a swarm of iron filings around metal weapons
+- turn the closest wall into a mouth and ask it to shout
+- make the nearest enemy's knees dream of sleep
+- call a line of frost from my toes to the farthest hostile eye
+- make every enemy within sight smell their own doom
+- summon a friendly scarecrow full of borrowed spells
+- turn the nearest dropped item into a small explosive promise
+- make the floor under me remember a bridge
+- ask the nearest flame to choose a side
+- turn the enemy's breath into cobweb
+- make my lost health return as angry red moths
+- summon a shrine that heals me but insults my choices
+- turn hostile magic into falling sand
+- make the nearest enemy hear footsteps behind them forever
+- pull the color out of the room and spend it as a shield
+- turn one visible wall tile into a temporary doorway with teeth
+- ask the next enemy attack to wait its turn politely
+- make my mana crystallize into a throwable blue tooth
+- summon a staircase that goes sideways
+- turn the nearest enemy's weapon into a harmless musical instrument
+- make all nearby vines decide they are snakes made of rope
+- call a tiny moon to orbit the nearest enemy's head
+- turn my shadow into a net and throw it
+- make the closest enemy's heartbeat visible and fragile
+- summon a cold kettle that whistles when enemies lie
+- turn the next puddle into a mirror trap
+- ask the dungeon to give me one unfair clue
+- make the nearest enemy's armor fill with startled birdsong
+- turn the air above hostile heads into falling brick
+- summon a chalk giant no taller than my knee
+- make my next spell leave a stain that does something later
+- turn the nearest enemy's fear into a key I can pick up
+- call a row of black candles along the safest path
+- make all hostile eyes briefly look inward
+- turn the nearest corpse into a warning sign with teeth
+- summon a friendly storm in a jar
+- make every loose stone hop one tile toward the enemy
+- turn the enemy's next word into a curse against itself
+- ask my blood to point north and punish south
+- make the walls grow antlers for a moment
+- summon a door that opens into the nearest enemy's mistake
+- turn the closest hostile weapon into brittle glass
+- make a little pond of healing light at my feet
+- convince the enemy's shield it is actually a window
+- turn my exhaustion into fog
+- call a needle-thread of lightning through every metal thing in sight
+- make the nearest enemy's shadow kneel
+- summon a jury of bones to decide who bleeds
+- turn every hostile footprint into a tiny pit
+- make my next wound spill smoke instead of blood
+- ask the ceiling for rain and accept whatever kind it sends
+- make the nearest enemy's ears fill with static
+- summon a cranky little altar that grants bad blessings
+- turn the space between two enemies into a snapping wire
+- make the nearest torch remember daylight
+- call a ribbon of water from nowhere and wrap it around the foe
+- turn one point of mana into a biting blue star
+- make all nearby mushrooms recite my enemy's secrets
+- summon a statue that blocks corridors and gives advice
+- turn hostile courage into wet clay
+- make my reflection step out and take the next hit
+- ask every door on this floor which one is safest
+- make the nearest enemy's bones ring like forks
+- call a dust devil full of old keys
+- turn the enemy's path into sticky ink
+- summon an unpaid apprentice made of smoke
+- make my curse leak out as poison cloud
+- turn the nearest enemy's name into a leash
+- ask the next tile I step on to become generous
+- make all enemy shadows point away from me
+- summon a healing bell that rings when I bleed
+- turn the closest enemy's skin into brittle porcelain
+- make the nearest wall sweat acid
+- pull a ladder out of the floor and hit someone with it
+- turn my mana bar into a fuse and light one end
+- call a circle of ash that burns only hostile feet
+- make the enemy's weapon too embarrassed to strike
+- summon a fog bank full of tiny helpful hands
+- turn the nearest enemy's jaw into a locked gate
+- make all visible fire lean toward my target
+- ask the floor to swallow one dropped item and return it changed
+- turn one enemy into a map of its own weaknesses
+- summon a mirror that reflects only projectiles
+- make my heartbeat audible to allies and painful to enemies
+- turn the next hostile step into a stumble across three tiles
+- call a lantern that reveals invisible things and embarrassing truths
+- make the enemy's blood forget the route through its body
+- summon a tiny bridge over whatever problem is nearest
+- turn every chalk mark nearby into a biting insect
+- make a curse sit in the corner and think about what it did
+- ask the nearest enemy's weapon to defect
+- turn the air in a line into polished ice
+- summon a blue dog made of rainwater and static
+- make the nearest enemy's shadow catch fire but not the enemy yet
+- call a ring of cracked bells around me
+- turn my next missed attack into a delayed hit
+- make the nearest pile of bones assemble into a ladder
+- ask the dungeon to misplace the nearest enemy
+- turn all hostile whispers into visible threads
+- summon a glass swarm that cuts only liars
+- make the enemy's helmet become a small dark room
+- call a gust that smells like cemeteries and pushes foes back
+- turn the nearest enemy's confidence into a fragile egg
+- make my inventory briefly weightless
+- summon a thorny chair behind the enemy as they step back
+- ask the nearest pool of water to become a mouthful of stars
+- turn the closest enemy into a temporary statue of itself
+- make every nearby chain remember being rope
+- call down a single enormous raindrop
+- turn the next hostile wound into a doorway for ants
+- make my spell cost a secret instead of mana
+- summon a candle that burns downward through the floor
+- turn the nearest enemy's tongue into a red ribbon
+- ask the map to redraw one corridor in my favor
+- make the wall behind the enemy become soft mud
+- call a ring of ice that moves outward one tile per turn
+- turn all nearby metal cold enough to scream
+- summon a paper knight with a very sharp promise
+- make my fear stand beside me and look bigger than I am
+- turn the nearest enemy's next thought into thunder
+- ask the dungeon to collect interest on my last miracle
+- make every hostile footstep plant a vine
+- summon a pool of ink that hides allies and stains enemies
+- turn the closest enemy's ribs into chimes
+- make the next door I open lead somewhere almost impossible
+- call a little earthquake that only hates enemies
+- turn my breath into a swarm of glass syllables
+- ask the nearest corpse to lend me its unfinished business
+- make the enemy's shadow heavier than its body
+- summon a shrine to a god I just invented
+- turn the nearest hostile intention into a visible red thread
+- make all nearby rubble become a low wall around me
+- call a beam of moonlight that pins one enemy like a specimen
+- turn one inventory item into a creature that resembles its purpose
+- make my next step leave a healing footprint
+- summon a belligerent umbrella against falling danger
+- turn the nearest enemy's armor seams into roots
+- ask the floor to remember every trap and mark them in dust
+- make the air taste like lightning until enemies hesitate
+- call a helpful skeleton key that opens wounds instead of doors
+- turn the nearest enemy's reflection into an ally for one turn
+- make every hostile eye see a different me
+- summon a tower of smoke just tall enough to block sight
+- turn my remaining mana into a protective orbit of blue stones
+- ask the walls to choose one enemy and close in politely
+- make the next enemy death leave behind a useful organ of magic
+- call a crown of frost onto the strongest foe
+- turn every enemy in sight slightly clockwise
+- summon a swarm of silver commas that interrupt attacks
+- make the nearest enemy's boots fill with grave dirt
+- ask the dungeon what it wants for safe passage
+- turn my own shadow into a temporary staircase
+- make all nearby poison become honest green light
+- call a ribbon of black water to drag foes into a line
+- turn the closest hostile spell into a confused little spark
+- summon a silent judge that punishes the next lie
+- make my wounds write instructions on the floor
+- ask the nearest enemy's bones to vote on surrender
+- turn the corridor behind me into mist and old regret
+- make the nearest ally glow with borrowed ferocity
+- call a ring of invisible hooks around the enemy
+- turn one curse into a coin and flip it
+- summon a small moon that heals allies in its shadow
+- make the enemy's path bend away from me like ashamed metal
+- ask the next fire I make to remember my face
+- turn the nearest door into a shield and the nearest shield into a door
+- make all hostile teeth itch with prophecy
+- call a fountain of cold sparks from under the target
+- turn my spell failure into a delayed trap
+- summon a memory of rain that puts out only enemy flames
+- make the enemy's shadow spill out as black oil
+- ask my last spent mana where it went
+- turn one visible enemy into a beacon for all other enemies' attacks
+- make a temporary bridge of bone over dangerous ground
+- call a handful of stars down and assign each one a target
+- turn the nearest enemy's footsteps into alarm bells
+- summon a glass saint that blesses recklessly
+- make my next attack arrive wearing a disguise
+- ask the ceiling to grow roots downward
+- turn the closest puddle into a portal for one small ally
+- make every hostile weapon briefly remember rust
+- call a humming wall of beeswax between me and danger
+- turn all nearby shadows into shallow water
+- summon a book that bites anyone who opens it wrong
+- make the nearest enemy's fear contagious
+- ask the dungeon to trade one room feature for another
+- turn my name into armor for three turns
+- make a chain of frost leap from enemy to enemy
+- summon a skeletal locksmith with poor boundaries
+- turn the closest enemy's victory into debt
+- make all doors nearby unlock, then demand payment
+- call a pale flame that burns curses instead of flesh
+- turn the nearest enemy's next attack into a thrown flowerpot
+- make my blood magnetic to dropped weapons
+- summon a choir of stones that sings enemies slow
+- ask the wall to become briefly transparent and judgmental
+- turn the next curse I gain into a summoned helper
+- make the nearest enemy's shadow drag them backward
+- call a spiral of salt that sorts friend from foe
+- turn my breath into a key for one impossible lock
+- summon a little engine of teeth and candlelight
+- make all nearby ice decide it is a mirror
+- ask the nearest enemy's armor to tell me where it is weakest
+- turn every hostile thought within three tiles into smoke
+- call a temporary river down the corridor
+- make my spell echo once at half strength next turn
+- summon a tower shield made of compacted whispers
+- turn the nearest enemy's heartbeat into a visible target
+- ask the floor to copy my last spell in mud
+- make a hostile aura reverse itself for three turns
+- call the smell of rain so strongly that vines burst from cracks
+- turn one enemy's damage into healing for its target, just once
+- summon a cracked hourglass that slows enemies and ages costs
+- make the nearest wall tile become a loyal stone dog for one fight
+- ask the dungeon for mercy and make it answer in terrain
+- turn all my current statuses into visible colored flames
+- call a net of moonlit thread between every enemy I can see
+- make the next enemy who dies become a door
+- summon a hungry lantern that eats poison clouds
+- turn my curse into a map marker pointing at trouble
+- ask gravity to make a local exception for that enemy
+- make the nearest hostile creature shed a useful object
+- call a wheel of ice that rolls away from me
+- turn the floor under enemies into a polite disagreement
+- summon an oath made of iron that blocks the corridor
+- make every hostile shadow grow one tile longer and trip its owner
+- ask the next spell cost to be strange but survivable
+- turn the nearest enemy's memory of me into a decoy
+- call a storm of quiet needles around the loudest foe
+- make my last footprint become a healing spring
+- summon a blue mask that frightens enemies who see it
+- turn the nearest enemy's weapon into a sleeping rope
+- ask the wall for teeth and then point
+- make all nearby doors slam in rhythm with my pulse
+- call a burst of daylight from under the floorboards
+- turn one mana into a coin that buys a miracle badly
+- summon an ink-black horse no bigger than a chair
+- make the enemy's next wound open into a pocket of fire
+- ask the dungeon to punish whoever is most confident
+- turn my shadow into a second health bar for a moment
+- call a row of spectral hands to shove enemies into line
+- make the nearest hostile eye see through the back of its head
+- summon a jar full of loyal thunder
+- turn all nearby rubble into caltrops with opinions
+- ask the nearest torch to betray the dark
+- make the next enemy step sink knee-deep into yesterday
+- call a spiral staircase down from the ceiling and drop it
+- turn my breath into clean water, then into ice, then into a spear
+- summon a patient statue that heals anyone standing still nearby
+- make the nearest enemy's shadow become too bright to hide in
+- ask the room to take one step to the left
+- turn one curse into a crown and put it on the enemy
+- call the echo of a huge bell and let it knock foes away
+- make all hostile weapons briefly weigh as much as guilt
+- summon a little bridge that follows me like a loyal plank
+- turn the nearest enemy into a weather report for disaster
+- ask my mana to improvise and apologize later
+- make a line of thorny vines crawl from me to the nearest foe
+- call a sudden library shelf between me and danger
+- turn one hostile status into an item on the floor
+- summon a swarm of glowing ants to write warnings on walls
+- make the nearest enemy's knees turn to smoke but leave the rest
+- ask the ceiling to blink open and show the sky
+- turn my next spell into a seed that grows over three turns
+- call a curtain of black rain that only wets enemies
+- make every ally's shadow point toward healing
+- summon a porcelain wasp nest and immediately regret it
+- turn the closest enemy's courage into a candle I can blow out
+- ask the dungeon to rearrange the furniture of fate
+- make one enemy owe me a turn
+- call a tunnel of wind that pulls projectiles sideways
+- turn nearby mist into a friendly ghost wall
+- summon a salt scarecrow that repels curses
+- make the next enemy who attacks me trade places with their fear
+- ask the floor to become a drum and stun anything standing wrong
+- turn the nearest enemy's armor into a garden
+- call a silver fish through the air to bite spellcasters
+- make my heartbeat heal allies and irritate enemies for three turns
+- summon a temporary door labeled absolutely not a trap
+- turn the enemy's next breath into a flock of tiny locks
+- ask the nearest corpse to drop the thing it never found
+- make all nearby fire burn downward into the floor
+- call a net of glass teeth under hostile feet
+- turn the strongest enemy's shadow into a weak ally
+- summon a fountain that pours sideways across the room
+- make the next technical failure become a harmless puff of glitter
+- ask the dungeon for one beautiful problem
+
+---
+
+## Combat — Direct Damage
+
+- throw a lightning bolt at the nearest enemy
+- hurl a fireball at the goblin
+- smash them with a wave of force
+- crack their skull with a psychic spike
+- send a shard of ice through their chest
+- drain the warmth from their body
+- tear open a wound with shadow
+- burn them from the inside out
+- hit them with a bolt of raw arcane energy
+- send a spear of light through the nearest foe
+- crush them under sudden gravity
+- shatter their eardrums with a sonic pulse
+- launch a spinning blade of wind
+- throw boiling water at the nearest enemy
+- hit everything nearby with a burst of electricity
+- fire a needle of compressed darkness
+- launch a volley of phantom arrows
+- whip them with a tendril of fire
+- crack them open with a force hammer
+- split their mind with a psychic wedge
+- grind them down with acid rain
+- tear their shadow from their body
+- shoot a bolt of pure spite
+- detonate a mote of trapped sunlight
+- squeeze them with magnetic force
+- explode a pocket of methane in their face
+- drive a spike of frozen mana into their chest
+- call down a pillar of divine fire on the nearest enemy
+- unleash a wave of necrotic energy
+- send an arc of chain lightning through the group
+
+---
+
+## Combat — Area & Burst
+
+- explode a fireball at the center of the room
+- rain burning embers on everything nearby
+- detonate a frost bomb centered on the goblin
+- send a shockwave out from my feet
+- ignite the air around me
+- make everything within three tiles bleed
+- scatter acid across the nearest cluster of enemies
+- unleash a pulse of shadow in all directions
+- detonate a sphere of force around the goblin
+- hurl a molten rock into the crowd
+- create a flashbang of arcane light
+- make lightning arc between all nearby metal creatures
+- cause a pressure wave that throws enemies back
+- trigger a burst of ground-shaking force at my feet
+- create a vortex that pulls and damages everything nearby
+- make every torch in the room burst simultaneously
+- ignite the blood on the floor
+- cause a chain reaction of arcane explosions
+- release a cloud of shrapnel in all directions
+- make all the air in the room very briefly very cold
+
+---
+
+## Status & Debuffs
+
+- freeze the nearest enemy in place
+- make the goblin too confused to act
+- slow every enemy in sight
+- blind the nearest foe with a flash of white light
+- coat the goblin in webbing so it cannot move
+- terrify everything nearby
+- make them heavy and slow
+- plant a curse of misfortune on the nearest enemy
+- mark the nearest enemy for death
+- silence the spellcasting enemy
+- tangle their feet with invisible roots
+- make the goblin attack its own allies
+- make them see phantoms and attack shadows
+- give every nearby enemy a bleeding wound
+- make the nearest enemy feel my pain (share my wounds)
+- instill a deep existential dread in the goblin
+- reverse the goblin's sense of direction
+- make the wizard forget all its spells
+- coat them in a film of bad luck
+- infect them with a memory of fire
+- make them perceive everything as a threat (berserk curse)
+- stitch their mouth closed with shadow thread
+- convince their blood to move the wrong way
+- make them nauseous and unable to focus
+- apply a slow-acting poison that doubles over time
+- make the floor beneath them feel like it's falling
+- curse them so that every wound they deal, they also feel
+- slow only their thoughts, not their body
+- make every shadow they touch feel like a blade
+- plant a beacon in them that draws the dungeon's attention
+
+---
+
+## Terrain & Environment
+
+- create a wall of ice across the corridor
+- fill this room with fire
+- raise a ring of stone spikes around me
+- flood the room with water
+- create a pit in front of the goblin
+- turn the floor to slick ice in a line east
+- grow vines across the doorway
+- cover the stairs in rubble
+- make a path of fire leading to the enemy
+- freeze all the water in the room
+- create a wall of thorns around me
+- fill the corridor with mist
+- shatter the ice wall to my north
+- clear the rubble blocking the door
+- turn the wall to my east into open floor
+- raise a series of stone columns in a line
+- create a narrow channel of water south
+- coat the floor in a ring of vines around the goblin
+- ignite the vines
+- place fire on every tile visible from here
+- make the ceiling drop rubble on a target tile
+- create a corridor of slick ice from here to the stairs
+- build a room-dividing wall of ice through the middle
+- turn all the floor in this corridor to mud (water tiles)
+- create a ring of fire at radius three
+- make a checkered pattern of ice and fire
+- seal every door in the room
+- fill the north end of the room with poison cloud
+- place a deep pool of water in the center of the room
+- open a hole in the south wall
+
+---
+
+## Summoning — Allies
+
+- summon a loyal wolf to fight by my side
+- call a spirit warrior from the bones of the dead
+- conjure a small fire elemental to serve me
+- summon a shadow cat that moves through walls
+- call a pair of ravens to attack from the air
+- conjure a construct of stone to guard me
+- summon a tiny demon bound to my service
+- call a ghost of a fallen soldier
+- conjure a thornling made of vines and thorns
+- summon a loyal hound with a keen nose
+- call a water spirit to fight for me
+- conjure a mirror of myself made of shadow
+- summon a swarm of biting insects
+- call a clockwork guardian
+- conjure a loyal fire sprite
+- summon a lantern-bearer made of will-o-wisp light
+- call a phantom that only the enemies can see (to distract them)
+- conjure a hungry ooze that attacks enemies
+- summon the memory of a fallen knight
+- call a smoke creature that obscures vision
+
+---
+
+## Summoning — Aura Bearers & Wards
+
+- summon a burning ward that ignites all who approach
+- conjure a healing totem at this location
+- create a fear ward that terrifies nearby enemies
+- summon a sentinel eye that keeps watch over this room
+- call a slow aura spirit that drains speed from nearby foes
+- place a poison radiator at the room entrance
+- conjure a mana font that restores my magic over time
+- summon a ward that reveals all invisible creatures nearby
+- create a dread anchor here — enemies who come close feel despair
+- call a flame guardian that burns everything that approaches
+- conjure a protective spirit that heals nearby allies
+- summon a warding sigil that keeps enemies frightened
+- place a toxic miasma source at this location
+- call a bleeding field — enemies within range continuously bleed
+- create a radiant beacon that reveals all nearby creatures
+
+---
+
+## Summoning — Hazardous Creatures
+
+- summon a bomb golem — it walks toward enemies and explodes
+- conjure a spider that webs its enemies and lays egg traps
+- call a plague carrier that poisons everything it touches
+- summon a berserker elemental that attacks randomly
+- conjure a glass creature that shatters on death, injuring nearby foes
+- call a death-shriek wraith — it screams when it dies
+- summon a volatile mana slime that explodes in arcane energy when killed
+- conjure a thornbeast that leaves bleeding wounds everywhere it walks
+- call a curse-carrier that spreads its affliction on contact
+- summon a leech swarm that heals me when it deals damage
+
+---
+
+## Healing & Support
+
+- heal my wounds
+- regenerate my health over the next five turns
+- restore my mana
+- mend the worst of my injuries
+- close every wound on my body
+- give myself a burst of speed
+- sharpen my senses and reactions
+- make myself harder to hit
+- ward myself against physical harm
+- give myself the strength of rage
+- make myself invisible for a few turns
+- grant myself the blessing of haste
+- make my next attack hit much harder
+- shield myself from fire damage
+- make myself resistant to poison
+- bless myself with regenerating skin
+- channel the pain into fuel for power
+- make my wounds clot instantly
+- give me a moment of absolute clarity
+- let me feel no pain for two turns
+- wrap myself in a ward of protection
+- draw some health from the nearest enemy
+- sacrifice some mana to heal instead
+- spread my wounds across the dungeon (distribute damage to environment)
+- swap my current HP and mana values
+
+---
+
+## Information & Divination
+
+- reveal every enemy in the dungeon
+- show me the fastest path to the stairs
+- sense the nearest hidden door
+- tell me what is behind the north wall
+- make all invisible things visible
+- find every item on this floor
+- let me hear through the walls
+- reveal the weaknesses of the nearest enemy
+- show me where the traps are
+- mark every enemy on this floor so I can sense them
+- give me a vision of the floor below
+- read the magical signature of this room
+- see through the eyes of the nearest ally
+- feel the dungeon breathe and understand its layout
+- count the enemies between me and the exit
+
+---
+
+## Sacrifice & Risk — High Power
+
+- drain my own blood to fuel a devastating attack
+- tear off a piece of my soul as payment for power
+- age ten years in exchange for omnipotence for one turn
+- pour all my mana into a single catastrophic explosion
+- write my name in shadow as a permanent curse for unlimited mana right now
+- hollow out my memory of fire to cast fire spells for free
+- trade my left hand's worth of sensation for invisibility
+- give an enemy part of my lifespan to destroy them utterly
+- offer my shadow as a cost for calling the old thing
+- spend every item I carry to open a rift in reality here
+- make a deal with whatever is listening
+- give the dungeon a scar in exchange for a boon
+- sacrifice the nearest ally to fuel a massive blast
+- sever my connection to magic temporarily for one overwhelming strike
+- let the dungeon write on my bones
+
+---
+
+## Strange & Esoteric
+
+- make the nearest enemy forget me
+- convince the door it was never closed
+- make the torchlight last longer than it should
+- teach the stone to become interested in the goblin
+- borrow a sound from somewhere else
+- make the dungeon feel smaller (compress distances temporarily)
+- rename the goblin "Harold" and confuse it
+- convince the shadows to take sides
+- make the nearest wall remember being a door
+- speak to whatever made this room
+- ask the floor where the deepest danger is
+- make light bend around me wrong
+- convince time to hesitate here
+- make the dungeon breathe in rhythm with my heartbeat
+- teach the nearest torch a different color
+- borrow a few seconds of silence from somewhere quiet
+- make the goblin hallucinate allies it must protect
+- convince the stone that it is tired of being stone
+- make everything smells like copper for a moment
+- call a thing without a name and ask it to help
+- fold two nearby tiles on top of each other
+- ask the dungeon for a gift (request a random boon)
+- make the stairs remember where they go and resent it
+- create a gap in the narrative around this enemy
+- convince the laws of thermodynamics to take a break
+- make the nearest enemy believe it has already won
+- pull a wall from three rooms away and place it here
+- make something in this room older than it should be
+- extract the color red from this room
+- make the nearest enemy dream while it's still awake
+
+---
+
+## Combo & Conditional Spells
+
+- freeze the water I'm standing in before they get here
+- ignite the bleeding goblin
+- strike the enemy in the water with lightning
+- pull the enemy into my ring of fire
+- slow them, then wall them in
+- web the goblin to the floor and set it alight
+- mark every enemy in the room and then make them bleed
+- set the enemy on fire, then hit the fire with wind
+- push the enemy into the poison cloud I made
+- freeze the mist into a wall
+- make the burning enemy explode
+- drain their mana and then hit them with an arcane blast
+- make the enemy fight my summoned wolves and then watch
+- heal myself to full, then convert the excess healing into mana
+- chain a lightning bolt through every enemy standing in water
+
+---
+
+## Creative Costs & Curses
+
+- cast anything — I'll pay in memories
+- do something powerful and charge it to my future
+- draw a spell from the dungeon's own anger
+- sacrifice my name temporarily for a miracle
+- spend chalk to stabilize wild magic
+- pay in years for something that would take years to learn
+- borrow power I don't have and owe it back
+- use my blood as ink for the spell
+- cast at cost — let the dungeon choose the price
+- write a blank check to the magic
+
+---
+
+## Environmental Exploitation
+
+- boil the water the enemies are standing in
+- ignite the poison cloud
+- cause the fire to spread toward the enemies
+- freeze the river to make a bridge
+- melt the ice wall with fire
+- overgrow the vines into a larger barrier
+- make the mist freeze into a cloud of ice shards
+- turn the rubble into sharp projectiles
+- electrify the water in the whole room
+- make the poison cloud heavier so it sinks to the ground
+- use the fire as fuel for a bigger spell
+- cause the vines to grow into the enemy
+- make the water flow toward the enemies
+- ignite every flammable thing in the room simultaneously
+- turn the mist into acid
+
+---
+
+## Aura Ward Examples (New System)
+
+- summon a burning ward here — it scorches all who approach
+- conjure a healer spirit that restores nearby allies each turn
+- place a fear anchor — enemies within three tiles flee
+- create a poison radiator — enemies nearby are slowly poisoned
+- summon a guardian that stands watch and never moves
+- call a slow-field generator — a pulsing entity that drains speed
+- place a mana font at this tile — I gain mana when standing near it
+- summon a ranged spirit archer that attacks from a distance
+- create a warding eye that reveals all nearby creatures
+- conjure a bomb-ward — it explodes violently when an enemy enters its range
+- call a bleed radiator — enemies within range continuously lose blood
+- summon a freeze anchor that slows all nearby enemies to a crawl
+- place a thorn-spirit that bleeds any enemy who approaches
+- conjure a dread emanation — something that just makes enemies not want to be near it
+- create a living trap: a creature that pretends to be an item, then explodes
+
+---
+
+*The LLM interprets spell intent freely. Poetic or indirect phrasing often produces more
+creative results than technical descriptions. Experiment liberally — unexpected interpretations
+are part of the magic.*

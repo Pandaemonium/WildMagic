@@ -292,6 +292,17 @@ def describe_state(engine: GameEngine) -> list[str]:
             e_parts = ",".join(f"{enemy.status_display.get(k, k)}:{v}" for k, v in sorted(enemy.statuses.items()))
             e_status_str = f" [{e_parts}]"
         enemies.append(f"{enemy.name}({enemy.hp}/{enemy.max_hp}) at {enemy.x},{enemy.y} [{enemy.faction}]{e_status_str}")
+    allies = []
+    for ally in sorted(
+        (e for e in engine.state.entities.values() if e.kind == "actor" and e.faction == "ally" and e.hp > 0),
+        key=lambda entity: entity.id,
+    ):
+        a_status_str = ""
+        if ally.statuses:
+            a_parts = ",".join(f"{ally.status_display.get(k, k)}:{v}" for k, v in sorted(ally.statuses.items()))
+            a_status_str = f" [{a_parts}]"
+        tag_str = f" tags:{','.join(sorted(ally.tags))}" if ally.tags else ""
+        allies.append(f"{ally.name}({ally.hp}/{ally.max_hp}) at {ally.x},{ally.y}{tag_str}{a_status_str}")
     resistances = ", ".join(f"{k}:{v}%" for k, v in sorted(player.resistances.items()) if v) or "none"
     weaknesses = ", ".join(f"{k}:{v}%" for k, v in sorted(player.weaknesses.items()) if v) or "none"
     lines = [
@@ -303,7 +314,9 @@ def describe_state(engine: GameEngine) -> list[str]:
         f"Curses: {curses}",
         f"Flags: {flags}",
         f"Scheduled events: {len(state.event_timers)}",
+        f"Triggers: {len(state.triggers)}",
         "Enemies: " + ("; ".join(enemies) if enemies else "none"),
+        "Allies: " + ("; ".join(allies) if allies else "none"),
     ]
     if player.resistances:
         lines.append(f"Resistances: {resistances}")
@@ -356,6 +369,19 @@ def summarize_state(engine: GameEngine) -> dict[str, Any]:
                 for event in state.event_timers
             ],
             key=lambda event: (str(event.get("turns")), str(event.get("event_type")), str(event.get("name"))),
+        ),
+        "triggers": sorted(
+            [
+                {
+                    "trigger": trigger.get("trigger") or trigger.get("on"),
+                    "target": trigger.get("target"),
+                    "charges": trigger.get("charges"),
+                    "duration": trigger.get("duration"),
+                    "name": trigger.get("name"),
+                }
+                for trigger in state.triggers
+            ],
+            key=lambda trigger: (str(trigger.get("trigger")), str(trigger.get("target")), str(trigger.get("name"))),
         ),
         "curses": {
             curse_id: {

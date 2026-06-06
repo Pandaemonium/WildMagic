@@ -39,13 +39,13 @@ Effect catalog:
 - heal or restore_mana: target, amount.
 - teleport: target, x, y.
 - push or pull: target, origin or dx/dy, distance.
-- create_tile or create_tiles: x/y or target, tile, radius, duration. Add hollow:true for a ring/perimeter pattern. Use ONE create_tiles effect for a ring — never list individual coordinates.
+- create_tile or create_tiles: x/y or target, tile, radius, duration. Add hollow:true for a ring/perimeter pattern, or shape:"line|wall|cone|scatter" with origin:"player" and target:"nearest_enemy" for paths, barriers, cones, and bursts. Use ONE create_tiles effect for shapes — never list individual coordinates.
 - add_status or remove_status: target, status, duration. Optional display_name (shown to player instead of the status key, e.g. "petrified" for frozen) and expiry_text (message when it wears off). For single target: an actor id, "player", or "nearest_enemy". For all enemies: "all_enemies". For everyone: "all".
 - summon: name, faction ("ally" or "enemy"), hp, attack, defense, char, x, y. All at top level.
 - spawn_item: name, item_type, x, y, char, material, quantity, tags.
 - conjure_item: template, name, material, tags, target, placement, count.
 - conjure_creature: template, name, faction ("ally" or "enemy"), tags, placement, count. Always include faction.
-- modify_inventory, transform_entity, change_faction, add_tag, remove_tag, add_resistance (fields: target, damage_type, amount), add_weakness (fields: target, damage_type, amount), set_flag, schedule_event, message.
+- modify_inventory, transform_entity, change_faction, add_tag, remove_tag, add_resistance (fields: target, damage_type, amount), add_weakness (fields: target, damage_type, amount), set_flag, schedule_event, create_trigger, message.
 
 Valid target strings: "player", "nearest_enemy", or a specific entity id from context. For add_status, you may also use "all_enemies" or "enemies" to affect all enemies, or "all" for everyone.
 
@@ -65,6 +65,7 @@ Balance rules:
 - For body-part changes, use damage/status/conjure_item instead of transform_entity unless the whole creature changes.
 - For tracking, glowing shadow, locate, or reveal spells, use add_status with status "revealed" on the target.
 - For spells promising a delayed payoff or future consequence, use schedule_event to create the payoff. schedule_event fields: turns (number), event_type (summon|message|damage|heal|status|flood|curse|conjure), plus event-specific fields (name, hp, attack, faction, amount, tile, status, etc.).
+- For "next time X happens, Y happens" spells, use create_trigger. Fields: trigger ("on_next_spell|on_player_hit|on_player_damaged|on_player_move|on_enemy_hit|on_enemy_damaged|on_enemy_death"), target ("player|nearest_enemy|all_enemies|any"), charges, duration, name, effects. Trigger effects may use target:"trigger_target" or target:"trigger_source".
 - For physically impossible global requests (reverse gravity for everything, turn all walls into X), reject with a creative reason or give a local creative interpretation using available effects.
 
 Useful tiles: floor, wall, door, open_door, stairs_down, stairs_up, water, fire, slick_ice, ice_wall, poison_cloud, vines, rubble, mist.
@@ -78,6 +79,27 @@ Conjuration:
 - Creature templates: tiny_swarm, small_beast, humanoid, construct, spirit, slime, summoned_servant, hazard_creature.
 - Creative names, materials, and tags are allowed, but mechanics come from the chosen template.
 
+Behavior tags (add to any summoned/conjured creature's tags array for special per-turn behaviors):
+- "pacifist" means the creature never attacks; useful for healing fonts, wards, shrines, and aura-only objects.
+- "aura_burn_N" — sets nearby enemies on fire each turn (radius N, default 2)
+- "aura_heal_N" — heals nearby allies 1 HP/turn
+- "aura_fear_N" — frightens nearby enemies each turn
+- "aura_slow_N" — slows nearby enemies each turn
+- "aura_poison_N" — poisons nearby enemies each turn
+- "aura_bleed_N" — causes bleeding in nearby enemies each turn
+- "aura_reveal_N" — applies revealed status to all nearby entities
+- "aura_mana_N" — restores 1 mana/turn to player when within radius N
+- "aura_damage_N" — deals 1 arcane damage to nearby enemies each turn
+- "aura_confuse_N" — confuses nearby enemies each turn
+- "ranged" — attacks from up to 7 tiles away (line of sight required) instead of melee
+- "guardian" — stays in place, only acts against enemies within 3 tiles; never chases
+- "stationary" — never moves at all; only attacks adjacent enemies
+- "explode_on_death" — explodes for fire damage in radius 3 when killed
+- "shatter_on_death" — deals physical damage in radius 2 when killed
+- "poison_cloud_on_death" — fills radius 3 with poison cloud when killed
+- "freeze_on_death" — freezes and ices the area around itself when killed
+- "spawn_on_death" — spawns two smaller creatures when killed
+
 Good examples:
 {"accepted": true, "severity": "minor", "outcome_text": "A blue shadow pins the target's location in your mind.", "effects": [{"type": "add_status", "target": "nearest_enemy", "status": "revealed", "duration": 6}], "costs": [{"type": "mana", "amount": 2}], "rejected_reason": null}
 {"accepted": true, "severity": "moderate", "outcome_text": "A tiny sun circles you and lashes out at foes.", "effects": [{"type": "summon", "name": "tiny sun", "faction": "ally", "hp": 4, "attack": 0, "defense": 1, "char": "o"}, {"type": "area_damage", "target": "player", "radius": 3, "amount": 4, "damage_type": "fire", "include_player": false, "affects": "enemies"}], "costs": [{"type": "mana", "amount": 6}, {"type": "status", "status": "burning", "duration": 2}], "rejected_reason": null}
@@ -85,9 +107,14 @@ Good examples:
 {"accepted": true, "severity": "minor", "outcome_text": "Blue webbing pins the target in place.", "effects": [{"type": "add_status", "target": "nearest_enemy", "status": "webbed", "duration": 3}, {"type": "conjure_item", "template": "generic_object", "name": "sticky blue webbing", "material": "silk", "target": "nearest_enemy", "placement": "target_tile"}], "costs": [{"type": "item", "item": "chalk", "amount": 1}], "rejected_reason": null}
 {"accepted": true, "severity": "moderate", "outcome_text": "Time thickens around your enemies.", "effects": [{"type": "area_status", "target": "player", "radius": 4, "status": "slowed", "duration": 4, "affects": "enemies"}], "costs": [{"type": "mana", "amount": 4}], "rejected_reason": null}
 {"accepted": true, "severity": "moderate", "outcome_text": "Two wolves lope out of a dark corner.", "effects": [{"type": "conjure_creature", "template": "small_beast", "name": "shadow wolf", "count": 2, "faction": "ally", "tags": ["wolf", "predator"], "placement": "near_player"}], "costs": [{"type": "mana", "amount": 5}, {"type": "curse", "id": "wild_debt", "name": "Wild Debt", "description": "The wild expects repayment."}], "rejected_reason": null}
-{"accepted": true, "severity": "major", "outcome_text": "The spell leaves and promises to come back with interest.", "effects": [{"type": "heal", "target": "player", "amount": 8}, {"type": "set_flag", "flag": "debt_owed", "value": true}, {"type": "schedule_event", "turns": 5, "event_type": "summon", "name": "debt collector", "char": "D", "hp": 10, "attack": 4, "faction": "enemy"}], "costs": [{"type": "mana", "amount": 3}], "rejected_reason": null}
+{"accepted": true, "severity": "major", "outcome_text": "Wounds close. In five turns, something hostile will arrive to collect.", "effects": [{"type": "heal", "target": "player", "amount": 8}, {"type": "schedule_event", "turns": 5, "event_type": "summon", "name": "wrath echo", "char": "W", "hp": 10, "attack": 4, "faction": "enemy"}], "costs": [{"type": "mana", "amount": 3}], "rejected_reason": null}
 {"accepted": true, "severity": "moderate", "outcome_text": "Your bones remember fire.", "effects": [{"type": "add_resistance", "target": "player", "damage_type": "fire", "amount": 50}], "costs": [{"type": "mana", "amount": 6}, {"type": "curse", "id": "fire_debt", "name": "Fire Debt", "description": "Something hot is owed."}], "rejected_reason": null}
 {"accepted": true, "severity": "minor", "outcome_text": "Your bones lock like limestone.", "effects": [{"type": "add_status", "target": "nearest_enemy", "status": "frozen", "display_name": "petrified", "expiry_text": "The stone cracks. You can move.", "duration": 3}], "costs": [{"type": "mana", "amount": 2}], "rejected_reason": null}
+{"accepted": true, "severity": "moderate", "outcome_text": "A smouldering ward takes shape. Enemies who approach will burn.", "effects": [{"type": "conjure_creature", "template": "hazard_creature", "name": "burning ward", "faction": "ally", "tags": ["aura_burn_3", "stationary", "ward"], "placement": "near_player", "count": 1}], "costs": [{"type": "mana", "amount": 5}, {"type": "item", "item": "chalk", "amount": 1}], "rejected_reason": null}
+{"accepted": true, "severity": "moderate", "outcome_text": "A spectral archer materialises, nocking an arrow of shadow.", "effects": [{"type": "conjure_creature", "template": "spirit", "name": "shadow archer", "faction": "ally", "tags": ["ranged", "undead"], "placement": "near_player", "count": 1}], "costs": [{"type": "mana", "amount": 6}], "rejected_reason": null}
+{"accepted": true, "severity": "major", "outcome_text": "Something volatile and eager answers the call. It will not last long.", "effects": [{"type": "conjure_creature", "template": "construct", "name": "bomb golem", "faction": "ally", "hp": 4, "tags": ["explode_on_death", "bomb"], "placement": "near_player", "count": 1}], "costs": [{"type": "mana", "amount": 8}], "rejected_reason": null}
+{"accepted": true, "severity": "moderate", "outcome_text": "A healing font pulses softly. Stand near it to recover.", "effects": [{"type": "summon", "name": "healing font", "faction": "ally", "hp": 6, "attack": 0, "defense": 2, "char": "+", "tags": ["aura_heal_3", "stationary"]}], "costs": [{"type": "mana", "amount": 7}], "rejected_reason": null}
+{"accepted": true, "severity": "moderate", "outcome_text": "Your wound learns to answer.", "effects": [{"type": "create_trigger", "name": "thorn-blood answer", "trigger": "on_player_hit", "target": "player", "charges": 1, "duration": 6, "effects": [{"type": "damage", "target": "trigger_source", "amount": 5, "damage_type": "physical"}, {"type": "add_status", "target": "trigger_source", "status": "bleeding", "duration": 3}]}], "costs": [{"type": "mana", "amount": 4}], "rejected_reason": null}
 {"accepted": false, "severity": "catastrophic", "outcome_text": "", "effects": [], "costs": [], "rejected_reason": "Reality refuses to become that convenient."}
 """.replace("{supported_statuses}", SUPPORTED_STATUS_TEXT)
 
@@ -119,6 +146,7 @@ SUPPORTED_EFFECTS = {
     "add_weakness",
     "set_flag",
     "schedule_event",
+    "create_trigger",
     "add_curse",
     "message",
 }
@@ -494,10 +522,11 @@ class MockWildMagicProvider:
                             "type": "schedule_event",
                             "turns": 3,
                             "event_type": "summon",
-                            "name": "debt collector",
-                            "char": "d",
+                            "name": "wild echo",
+                            "char": "w",
                             "hp": 6,
                             "attack": 3,
+                            "faction": "ally",
                         },
                     ],
                     "costs": [{"type": "mana", "amount": 2}],
@@ -781,6 +810,11 @@ _EFFECT_TYPE_ALIASES: dict[str, str] = {
     "area_effect": "area_damage",
     "explosion": "area_damage",
     "blast": "area_damage",
+    "trigger": "create_trigger",
+    "ward": "create_trigger",
+    "reaction": "create_trigger",
+    "contingency": "create_trigger",
+    "delayed_reaction": "create_trigger",
 }
 
 # Status names that the LLM might use as effect type directly.
@@ -895,6 +929,23 @@ def _normalize_resolution(data: dict[str, Any]) -> dict[str, Any]:
             data = dict(data)
             data["costs"] = costs
 
+    # Rescue trigger-shaped responses where top-level "effects" is intended as the
+    # trigger payload instead of the resolution's effect list.
+    top_effect_type = str(data.get("effect") or data.get("effect_type") or data.get("type") or "").lower().strip()
+    if top_effect_type in {"create_trigger", "trigger", "ward", "reaction", "contingency", "delayed_reaction"} and isinstance(data.get("effects"), list):
+        trigger_effect = {
+            "type": _EFFECT_TYPE_ALIASES.get(top_effect_type, top_effect_type),
+            "effects": data["effects"],
+        }
+        for key in {
+            "target", "trigger", "on", "charges", "duration", "turns", "name",
+            "display_name", "expiry_text",
+        }:
+            if key in data:
+                trigger_effect[key] = data[key]
+        data = dict(data)
+        data["effects"] = [trigger_effect]
+
     # If effects is missing/empty, try to reconstruct from common alternate structures.
     if not data.get("effects"):
         # Case 1: "effect" (singular) at top level — may be a string ("damage") or dict ({"type": "damage", ...}).
@@ -920,6 +971,8 @@ def _normalize_resolution(data: dict[str, Any]) -> dict[str, Any]:
                     "hollow", "ring", "perimeter", "include_player", "affects",
                     "display_name", "expiry_text", "item", "material", "quantity",
                     "dx", "dy", "distance", "positions", "tiles", "creature",
+                    "trigger", "on", "effects", "effect", "charges", "shape",
+                    "pattern", "width", "length", "from", "to",
                 }
                 for _k in _EFFECT_TOP_FIELDS:
                     if _k in data and _k not in effect_obj:
@@ -1063,13 +1116,15 @@ def _normalize_resolution(data: dict[str, Any]) -> dict[str, Any]:
                 if "origin" in e:
                     e = dict(e)
                     e["origin"] = _normalize_target_text(e["origin"])
-                # Flatten conjure_creature "creature" sub-dict into the effect.
-                if et in {"conjure_creature", "summon"} and isinstance(e.get("creature"), dict):
-                    e = dict(e)
-                    creature_data = e.pop("creature")
-                    for _ck, _cv in creature_data.items():
-                        if _ck not in e:
-                            e[_ck] = _cv
+                # Flatten conjure_creature "creature"/"entity" sub-dict into the effect.
+                if et in {"conjure_creature", "summon"}:
+                    for _sub_key in ("creature", "entity"):
+                        if isinstance(e.get(_sub_key), dict):
+                            e = dict(e)
+                            sub_data = e.pop(_sub_key)
+                            for _ck, _cv in sub_data.items():
+                                if _ck not in e:
+                                    e[_ck] = _cv
                 # Normalize "positions" array → "tiles" array for create_tiles.
                 if et in {"conjure_item", "spawn_item"} and isinstance(e.get("item"), dict):
                     e = dict(e)
@@ -1150,7 +1205,7 @@ def _effect_from_text(text: str) -> dict[str, Any] | None:
     if not any(word in normalized for word in ["arrive", "appears", "appear", "summon"]):
         return None
 
-    name = "debt collector"
+    name = "summoned creature"
     for pattern in [
         r"scheduled\s+(?:a|an|the)?\s*([a-z][a-z _-]+?)\s+to\s+arrive",
         r"(?:a|an|the)\s+([a-z][a-z _-]+?)\s+(?:should|will|shall)?\s*arrive",
@@ -1162,7 +1217,7 @@ def _effect_from_text(text: str) -> dict[str, Any] | None:
             if candidate:
                 name = candidate[:40]
                 break
-    faction = "ally" if any(word in normalized for word in ["friendly", "ally", "helpful"]) else "enemy"
+    faction = "ally" if not any(word in normalized for word in ["hostile", "enemy", "foe", "threat", "collector"]) else "enemy"
     return {
         "type": "schedule_event",
         "turns": turns,
@@ -1205,11 +1260,11 @@ def _normalize_schedule_event(effect: dict[str, Any]) -> dict[str, Any]:
         else:
             normalized["event_type"] = "message"
     if normalized.get("event_type") == "summon":
-        normalized.setdefault("name", "debt collector")
+        normalized.setdefault("name", "summoned creature")
         normalized.setdefault("char", _effect_char(str(normalized["name"])))
         normalized.setdefault("hp", normalized.get("max_hp", 8))
         normalized.setdefault("attack", 3)
-        normalized.setdefault("faction", "enemy")
+        normalized.setdefault("faction", "ally")
     return normalized
 
 

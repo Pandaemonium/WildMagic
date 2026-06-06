@@ -26,7 +26,7 @@ Supported effect types:
 - `teleport`: move an entity to a specific tile.
 - `push` / `pull`: move an entity away from or toward an origin.
 - `create_tile` / `set_tile`: change one tile.
-- `create_tiles`: change an area or explicit list of tiles.
+- `create_tiles`: change an area, a line/path, or an explicit list of tiles.
 - `add_status` / `remove_status`: apply or clear statuses.
 - `summon`: create an actor.
 - `spawn_item`: create an item.
@@ -39,6 +39,7 @@ Supported effect types:
 - `add_resistance` / `add_weakness`: alter damage modifiers.
 - `set_flag`: set a persistent world flag.
 - `schedule_event`: create a delayed event.
+- `create_trigger`: create a charged reaction that fires when a later event happens.
 - `add_curse`: add a curse as an effect.
 - `message`: add log text.
 
@@ -74,7 +75,14 @@ Current engine-native tiles:
 - `rubble`
 - `mist`
 
-Temporary terrain can include a `duration` field. Area effects are currently limited to radius `0-4` and at most 30 changed tiles per effect.
+Temporary terrain can include a `duration` field. Area effects can use `radius`, `hollow`, and `target`. Shape effects can use `shape`, `origin`, `target`, and optional `width`.
+
+Useful shapes:
+
+- `line`, `path`, `beam`, `bridge`: draw from `origin` toward `target`.
+- `wall`, `barrier`: draw a perpendicular barrier centered on `target`.
+- `cone`, `fan`: fill a cone from `origin` toward `target`.
+- `scatter`, `spray`: choose scattered tiles around `target`.
 
 ## Statuses
 
@@ -106,6 +114,19 @@ Some statuses already affect behavior. For example, burning and poisoned deal da
     {"type": "push", "target": "nearest_enemy", "origin": "player", "distance": 2}
   ],
   "costs": [{"type": "mana", "amount": 3}],
+  "rejected_reason": null
+}
+```
+
+```json
+{
+  "accepted": true,
+  "severity": "minor",
+  "outcome_text": "A slick blue path skids toward the nearest foe.",
+  "effects": [
+    {"type": "create_tiles", "shape": "line", "origin": "player", "target": "nearest_enemy", "tile": "slick_ice", "duration": 5}
+  ],
+  "costs": [{"type": "mana", "amount": 2}],
   "rejected_reason": null
 }
 ```
@@ -153,6 +174,46 @@ Some statuses already affect behavior. For example, burning and poisoned deal da
     {"type": "mana", "amount": 4},
     {"type": "status", "status": "crawling_skin", "duration": 6}
   ],
+  "rejected_reason": null
+}
+```
+
+## Triggers
+
+Use `create_trigger` for "the next time X happens, Y happens" spells. Triggers are stored in the game state with charges and duration, then apply ordinary effects when fired.
+
+Supported trigger names include:
+
+- `on_next_spell`
+- `on_player_hit`
+- `on_player_damaged`
+- `on_player_move`
+- `on_enemy_hit`
+- `on_enemy_damaged`
+- `on_enemy_death`
+
+Inside trigger effects, `target: "trigger_target"` means the entity that caused the trigger target condition, and `target: "trigger_source"` means the attacker/source when one exists.
+
+```json
+{
+  "accepted": true,
+  "severity": "moderate",
+  "outcome_text": "Your blood is instructed to answer violence.",
+  "effects": [
+    {
+      "type": "create_trigger",
+      "name": "thorn-blood answer",
+      "trigger": "on_player_hit",
+      "target": "player",
+      "charges": 1,
+      "duration": 6,
+      "effects": [
+        {"type": "damage", "target": "trigger_source", "amount": 5, "damage_type": "physical"},
+        {"type": "add_status", "target": "trigger_source", "status": "bleeding", "duration": 3}
+      ]
+    }
+  ],
+  "costs": [{"type": "mana", "amount": 4}],
   "rejected_reason": null
 }
 ```
