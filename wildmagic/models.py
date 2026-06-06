@@ -96,6 +96,10 @@ MECHANICAL_STATUSES = {
     "jinxed",
     "crawling_skin",
     "silenced",
+    "regenerating",
+    "berserk",
+    "empowered",
+    "cursed",
 }
 
 
@@ -120,6 +124,8 @@ class Entity:
     material: str | None = None
     quantity: int = 1
     statuses: dict[str, int | str] = field(default_factory=dict)
+    status_display: dict[str, str] = field(default_factory=dict)
+    status_expiry_text: dict[str, str] = field(default_factory=dict)
     tags: set[str] = field(default_factory=set)
     resistances: dict[str, int] = field(default_factory=dict)
     weaknesses: dict[str, int] = field(default_factory=dict)
@@ -142,6 +148,8 @@ class Entity:
             "resistances": self.resistances,
             "weaknesses": self.weaknesses,
         }
+        if self.status_display:
+            data["status_display"] = self.status_display
         if self.kind != "item":
             data.update(
                 {
@@ -171,6 +179,34 @@ class Curse:
             "name": self.name,
             "description": self.description,
             "stacks": self.stacks,
+        }
+
+
+@dataclass
+class GameStats:
+    enemies_killed: int = 0
+    spells_cast: int = 0
+    spells_failed: int = 0
+    items_used: int = 0
+    items_collected: int = 0
+    curses_gained: int = 0
+    deepest_floor: int = 1
+    damage_dealt: int = 0
+    damage_taken: int = 0
+    hp_healed: int = 0
+
+    def to_dict(self) -> "dict[str, Any]":
+        return {
+            "enemies_killed": self.enemies_killed,
+            "spells_cast": self.spells_cast,
+            "spells_failed": self.spells_failed,
+            "items_used": self.items_used,
+            "items_collected": self.items_collected,
+            "curses_gained": self.curses_gained,
+            "deepest_floor": self.deepest_floor,
+            "damage_dealt": self.damage_dealt,
+            "damage_taken": self.damage_taken,
+            "hp_healed": self.hp_healed,
         }
 
 

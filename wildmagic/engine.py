@@ -26,6 +26,7 @@ from .models import (
     VINES,
     Curse,
     Entity,
+    GameStats,
     TILE_NAMES,
     TILE_TAGS,
     WildMagicOutcome,
@@ -35,6 +36,89 @@ from .templates import creature_template, creature_template_ids, item_template, 
 
 MAP_WIDTH = 42
 MAP_HEIGHT = 28
+
+
+ITEM_USE_SPECS: dict[str, dict[str, Any]] = {
+    "mana_crystal": {
+        "effects": [{"kind": "restore_mana", "amount": 6}],
+        "message": "The {item} dissolves. You recover {amount} mana.",
+    },
+    "blood_moss": {
+        "effects": [{"kind": "heal", "amount": 5}],
+        "message": "You chew the {item}. You heal {amount} HP.",
+    },
+    "bone_charm": {
+        "effects": [
+            {"kind": "status", "status": "warded", "duration": 8},
+            {"kind": "resistance", "damage_type": "physical", "amount": 20},
+        ],
+        "message": "The {item} crumbles. You feel warded and resistant.",
+    },
+    "healing_potion": {
+        "effects": [{"kind": "heal", "amount": 10}],
+        "message": "The {item} works. You heal {amount} HP.",
+    },
+    "mana_potion": {
+        "effects": [{"kind": "restore_mana", "amount": 10}],
+        "message": "The {item} restores {amount} mana.",
+    },
+    "smoke_vial": {
+        "effects": [{"kind": "create_tiles", "tile": MIST, "radius": 2, "duration": 5}],
+        "message": "A cloud of mist erupts around you.",
+    },
+    "blink_scroll": {
+        "effects": [{"kind": "teleport_explored"}],
+        "message": "You blink to an explored tile.",
+        "failure": "The scroll finds nowhere to send you.",
+    },
+    "beast_claw": {
+        "effects": [{"kind": "status", "status": "empowered", "duration": 4}],
+        "message": "You drag the {item} across your palm. Your strikes feel sharper.",
+    },
+    "bone_shard": {
+        "effects": [{"kind": "damage_nearest", "range": 12, "amount": 4, "damage_type": "physical", "required": True}],
+        "message": "You hurl the {item}. {target} takes {amount} damage.",
+        "failure": "No enemy is close enough to throw at.",
+    },
+    "viscous_residue": {
+        "effects": [{"kind": "status_nearest", "range": 8, "status": "poisoned", "duration": 4, "required": True}],
+        "message": "You fling the {item}. {target} is poisoned.",
+        "failure": "No enemy to throw this at.",
+    },
+    "metal_scrap": {
+        "effects": [{"kind": "damage_nearest", "range": 6, "amount_min": 3, "amount_max": 6, "damage_type": "physical", "required": True}],
+        "message": "You bash with the {item}. {target} takes {amount} damage.",
+        "failure": "No enemy nearby.",
+    },
+    "arcane_residue": {
+        "effects": [
+            {"kind": "restore_mana", "amount": 3},
+            {"kind": "damage_nearest", "range": 8, "amount": 3, "damage_type": "arcane"},
+        ],
+        "message": "The {item} sparks. You gain {mana} mana. {target_clause}",
+    },
+    "stolen_coin": {
+        "choices": [
+            {
+                "effects": [{"kind": "restore_mana", "amount_min": 4, "amount_max": 8}],
+                "message": "The {item} lands lucky side up. You gain {amount} mana.",
+            },
+            {
+                "effects": [{"kind": "heal", "amount_min": 2, "amount_max": 5}],
+                "message": "The {item} lands fair. You heal {amount} HP.",
+            },
+            {
+                "effects": [{"kind": "status", "status": "marked", "duration": 4}],
+                "message": "The {item} lands cursed side up. You are marked.",
+            },
+        ],
+    },
+}
+
+DEFAULT_ITEM_USE_SPEC: dict[str, Any] = {
+    "effects": [{"kind": "restore_mana", "amount": 2}],
+    "message": "You consume the {item}. It restores {amount} mana.",
+}
 
 
 @dataclass(frozen=True)
@@ -81,6 +165,7 @@ class GameState:
     fov_radius: int = 9
     depth: int = 1
     max_depth: int = 3
+    stats: GameStats = field(default_factory=GameStats)
 
     @property
     def player(self) -> Entity:
@@ -167,9 +252,13 @@ class GameEngine:
             state.tiles[py][px] = STAIRS_UP
 
         enemy_templates = [
-            ("goblin cutpurse", "g", 8, 3, 0, "goblin", {"goblin", "flesh"}, {}, {}),
+            ("goblin cutpurse", "g", 8, 3, 0, "goblin", {"goblin", "humanoid", "flesh"}, {}, {}),
             ("glass bat", "b", 5, 2, 0, "bat", {"beast", "glass"}, {"poison": 25}, {"force": 25}),
             ("ash slime", "s", 10, 2, 1, "slime", {"slime", "ash"}, {"fire": 35, "poison": 50}, {"frost": 25}),
+            ("bone skeleton", "k", 7, 3, 1, "simple", {"undead", "bone"}, {"poison": 100, "frost": 50}, {"force": 50, "radiant": 50}),
+            ("cave spider", "x", 6, 2, 0, "simple", {"beast", "spider"}, {}, {"fire": 25}),
+            ("shadow wraith", "W", 4, 4, 0, "simple", {"undead", "shadow"}, {"physical": 25, "poison": 100}, {"radiant": 75, "fire": 25}),
+            ("fungal crawler", "c", 9, 2, 0, "simple", {"beast", "fungus"}, {"acid": 50}, {"fire": 50}),
         ]
         for room in rooms[1:]:
             if self.rng.random() < 0.85:
@@ -485,6 +574,9 @@ class GameEngine:
         if self.state.game_over:
             return False
         player = self.state.player
+        if any(s in player.statuses for s in ["rooted", "webbed", "frozen", "stunned"]):
+            self.state.add_message("You cannot move — you are held in place.")
+            return False
         target_x = player.x + dx
         target_y = player.y + dy
         if not self.in_bounds(target_x, target_y):
@@ -507,6 +599,16 @@ class GameEngine:
         self.pick_up_items_at_player()
         self._apply_tile_entry(player)
         self.update_fov()
+        # Slick ice keeps you sliding one extra tile in the same direction.
+        if self.tile_at(player.x, player.y) == SLICK_ICE:
+            slide_x, slide_y = player.x + dx, player.y + dy
+            if (self.in_bounds(slide_x, slide_y)
+                    and self.tile_at(slide_x, slide_y) not in BLOCKING_TILES
+                    and not self.blocking_entity_at(slide_x, slide_y)):
+                player.x = slide_x
+                player.y = slide_y
+                self.state.add_message("You slide on the ice!")
+                self._apply_tile_entry(player)
         self.finish_player_turn()
         return True
 
@@ -547,6 +649,7 @@ class GameEngine:
             self.state.add_message("You descend past the last stair and escape with your impossible magic intact.")
             return True
         self.state.depth += 1
+        self.state.stats.deepest_floor = max(self.state.stats.deepest_floor, self.state.depth)
         self._generate_dungeon_floor(preserve_player=True)
         self.state.turn += 1
         self.update_fov()
@@ -585,6 +688,129 @@ class GameEngine:
         self.finish_player_turn()
         return True
 
+    def use_item(self, item_name: str) -> bool:
+        if self.state.game_over:
+            return False
+        matched = self.find_inventory_item(item_name)
+        if matched is None or self.state.inventory.get(matched, 0) < 1:
+            self.state.add_message(f"You don't have any {item_name.strip().lower()}.")
+            return False
+        spec = ITEM_USE_SPECS.get(normalize_id(matched), DEFAULT_ITEM_USE_SPEC)
+        consumed = self._apply_item_use_spec(matched, spec)
+        if consumed:
+            self.consume_inventory_item(matched, 1)
+            self.state.stats.items_used += 1
+            self.finish_player_turn()
+        return consumed
+
+    def drop_item(self, item_name: str) -> bool:
+        if self.state.game_over:
+            return False
+        matched = self.find_inventory_item(item_name)
+        if matched is None or self.state.inventory.get(matched, 0) < 1:
+            self.state.add_message(f"You don't have any {item_name.strip().lower()}.")
+            return False
+        self.consume_inventory_item(matched, 1)
+        player = self.state.player
+        self.spawn_item(matched, "?", player.x, player.y, item_type=normalize_id(matched))
+        self.state.add_message(f"You drop {matched}.")
+        self.finish_player_turn()
+        return True
+
+    def find_inventory_item(self, item_name: str) -> str | None:
+        wanted = normalize_id(item_name)
+        for key in self.state.inventory:
+            if key.lower() == item_name.strip().lower() or normalize_id(key) == wanted:
+                return key
+        return None
+
+    def consume_inventory_item(self, item_name: str, amount: int) -> int:
+        current = self.state.inventory.get(item_name, 0)
+        spent = min(current, max(0, amount))
+        remaining = current - spent
+        if remaining:
+            self.state.inventory[item_name] = remaining
+        else:
+            self.state.inventory.pop(item_name, None)
+        return spent
+
+    def _apply_item_use_spec(self, item_name: str, spec: dict[str, Any]) -> bool:
+        if "choices" in spec:
+            choices = [choice for choice in coerce_list(spec.get("choices")) if isinstance(choice, dict)]
+            if choices:
+                spec = self.rng.choice(choices)
+        context: dict[str, Any] = {"item": item_name.replace("_", " ")}
+        target_clause = ""
+        for effect in coerce_list(spec.get("effects")):
+            if not isinstance(effect, dict):
+                continue
+            success, updates = self._apply_item_effect(effect)
+            context.update(updates)
+            if "target" in updates and "amount" in updates and "damage_type" in updates:
+                target_clause = f"{updates['target']} takes {updates['amount']} {updates['damage_type']}."
+            if not success and effect.get("required"):
+                self.state.add_message(str(spec.get("failure") or "Nothing happens."))
+                return False
+        context["target_clause"] = target_clause or "No enemy is close enough to be caught in it."
+        self.state.add_message(str(spec.get("message") or "You use the {item}.").format(**context))
+        return True
+
+    def _apply_item_effect(self, effect: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
+        player = self.state.player
+        kind = normalize_id(str(effect.get("kind") or ""))
+        amount = self._roll_item_amount(effect)
+        if kind == "restore_mana":
+            gained = min(amount, player.max_mana - player.mana)
+            player.mana += gained
+            return True, {"amount": gained, "mana": gained}
+        if kind == "heal":
+            healed = self.heal_entity(player, amount)
+            return True, {"amount": healed}
+        if kind == "status":
+            status = normalize_id(str(effect.get("status") or "marked"))
+            player.statuses[status] = max(status_duration(player.statuses.get(status)), clamp_int(effect.get("duration"), 1, 999))
+            return True, {"status": status, "duration": player.statuses[status]}
+        if kind == "resistance":
+            damage_type = normalize_id(str(effect.get("damage_type") or "physical"))
+            player.resistances[damage_type] = clamp_int(player.resistances.get(damage_type, 0) + amount, 0, 95)
+            return True, {"damage_type": damage_type, "amount": amount}
+        if kind == "create_tiles":
+            tile = str(effect.get("tile") or MIST)
+            for tx, ty in self.points_in_radius(player.x, player.y, clamp_int(effect.get("radius"), 0, 6)):
+                self.set_tile(tx, ty, tile, optional_duration(effect.get("duration")))
+            return True, {"tile": tile}
+        if kind == "teleport_explored":
+            candidates = [
+                (x, y)
+                for x, y in (
+                    (self.rng.randint(0, self.state.width - 1), self.rng.randint(0, self.state.height - 1))
+                    for _ in range(40)
+                )
+                if self.can_occupy(x, y) and self.is_explored(x, y)
+            ]
+            if not candidates:
+                return False, {}
+            x, y = self.rng.choice(candidates)
+            self.teleport_entity(player, x, y)
+            return True, {"x": x, "y": y}
+        if kind in {"damage_nearest", "status_nearest"}:
+            target = self.nearest_enemy(max_distance=clamp_int(effect.get("range"), 1, 99))
+            if not target:
+                return False, {}
+            if kind == "damage_nearest":
+                damage_type = normalize_id(str(effect.get("damage_type") or "physical"))
+                actual = self.damage_entity(target, amount, damage_type)
+                return True, {"target": target.name, "amount": actual, "damage_type": damage_type}
+            status = normalize_id(str(effect.get("status") or "poisoned"))
+            target.statuses[status] = max(status_duration(target.statuses.get(status)), clamp_int(effect.get("duration"), 1, 999))
+            return True, {"target": target.name, "status": status}
+        return True, {}
+
+    def _roll_item_amount(self, effect: dict[str, Any]) -> int:
+        if "amount_min" in effect or "amount_max" in effect:
+            return self.rng.randint(clamp_int(effect.get("amount_min"), 0, 99), clamp_int(effect.get("amount_max"), 0, 99))
+        return clamp_int(effect.get("amount"), 0, 99)
+
     def nearest_enemy(self, max_distance: int | None = None) -> Entity | None:
         player = self.state.player
         enemies = self.living_enemies()
@@ -595,10 +821,22 @@ class GameEngine:
         return min(enemies, key=lambda enemy: self.distance(player, enemy))
 
     def attack(self, attacker: Entity, defender: Entity) -> None:
-        amount = max(1, attacker.attack - defender.defense + self.rng.randint(0, 2))
+        base = max(1, attacker.attack - defender.defense + self.rng.randint(0, 2))
+        bonus = 2 if ("berserk" in attacker.statuses or "empowered" in attacker.statuses) else 0
+        amount = base + bonus
         self.damage_entity(defender, amount, "physical")
+        if "berserk" in attacker.statuses:
+            self.damage_entity(attacker, 1, "blood")
         if defender.hp > 0:
             self.state.add_message(f"{attacker.name} hits {defender.name} for {amount}.")
+            # Spider webs on hit
+            if "spider" in attacker.tags and "webbed" not in defender.statuses and self.rng.random() < 0.5:
+                defender.statuses["webbed"] = 2
+                self.state.add_message(f"{defender.name} is webbed!")
+            # Fungus spreads spores on hit (poisoned)
+            if "fungus" in attacker.tags and "poisoned" not in defender.statuses and self.rng.random() < 0.4:
+                defender.statuses["poisoned"] = 3
+                self.state.add_message(f"Fungal spores infect {defender.name}!")
         else:
             self.state.add_message(f"{attacker.name} drops {defender.name}.")
 
@@ -606,9 +844,26 @@ class GameEngine:
         if entity.kind == "item" or entity.hp <= 0:
             return 0
         damage_type = normalize_id(damage_type)
+        if "marked" in entity.statuses and damage_type not in {"blood"}:
+            amount = amount + 2
+        if "cursed" in entity.statuses and damage_type not in {"blood"}:
+            amount = amount + 1
+        if "warded" in entity.statuses and damage_type not in {"blood"}:
+            amount = max(0, amount - 2)
         actual = self._modified_damage(entity, amount, damage_type)
         entity.hp -= actual
+        if entity.id == self.state.player_id:
+            self.state.stats.damage_taken += actual
+        elif entity.kind == "actor":
+            self.state.stats.damage_dealt += actual
         if entity.hp <= 0:
+            # Undead entities have a 30% chance to reform at 1 HP rather than dying.
+            if ("undead" in entity.tags and entity.kind == "actor" and entity.id != self.state.player_id
+                    and "slain" not in entity.tags and self.rng.random() < 0.3):
+                entity.hp = 1
+                entity.tags.add("slain")
+                self.state.add_message(f"{entity.name} collapses… but begins to stir again!")
+                return 0
             entity.hp = 0
             entity.blocks = False
             entity.char = "%"
@@ -617,15 +872,35 @@ class GameEngine:
             if entity.id == self.state.player_id:
                 self.state.game_over = True
                 self.state.add_message("You die. The dungeon keeps your echo.")
-            elif not self.living_enemies():
-                self.state.victory = True
-                self.state.add_message("For a breath, the floor is yours.")
+            else:
+                self.state.stats.enemies_killed += 1
+                self._drop_loot(entity)
+                # Slime splits into two smaller ones.
+                if "slime" in entity.tags and "split" not in entity.tags and entity.max_hp > 2:
+                    self._split_slime(entity)
+                if not self.living_enemies():
+                    self.state.victory = True
+                    self.state.add_message("For a breath, the floor is yours.")
         elif damage_type == "fire":
-            entity.statuses["burning"] = max(status_duration(entity.statuses.get("burning")), 3)
+            if "bleeding" in entity.statuses:
+                entity.statuses.pop("bleeding")
+                entity.hp -= 1
+                wound_subj = "Your wound is" if entity.id == self.state.player_id else f"{entity.name}'s wound is"
+                self.state.add_message(f"{wound_subj} cauterized — brutal but effective.")
+            else:
+                entity.statuses["burning"] = max(status_duration(entity.statuses.get("burning")), 3)
         elif damage_type == "frost":
-            entity.statuses["slowed"] = max(status_duration(entity.statuses.get("slowed")), 2)
-        elif damage_type == "lightning" and self.tile_at(entity.x, entity.y) == WATER:
-            entity.statuses["stunned"] = max(status_duration(entity.statuses.get("stunned")), 1)
+            if self.tile_at(entity.x, entity.y) == WATER:
+                entity.statuses["frozen"] = max(status_duration(entity.statuses.get("frozen")), 2)
+                self.state.add_message(f"{'You are' if entity.id == self.state.player_id else entity.name + ' is'} frozen solid in the water!")
+            else:
+                entity.statuses["slowed"] = max(status_duration(entity.statuses.get("slowed")), 2)
+        elif damage_type == "lightning":
+            if self.tile_at(entity.x, entity.y) == WATER:
+                entity.statuses["stunned"] = max(status_duration(entity.statuses.get("stunned")), 2)
+                self.state.add_message(f"Lightning courses through the water!")
+        elif damage_type == "poison" and "poisoned" in entity.statuses:
+            entity.statuses["poisoned"] = min(99, status_duration(entity.statuses.get("poisoned", 0)) + 2)
         return actual
 
     def _modified_damage(self, entity: Entity, amount: int, damage_type: str) -> int:
@@ -643,7 +918,10 @@ class GameEngine:
             return 0
         before = entity.hp
         entity.hp = min(entity.max_hp, entity.hp + max(0, int(amount)))
-        return entity.hp - before
+        actual = entity.hp - before
+        if entity.id == self.state.player_id:
+            self.state.stats.hp_healed += actual
+        return actual
 
     def teleport_entity(self, entity: Entity, x: int, y: int) -> bool:
         if self.can_occupy(x, y):
@@ -666,6 +944,44 @@ class GameEngine:
                         return True
         return False
 
+    def _split_slime(self, parent: Entity) -> None:
+        split_hp = max(1, parent.max_hp // 2)
+        spawned = 0
+        for _ in range(2):
+            sx, sy = self.find_open_tile_near(parent.x, parent.y)
+            if not self.can_occupy(sx, sy):
+                continue
+            self.spawn_actor(
+                f"small {parent.name}", parent.char, sx, sy,
+                hp=split_hp, attack=max(1, parent.attack - 1), defense=0,
+                faction=parent.faction,
+                tags=parent.tags | {"split"},
+                ai=parent.ai or "simple",
+            )
+            spawned += 1
+        if spawned:
+            self.state.add_message(f"{parent.name} splits into {spawned} smaller slimes!")
+
+    def _drop_loot(self, entity: Entity) -> None:
+        tags = entity.tags
+        # 40% drop chance; conjured creatures and constructs don't drop loot
+        if "conjured" in tags or self.rng.random() > 0.4:
+            return
+        loot_by_tag = {
+            "undead": ("bone shard", "bone_shard", "?", "bone"),
+            "beast": ("beast claw", "claw", "?", "bone"),
+            "humanoid": ("stolen coin", "coin", "$", "metal"),
+            "slime": ("viscous residue", "residue", "~", "slime"),
+            "construct": ("metal scrap", "scrap", "/", "metal"),
+        }
+        drop_name, drop_type, drop_char, drop_mat = ("arcane residue", "arcane_residue", "*", "essence")
+        for tag, drop_data in loot_by_tag.items():
+            if tag in tags:
+                drop_name, drop_type, drop_char, drop_mat = drop_data
+                break
+        self.spawn_item(drop_name, drop_char, entity.x, entity.y, item_type=drop_type, material=drop_mat)
+        self.state.add_message(f"{entity.name} drops {drop_name}.")
+
     def pick_up_items_at_player(self) -> None:
         player = self.state.player
         for entity in list(self.entities_at(player.x, player.y)):
@@ -674,6 +990,7 @@ class GameEngine:
             item_type = entity.item_type or entity.name
             self.state.inventory[item_type] = self.state.inventory.get(item_type, 0) + entity.quantity
             self.state.add_message(f"You pick up {entity.name}.")
+            self.state.stats.items_collected += 1
             del self.state.entities[entity.id]
 
     def finish_player_turn(self) -> None:
@@ -685,72 +1002,201 @@ class GameEngine:
         self._tick_event_timers()
         self.update_fov()
         self._enemy_turns()
+        self._ally_turns()
         self._regenerate_player()
+        self._ambient_sounds()
+
+    def _ambient_sounds(self) -> None:
+        if self.rng.random() > 0.12:
+            return
+        player = self.state.player
+        unseen_enemies = [
+            e for e in self.living_enemies()
+            if not self.is_visible(e.x, e.y)
+        ]
+        if not unseen_enemies:
+            return
+        enemy = self.rng.choice(unseen_enemies)
+        sounds_by_tag = {
+            "undead": ["Something rattles in the dark.", "You hear hollow footsteps.", "A cold draft passes through the wall."],
+            "beast": ["Claws scrape stone somewhere nearby.", "You hear labored breathing.", "Something heavy shifts in the shadows."],
+            "slime": ["A wet sound gurgles in the distance.", "Something drips that isn't water.", "You hear a slow, wet pulse."],
+            "spider": ["Silk scrapes against stone.", "You hear many legs on the ceiling.", "A faint clicking echoes past."],
+            "construct": ["Metal grinds against stone.", "A low hum resonates from the walls.", "Gears turn somewhere unseen."],
+            "shadow": ["The shadows pool and shift.", "Something cold watches from the dark.", "Your torch dims for a moment."],
+        }
+        messages = ["Something moves in the dark.", "You sense you are not alone.", "The dungeon breathes."]
+        for tag, tag_messages in sounds_by_tag.items():
+            if tag in enemy.tags:
+                messages = tag_messages
+                break
+        self.state.add_message(self.rng.choice(messages))
 
     def _tick_environment(self) -> None:
         for entity in list(self.state.entities.values()):
             if entity.kind == "item" or entity.hp <= 0:
                 continue
             tile = self.tile_at(entity.x, entity.y)
+            is_player = entity.id == self.state.player_id
             if tile == FIRE:
                 self.damage_entity(entity, 1, "fire")
                 if entity.hp > 0:
                     entity.statuses["burning"] = max(status_duration(entity.statuses.get("burning")), 2)
-                    self.state.add_message(f"{entity.name} is scorched by wild fire.")
+                    self.state.add_message("You are scorched by wild fire." if is_player else f"{entity.name} is scorched by wild fire.")
             elif tile == POISON_CLOUD:
                 self.damage_entity(entity, 1, "poison")
                 if entity.hp > 0:
                     entity.statuses["poisoned"] = max(status_duration(entity.statuses.get("poisoned")), 2)
-                    self.state.add_message(f"{entity.name} coughs in poison vapors.")
+                    self.state.add_message("You cough in poison vapors." if is_player else f"{entity.name} coughs in poison vapors.")
+            elif tile == WATER and "burning" in entity.statuses:
+                entity.statuses.pop("burning")
+                if is_player:
+                    self.state.add_message("The water extinguishes your flames.")
+                else:
+                    self.state.add_message(f"{entity.name} is doused by the water.")
+            elif tile == VINES and "rooted" not in entity.statuses and "webbed" not in entity.statuses:
+                entity.statuses["rooted"] = 2
+                if is_player:
+                    self.state.add_message("Vines coil around your feet!")
+                else:
+                    self.state.add_message(f"{entity.name} is snared by vines.")
 
+            _is_player = entity.id == self.state.player_id
             if "burning" in entity.statuses:
                 turns = status_duration(entity.statuses["burning"])
                 self.damage_entity(entity, 1, "fire")
                 if entity.hp > 0:
-                    self.state.add_message(f"{entity.name} burns.")
+                    burn_name = entity.status_display.get("burning", "burning")
+                    self.state.add_message("You burn." if _is_player else f"{entity.name} burns ({burn_name}).")
                 turns -= 1
                 if turns <= 0:
                     entity.statuses.pop("burning", None)
+                    entity.status_display.pop("burning", None)
+                    entity.status_expiry_text.pop("burning", None)
                 else:
                     entity.statuses["burning"] = turns
             if "poisoned" in entity.statuses:
                 turns = status_duration(entity.statuses["poisoned"])
                 self.damage_entity(entity, 1, "poison")
                 if entity.hp > 0:
-                    self.state.add_message(f"{entity.name} weakens from poison.")
+                    poison_name = entity.status_display.get("poisoned", "poison")
+                    self.state.add_message("You weaken from poison." if _is_player else f"{entity.name} weakens ({poison_name}).")
                 turns -= 1
                 if turns <= 0:
                     entity.statuses.pop("poisoned", None)
+                    entity.status_display.pop("poisoned", None)
+                    entity.status_expiry_text.pop("poisoned", None)
                 else:
                     entity.statuses["poisoned"] = turns
             self._tick_simple_statuses(entity)
+        self._tick_fire_spread()
+        self._tick_poison_spread()
+
+    def _tick_fire_spread(self) -> None:
+        fire_tiles = [
+            (x, y)
+            for y, row in enumerate(self.state.tiles)
+            for x, tile in enumerate(row)
+            if tile == FIRE
+        ]
+        for fx, fy in fire_tiles:
+            if self.rng.random() > 0.25:
+                continue
+            dx, dy = self.rng.choice([(0, -1), (0, 1), (-1, 0), (1, 0)])
+            nx, ny = fx + dx, fy + dy
+            if not self.in_bounds(nx, ny):
+                continue
+            neighbor = self.tile_at(nx, ny)
+            if neighbor == WATER:
+                self.set_tile(nx, ny, MIST, duration=3)
+                self.set_tile(fx, fy, MIST, duration=2)
+            elif "flammable" in TILE_TAGS.get(neighbor, set()):
+                self.set_tile(nx, ny, FIRE, duration=4)
+
+    def _tick_poison_spread(self) -> None:
+        poison_tiles = [
+            (x, y)
+            for y, row in enumerate(self.state.tiles)
+            for x, tile in enumerate(row)
+            if tile == POISON_CLOUD
+        ]
+        for px, py in poison_tiles:
+            if self.rng.random() > 0.15:
+                continue
+            dx, dy = self.rng.choice([(0, -1), (0, 1), (-1, 0), (1, 0)])
+            nx, ny = px + dx, py + dy
+            if not self.in_bounds(nx, ny) or self.tile_at(nx, ny) not in {FLOOR, MIST}:
+                continue
+            self.set_tile(nx, ny, POISON_CLOUD, duration=3)
 
     def _apply_tile_entry(self, entity: Entity) -> None:
         tile = self.tile_at(entity.x, entity.y)
+        is_player = entity.id == self.state.player_id
         if tile == FIRE:
             self.damage_entity(entity, 1, "fire")
             entity.statuses["burning"] = max(status_duration(entity.statuses.get("burning")), 2)
-            self.state.add_message(f"{entity.name} steps into wild fire.")
+            self.state.add_message("You step into wild fire." if is_player else f"{entity.name} steps into wild fire.")
         elif tile == POISON_CLOUD:
             self.damage_entity(entity, 1, "poison")
             entity.statuses["poisoned"] = max(status_duration(entity.statuses.get("poisoned")), 2)
-            self.state.add_message(f"{entity.name} inhales a poison cloud.")
+            self.state.add_message("You inhale a poison cloud." if is_player else f"{entity.name} inhales a poison cloud.")
         elif tile == SLICK_ICE:
             entity.statuses["slowed"] = max(status_duration(entity.statuses.get("slowed")), 1)
-            self.state.add_message(f"{entity.name} skids on slick ice.")
+            self.state.add_message("You skid on slick ice." if is_player else f"{entity.name} skids on slick ice.")
+        elif tile == WATER and "burning" in entity.statuses:
+            entity.statuses.pop("burning")
+            if entity.id == self.state.player_id:
+                self.state.add_message("The water extinguishes your flames.")
+            else:
+                self.state.add_message(f"{entity.name} is doused.")
+        if tile == VINES and "rooted" not in entity.statuses and "webbed" not in entity.statuses:
+            entity.statuses["rooted"] = 2
+            if entity.id == self.state.player_id:
+                self.state.add_message("Vines coil around your feet!")
+            else:
+                self.state.add_message(f"{entity.name} is snared by vines.")
 
     def _tick_simple_statuses(self, entity: Entity) -> None:
+        _sp = entity.id == self.state.player_id
         if "bleeding" in entity.statuses:
             turns = status_duration(entity.statuses["bleeding"])
             self.damage_entity(entity, 1, "blood")
             if entity.hp > 0:
-                self.state.add_message(f"{entity.name} bleeds.")
+                bleed_name = entity.status_display.get("bleeding", "bleeding")
+                self.state.add_message("You bleed." if _sp else f"{entity.name} bleeds ({bleed_name}).")
             turns -= 1
             if turns <= 0:
                 entity.statuses.pop("bleeding", None)
+                entity.status_display.pop("bleeding", None)
+                entity.status_expiry_text.pop("bleeding", None)
             else:
                 entity.statuses["bleeding"] = turns
 
+        if "regenerating" in entity.statuses:
+            turns = status_duration(entity.statuses["regenerating"])
+            if entity.hp < entity.max_hp:
+                entity.hp += 1
+                if _sp:
+                    regen_name = entity.status_display.get("regenerating", "regenerating")
+                    self.state.add_message(f"You regenerate ({regen_name})." if regen_name != "regenerating" else "You regenerate.")
+            turns -= 1
+            if turns <= 0:
+                entity.statuses.pop("regenerating", None)
+                entity.status_display.pop("regenerating", None)
+                entity.status_expiry_text.pop("regenerating", None)
+            else:
+                entity.statuses["regenerating"] = turns
+
+        _DEFAULT_EXPIRY = {
+            "frozen": "You thaw.",
+            "stunned": "Your head clears.",
+            "rooted": "The grip releases.",
+            "webbed": "The webbing falls away.",
+            "silenced": "Your voice returns.",
+            "invisible": "You become visible again.",
+            "berserk": "The rage subsides.",
+            "burning": "The flames die out.",
+        }
         for status in [
             "frozen",
             "stunned",
@@ -760,6 +1206,7 @@ class GameEngine:
             "hasted",
             "confused",
             "frightened",
+            "invisible",
             "marked",
             "revealed",
             "warded",
@@ -768,6 +1215,9 @@ class GameEngine:
             "jinxed",
             "crawling_skin",
             "silenced",
+            "berserk",
+            "empowered",
+            "cursed",
         ]:
             if status not in entity.statuses:
                 continue
@@ -777,6 +1227,12 @@ class GameEngine:
             turns = status_duration(value) - 1
             if turns <= 0:
                 entity.statuses.pop(status, None)
+                custom_expiry = entity.status_expiry_text.pop(status, None)
+                entity.status_display.pop(status, None)
+                if entity.id == self.state.player_id:
+                    msg = custom_expiry or _DEFAULT_EXPIRY.get(status)
+                    if msg:
+                        self.state.add_message(msg)
             else:
                 entity.statuses[status] = turns
 
@@ -809,24 +1265,49 @@ class GameEngine:
     def _trigger_event(self, event: dict[str, Any]) -> None:
         event_type = str(event.get("event_type") or event.get("type") or "message").lower()
         if event_type == "message":
-            text = str(event.get("text") or "Something promised arrives late.")
+            text = str(event.get("text") or event.get("message") or "Something promised arrives late.")
             self.state.add_message(text)
-        elif event_type == "summon":
+        elif event_type in {"summon", "spawn"}:
             player = self.state.player
             x, y = self.find_open_tile_near(player.x, player.y)
-            self.spawn_actor(
-                str(event.get("name") or "debt collector"),
-                str(event.get("char") or "d")[:1],
-                x,
-                y,
-                clamp_int(event.get("hp"), 1, 30),
-                clamp_int(event.get("attack"), 0, 10),
-                0,
-                str(event.get("faction") or "enemy"),
-                "simple",
-                tags=set(coerce_list(event.get("tags"))),
-            )
-            self.state.add_message(f"{event.get('name') or 'Something'} arrives to collect.")
+            faction = str(event.get("faction") or "enemy")
+            name = str(event.get("name") or "debt collector")
+            count = clamp_int(event.get("count") or event.get("quantity") or 1, 1, 6)
+            for _ in range(count):
+                if not self.can_occupy(x, y):
+                    x, y = self.find_open_tile_near(player.x, player.y)
+                if not self.can_occupy(x, y):
+                    break
+                self.spawn_actor(
+                    name,
+                    str(event.get("char") or ("a" if faction == "ally" else "d"))[:1],
+                    x, y,
+                    clamp_int(event.get("hp") or 6, 1, 30),
+                    clamp_int(event.get("attack") or 2, 0, 10),
+                    clamp_int(event.get("defense") or 0, 0, 8),
+                    faction,
+                    None if faction in {"ally", "player"} else "simple",
+                    tags=set(coerce_list(event.get("tags"))),
+                )
+            self.state.add_message(f"{name} arrives.")
+        elif event_type == "conjure":
+            template_id = str(event.get("template") or "small_beast")
+            self._apply_effect({"type": "conjure_creature", **event, "event_type": None})
+        elif event_type in {"damage", "area_damage"}:
+            player = self.state.player
+            self._apply_effect({"type": event_type, "target": "player", **event, "event_type": None})
+        elif event_type in {"heal", "restore_mana"}:
+            self._apply_effect({"type": event_type, "target": "player", **event, "event_type": None})
+        elif event_type in {"status", "add_status"}:
+            self._apply_effect({"type": "add_status", "target": "player", **event, "event_type": None})
+        elif event_type == "flood":
+            tile = str(event.get("tile") or "water")
+            radius = clamp_int(event.get("radius") or 3, 0, 99)
+            player = self.state.player
+            self._apply_effect({"type": "create_tiles", "target": "player", "tile": tile, "radius": radius, "event_type": None})
+            self.state.add_message(f"{TILE_NAMES.get(tile, tile)} floods the area.")
+        elif event_type == "curse":
+            self._apply_cost({"type": "curse", **event})
 
     def _enemy_turns(self) -> None:
         player = self.state.player
@@ -834,28 +1315,74 @@ class GameEngine:
             if any(status in enemy.statuses for status in ["stunned", "frozen"]):
                 self.state.add_message(f"{enemy.name} cannot act.")
                 continue
-            if self.distance(enemy, player) <= 1.5:
-                self.attack(enemy, player)
-                if self.state.game_over:
-                    return
+            if "slowed" in enemy.statuses and self.state.turn % 2 == 1:
                 continue
-            if any(status in enemy.statuses for status in ["rooted", "webbed"]):
+            hasted = "hasted" in enemy.statuses
+            action_count = 2 if hasted else 1
+            for _ in range(action_count):
+                if enemy.hp <= 0 or self.state.game_over:
+                    break
+                self._enemy_single_action(enemy, player)
+        return
+
+    def _enemy_single_action(self, enemy: Entity, player: Entity) -> None:
+        if "frightened" in enemy.statuses and self.distance(enemy, player) <= 8:
+            step = self._flee_step(enemy, player.x, player.y)
+            if step is not None:
+                enemy.x, enemy.y = step
+                self._apply_tile_entry(enemy)
+            return
+        if self.distance(enemy, player) <= 1.5:
+            self.attack(enemy, player)
+            return
+        if any(status in enemy.statuses for status in ["rooted", "webbed"]):
+            return
+        if "confused" in enemy.statuses:
+            dx, dy = self.rng.choice([(1, 0), (-1, 0), (0, 1), (0, -1)])
+            if self.can_occupy(enemy.x + dx, enemy.y + dy):
+                enemy.x += dx
+                enemy.y += dy
+                self._apply_tile_entry(enemy)
+            return
+        if self.enemy_can_sense_player(enemy):
+            step = self.next_path_step(enemy, player.x, player.y)
+            if step is not None:
+                enemy.x, enemy.y = step
+                self._apply_tile_entry(enemy)
+        else:
+            dx, dy = self.rng.choice([(1, 0), (-1, 0), (0, 1), (0, -1), (0, 0)])
+            if (dx or dy) and self.can_occupy(enemy.x + dx, enemy.y + dy):
+                enemy.x += dx
+                enemy.y += dy
+                self._apply_tile_entry(enemy)
+
+    def _ally_turns(self) -> None:
+        allies = [
+            e for e in self.state.entities.values()
+            if e.kind == "actor" and e.faction == "ally" and e.hp > 0
+        ]
+        for ally in allies:
+            if any(s in ally.statuses for s in ["stunned", "frozen"]):
                 continue
-            if self.enemy_can_sense_player(enemy):
-                step = self.next_path_step(enemy, player.x, player.y)
+            if any(s in ally.statuses for s in ["slowed"]) and self.state.turn % 2 == 1:
+                continue
+            enemies = self.living_enemies()
+            if not enemies:
+                continue
+            target = min(enemies, key=lambda e: self.distance(ally, e))
+            if self.distance(ally, target) <= 1.5:
+                self.attack(ally, target)
+            elif not any(s in ally.statuses for s in ["rooted", "webbed"]):
+                step = self.next_path_step(ally, target.x, target.y)
                 if step is not None:
-                    enemy.x, enemy.y = step
-                    self._apply_tile_entry(enemy)
-            else:
-                dx, dy = self.rng.choice([(1, 0), (-1, 0), (0, 1), (0, -1), (0, 0)])
-                if (dx or dy) and self.can_occupy(enemy.x + dx, enemy.y + dy):
-                    enemy.x += dx
-                    enemy.y += dy
-                    self._apply_tile_entry(enemy)
+                    ally.x, ally.y = step
+                    self._apply_tile_entry(ally)
 
     def enemy_can_sense_player(self, enemy: Entity) -> bool:
         player = self.state.player
         distance = self.distance(enemy, player)
+        if "invisible" in player.statuses:
+            return distance <= 1.5
         if distance <= 5:
             return True
         if distance <= 11 and self.has_line_of_sight(enemy.x, enemy.y, player.x, player.y):
@@ -887,6 +1414,20 @@ class GameEngine:
             return None
         return current
 
+    def _flee_step(self, entity: Entity, from_x: int, from_y: int) -> tuple[int, int] | None:
+        neighbors = [(entity.x + 1, entity.y), (entity.x - 1, entity.y), (entity.x, entity.y + 1), (entity.x, entity.y - 1)]
+        self.rng.shuffle(neighbors)
+        best: tuple[int, int] | None = None
+        best_dist = self.distance(entity, self.state.player)
+        for tx, ty in neighbors:
+            if not self.can_occupy(tx, ty):
+                continue
+            d = math.hypot(tx - from_x, ty - from_y)
+            if d > best_dist:
+                best_dist = d
+                best = (tx, ty)
+        return best
+
     def path_neighbors(
         self,
         entity: Entity,
@@ -900,10 +1441,12 @@ class GameEngine:
         for tx, ty in neighbors:
             if not self.in_bounds(tx, ty) or self.tile_at(tx, ty) in BLOCKING_TILES:
                 continue
-            blocker = self.blocking_entity_at(tx, ty)
-            if blocker is not None and blocker.id not in {entity.id, self.state.player_id}:
+            # Always allow the goal tile so entities can reach their target.
+            if (tx, ty) == goal:
+                valid.append((tx, ty))
                 continue
-            if blocker is not None and blocker.id == self.state.player_id and (tx, ty) != goal:
+            blocker = self.blocking_entity_at(tx, ty)
+            if blocker is not None and blocker.id != entity.id:
                 continue
             valid.append((tx, ty))
         return valid
@@ -914,11 +1457,38 @@ class GameEngine:
             player.mana += 1
 
     def resolve_target(self, target_id: str | None) -> Entity | None:
-        if not target_id or target_id in {"player", "self", "@", "you"}:
+        if not target_id or target_id in {"player", "self", "@", "you", "me"}:
             return self.state.player
-        if target_id in {"nearest_enemy", "nearest enemy", "enemy"}:
+        if target_id in {
+            "nearest_enemy", "nearest enemy", "enemy", "nearest_foe", "nearest_entity",
+            "nearest_target", "closest_enemy", "target", "foe", "nearest_actor",
+        }:
             return self.nearest_enemy()
         return self.state.entities.get(target_id)
+
+    def resolve_target_group(self, target_id: str | None) -> list[Entity]:
+        target = normalize_id(str(target_id or ""))
+        if target in {"all", "everyone", "all_entities", "all_nearby", "everything"}:
+            return [entity for entity in self.state.entities.values() if entity.kind == "actor" and entity.hp > 0]
+        if target in {"all_enemies", "enemies", "all_foes", "all_hostiles", "nearby_enemies", "every_enemy"}:
+            return self.living_enemies()
+        if target in {"allies", "all_allies", "friends", "friendlies"}:
+            return [
+                entity
+                for entity in self.state.entities.values()
+                if entity.kind == "actor" and entity.hp > 0 and entity.faction in {"ally", "player"}
+            ]
+        singular = singular_target_tag(target)
+        if not singular:
+            return []
+        return [
+            entity
+            for entity in self.state.entities.values()
+            if entity.kind == "actor"
+            and entity.hp > 0
+            and entity.id != self.state.player_id
+            and (singular in entity.tags or singular in normalize_id(entity.name).split("_"))
+        ]
 
     def context_for_llm(self, spell: str) -> dict[str, Any]:
         player = self.state.player
@@ -929,6 +1499,15 @@ class GameEngine:
             and self.is_visible(entity.x, entity.y)
             and abs(entity.x - player.x) <= self.state.fov_radius
             and abs(entity.y - player.y) <= self.state.fov_radius
+        ]
+        floor_items = [
+            {"id": e.id, "name": e.name, "item_type": e.item_type, "material": e.material,
+             "quantity": e.quantity, "x": e.x, "y": e.y, "tags": sorted(e.tags)}
+            for e in self.state.entities.values()
+            if e.kind == "item"
+            and self.is_visible(e.x, e.y)
+            and abs(e.x - player.x) <= self.state.fov_radius
+            and abs(e.y - player.y) <= self.state.fov_radius
         ]
         return {
             "spell": spell,
@@ -943,12 +1522,14 @@ class GameEngine:
             "visible_tile_count": len(self.state.visible),
             "explored_tile_count": len(self.state.explored),
             "nearby_entities": nearby_entities,
+            "floor_items": floor_items,
             "nearby_map": self.nearby_map_strings(radius=9),
             "nearby_tile_details": self.nearby_tile_details(radius=5),
             "tile_legend": {tile: {"name": name, "tags": sorted(TILE_TAGS.get(tile, set()))} for tile, name in TILE_NAMES.items()},
             "supported_effects": [
                 "damage",
                 "area_damage",
+                "area_status",
                 "heal",
                 "restore_mana",
                 "teleport",
@@ -985,8 +1566,9 @@ class GameEngine:
                 "major_damage": "9-16 with meaningful cost",
                 "outrageous_spell": "reject outright or apply a severe permanent curse",
                 "technical_failure": "invalid JSON means the engine will not consume a turn",
-                "area_limits": "radius 0-4, max 30 changed tiles per effect",
+                "area_limits": "no hard radius cap — crazy AOE is fine with appropriate costs",
                 "cost_timing": "effects happen first, then costs are revealed and applied",
+                "environment": "fire+water=mist, water extinguishes burning, vines snare on entry, ice slides movement",
             },
         }
 
@@ -1050,10 +1632,11 @@ class GameEngine:
             return WildMagicOutcome(False, False, ["The dead do not cast."])
 
         accepted = bool(resolution.get("accepted", True))
-        outcome_text = str(resolution.get("outcome_text") or "").strip()
+        outcome_text = str(resolution.get("outcome_text") or resolution.get("outcome") or resolution.get("message") or "").strip()
         if not accepted:
             reason = str(resolution.get("rejected_reason") or "The spell is too vast to fit through you.")
             self.state.add_message(reason)
+            self.state.stats.spells_failed += 1
             self.finish_player_turn()
             return WildMagicOutcome(True, False, [reason])
 
@@ -1077,6 +1660,7 @@ class GameEngine:
             self.state.add_message(message)
             messages.append(message)
 
+        self.state.stats.spells_cast += 1
         self.finish_player_turn()
         return WildMagicOutcome(True, False, messages)
 
@@ -1104,7 +1688,7 @@ class GameEngine:
             player.mana = min(player.mana, player.max_mana)
             return f"Cost: {amount} maximum mana."
         if cost_type == "item":
-            item = str(cost.get("item") or cost.get("id") or "").strip()
+            item = str(cost.get("item") or cost.get("item_name") or cost.get("id") or "").strip()
             amount = clamp_int(cost.get("amount"), 1, 99)
             if not item:
                 return None
@@ -1125,12 +1709,24 @@ class GameEngine:
                 self.state.curses[curse_id].stacks += 1
             else:
                 self.state.curses[curse_id] = Curse(curse_id, name, description)
+            self.state.stats.curses_gained += 1
             return f"Curse gained: {name}."
         if cost_type == "status":
-            status = normalize_id(str(cost.get("status") or cost.get("id") or "strained"))
-            duration = cost.get("duration", 5)
+            raw_status = str(cost.get("status") or cost.get("id") or "strained")
+            status = normalize_id(raw_status)
+            # Alias flavor names to canonical
+            from .wild_magic import _STATUS_FLAVOR_ALIASES
+            display_name = str(cost.get("display_name") or "").strip()
             if status not in MECHANICAL_STATUSES:
-                name = status.replace("_", " ").title()
+                canonical = _STATUS_FLAVOR_ALIASES.get(status)
+                if canonical:
+                    if not display_name:
+                        display_name = status.replace("_", " ")
+                    status = canonical
+            duration = cost.get("duration", 5)
+            expiry_text = str(cost.get("expiry_text") or "").strip()
+            if status not in MECHANICAL_STATUSES:
+                name = display_name or status.replace("_", " ").title()
                 curse_id = f"wild_condition_{status}"
                 if curse_id in self.state.curses:
                     self.state.curses[curse_id].stacks += 1
@@ -1141,26 +1737,33 @@ class GameEngine:
                         f"Wild magic leaves you with an uncanny condition: {name}.",
                     )
                 return f"Cost became a curse: {name}."
-            player.statuses[status] = "permanent" if duration == "permanent" else clamp_int(duration, 1, 999)
-            return f"Cost: you are {status.replace('_', ' ')}."
+            dur_val3: int | str = "permanent" if duration == "permanent" else clamp_int(duration, 1, 999)
+            player.statuses[status] = dur_val3
+            shown = display_name or status.replace("_", " ")
+            if display_name:
+                player.status_display[status] = display_name
+            if expiry_text:
+                player.status_expiry_text[status] = expiry_text
+            return f"Cost: you are {shown}."
         return None
 
     def _apply_effect(self, effect: dict[str, Any]) -> list[str]:
         if not isinstance(effect, dict):
             return []
+        effect = _flatten_effect(effect)
         effect_type = str(effect.get("type", "")).lower()
         if effect_type == "damage":
             target = self.resolve_target(str(effect.get("target") or "nearest_enemy"))
             if not target:
                 return ["The spell claws at empty air."]
-            amount = clamp_int(effect.get("amount"), 0, 25)
+            amount = clamp_int(effect.get("amount"), 0, 999)
             damage_type = str(effect.get("damage_type") or "arcane")
             actual = self.damage_entity(target, amount, damage_type)
             return [f"{target.name} takes {actual} {damage_type} damage."]
         if effect_type == "area_damage":
             x, y = self.effect_position(effect)
-            radius = clamp_int(effect.get("radius"), 0, 4)
-            amount = clamp_int(effect.get("amount"), 0, 20)
+            radius = clamp_int(effect.get("radius"), 0, 99) if effect.get("radius") is not None else 3
+            amount = clamp_int(effect.get("amount"), 0, 99)
             damage_type = str(effect.get("damage_type") or "arcane")
             include_player = bool(effect.get("include_player", False))
             affects = normalize_id(str(effect.get("affects") or "non_player"))
@@ -1177,21 +1780,55 @@ class GameEngine:
             if not hit:
                 return ["The blast spends itself on empty stone."]
             return [f"Area spell hits {len(hit)} target(s): {', '.join(hit)}."]
+        if effect_type == "area_status":
+            x, y = self.effect_position(effect)
+            radius = clamp_int(effect.get("radius"), 0, 99) if effect.get("radius") is not None else 15
+            status = normalize_id(str(effect.get("status") or "strange"))
+            display_name = str(effect.get("display_name") or effect.get("name") or "").strip() or status.replace("_", " ")
+            expiry_text = str(effect.get("expiry_text") or effect.get("wears_off") or "").strip()
+            duration = effect.get("duration", 3)
+            affects = normalize_id(str(effect.get("affects") or "enemies"))
+            include_player = bool(effect.get("include_player", False))
+            if status not in MECHANICAL_STATUSES:
+                return [f"Unknown status: {status}."]
+            affected: list[str] = []
+            dur_val2: int | str = "permanent" if duration == "permanent" else clamp_int(duration, 1, 99)
+            for entity in self.entities_in_radius(x, y, radius):
+                if entity.kind == "item" or entity.hp <= 0:
+                    continue
+                if entity.id == self.state.player_id and not include_player:
+                    continue
+                if not area_damage_affects(entity, affects, self.state.player_id):
+                    continue
+                entity.statuses[status] = dur_val2
+                if display_name != status.replace("_", " "):
+                    entity.status_display[status] = display_name
+                if expiry_text:
+                    entity.status_expiry_text[status] = expiry_text
+                affected.append(entity.name)
+            if not affected:
+                return ["The status finds no one to cling to."]
+            return [f"{display_name.title()} spreads to: {', '.join(affected)}."]
         if effect_type == "heal":
             target = self.resolve_target(str(effect.get("target") or "player"))
             if not target:
                 return []
-            amount = clamp_int(effect.get("amount"), 0, 20)
+            amount = clamp_int(effect.get("amount"), 0, 999)
             actual = self.heal_entity(target, amount)
-            return [f"{target.name} heals {actual}."]
+            if target.id == self.state.player_id:
+                return [f"You heal {actual} HP."]
+            return [f"{target.name} heals {actual} HP."]
         if effect_type == "restore_mana":
             target = self.resolve_target(str(effect.get("target") or "player"))
             if not target:
                 return []
-            amount = clamp_int(effect.get("amount"), 0, 20)
+            amount = clamp_int(effect.get("amount"), 0, 999)
             before = target.mana
             target.mana = min(target.max_mana, target.mana + amount)
-            return [f"{target.name} recovers {target.mana - before} mana."]
+            gained = target.mana - before
+            if target.id == self.state.player_id:
+                return [f"You recover {gained} mana."]
+            return [f"{target.name} recovers {gained} mana."]
         if effect_type == "teleport":
             target = self.resolve_target(str(effect.get("target") or "player"))
             if not target:
@@ -1202,22 +1839,36 @@ class GameEngine:
                 return [f"{target.name} snaps to another tile."]
             return ["The teleport folds into a wall and fails."]
         if effect_type in {"push", "pull"}:
-            target = self.resolve_target(str(effect.get("target") or "nearest_enemy"))
-            if not target:
+            target_str = str(effect.get("target") or "nearest_enemy")
+            distance = clamp_int(effect.get("distance"), 1, 20)
+            targets = self.resolve_target_group(target_str)
+            if not targets:
+                target = self.resolve_target(target_str)
+                targets = [target] if target else []
+            if not targets:
                 return []
-            distance = clamp_int(effect.get("distance"), 1, 6)
-            if "dx" in effect or "dy" in effect:
-                dx = sign(clamp_int(effect.get("dx"), -1, 1))
-                dy = sign(clamp_int(effect.get("dy"), -1, 1))
-            else:
-                origin = self.resolve_target(str(effect.get("origin") or "player")) or self.state.player
-                dx = sign(target.x - origin.x)
-                dy = sign(target.y - origin.y)
-                if effect_type == "pull":
-                    dx *= -1
-                    dy *= -1
-            moved = self.push_entity(target, dx, dy, distance)
-            return [f"{target.name} is moved {moved} tile(s)."]
+            origin = self.resolve_target(str(effect.get("origin") or "player")) or self.state.player
+            moved_total = 0
+            moved_names: list[str] = []
+            for target in targets[:12]:
+                if "dx" in effect or "dy" in effect:
+                    dx = sign(clamp_int(effect.get("dx"), -1, 1))
+                    dy = sign(clamp_int(effect.get("dy"), -1, 1))
+                else:
+                    dx = sign(target.x - origin.x)
+                    dy = sign(target.y - origin.y)
+                    if effect_type == "pull":
+                        dx *= -1
+                        dy *= -1
+                moved = self.push_entity(target, dx, dy, distance)
+                if moved:
+                    moved_total += moved
+                    moved_names.append(target.name)
+            if len(targets) == 1:
+                return [f"{targets[0].name} is moved {moved_total} tile(s)."]
+            if moved_names:
+                return [f"{len(moved_names)} target(s) are moved {moved_total} tile(s) total."]
+            return ["The force finds no room to move anyone."]
         if effect_type in {"create_tile", "set_tile", "create_tiles"}:
             x, y = self.effect_position(effect)
             tile_name = str(effect.get("tile") or FLOOR).lower()
@@ -1227,32 +1878,62 @@ class GameEngine:
             changed = 0
             tile_specs = effect.get("tiles")
             if isinstance(tile_specs, list):
+                first_spec_tile: str | None = None
                 for spec in tile_specs[:30]:
                     if not isinstance(spec, dict):
                         continue
                     tx = clamp_int(spec.get("x"), 0, self.state.width - 1)
                     ty = clamp_int(spec.get("y"), 0, self.state.height - 1)
                     spec_tile = tile_from_name(str(spec.get("tile") or tile_name))
+                    if first_spec_tile is None:
+                        first_spec_tile = spec_tile
                     spec_duration = optional_duration(spec.get("duration", duration))
                     spec_tags = set(normalize_id(str(tag)) for tag in coerce_list(spec.get("tags", list(tags))) if str(tag).strip())
                     if self.set_tile(tx, ty, spec_tile, spec_duration, spec_tags):
                         changed += 1
+                if first_spec_tile is not None:
+                    tile = first_spec_tile
             else:
-                radius = clamp_int(effect.get("radius"), 0, 4)
-                for tx, ty in self.points_in_radius(x, y, radius)[:30]:
+                radius = clamp_int(effect.get("radius"), 0, 99)
+                hollow = bool(effect.get("hollow") or effect.get("ring") or effect.get("perimeter"))
+                inner_radius = max(0, radius - 1) if hollow else -1
+                for tx, ty in self.points_in_radius(x, y, radius)[:200]:
+                    if hollow and math.hypot(tx - x, ty - y) <= inner_radius:
+                        continue
                     if self.set_tile(tx, ty, tile, duration, tags):
                         changed += 1
             return [f"Terrain changes to {TILE_NAMES.get(tile, 'strange')} on {changed} tile(s)."]
         if effect_type == "add_status":
-            target = self.resolve_target(str(effect.get("target") or "nearest_enemy"))
-            if not target:
-                return []
+            target_str = normalize_id(str(effect.get("target") or "nearest_enemy"))
             status = normalize_id(str(effect.get("status") or "strange"))
+            display_name = str(effect.get("display_name") or effect.get("name") or "").strip() or status.replace("_", " ")
+            expiry_text = str(effect.get("expiry_text") or effect.get("wears_off") or "").strip()
             duration = effect.get("duration", 3)
-            target.statuses[status] = "permanent" if duration == "permanent" else clamp_int(duration, 1, 99)
+            dur_val: int | str = "permanent" if duration == "permanent" else clamp_int(duration, 1, 99)
+            group_targets = self.resolve_target_group(target_str)
+            if group_targets:
+                if status not in MECHANICAL_STATUSES:
+                    return [f"Unknown status: {status}."]
+                for ent in group_targets:
+                    ent.statuses[status] = dur_val
+                    if display_name != status.replace("_", " "):
+                        ent.status_display[status] = display_name
+                    if expiry_text:
+                        ent.status_expiry_text[status] = expiry_text
+                return [f"{display_name.title()} spreads to {len(group_targets)} target(s)."]
+            target = self.resolve_target(target_str)
+            if not target or target.kind == "item":
+                return []
+            if status not in MECHANICAL_STATUSES:
+                return [f"Unknown status: {status}."]
+            target.statuses[status] = dur_val
+            if display_name != status.replace("_", " "):
+                target.status_display[status] = display_name
+            if expiry_text:
+                target.status_expiry_text[status] = expiry_text
             if target.id == self.state.player_id:
-                return [f"You are now {status.replace('_', ' ')}."]
-            return [f"{target.name} is now {status.replace('_', ' ')}."]
+                return [f"You are now {display_name}."]
+            return [f"{target.name} is now {display_name}."]
         if effect_type == "remove_status":
             target = self.resolve_target(str(effect.get("target") or "player"))
             if not target:
@@ -1268,30 +1949,32 @@ class GameEngine:
                 return ["All statuses leave you."]
             return [f"All statuses leave {target.name}."]
         if effect_type == "summon":
-            name = str(effect.get("name") or "borrowed thing")
-            faction = str(effect.get("faction") or "enemy")
-            x, y = self.effect_position(effect)
-            if not self.can_occupy(x, y):
-                player = self.state.player
-                x, y = self.find_open_tile_near(player.x, player.y)
-            hp = clamp_int(effect.get("hp"), 1, 20)
-            attack = clamp_int(effect.get("attack"), 0, 8)
+            name = str(effect.get("name") or effect.get("creature") or effect.get("creature_type") or "borrowed thing")
+            faction = str(effect.get("faction") or "ally")
+            count = clamp_int(effect.get("count") or effect.get("quantity") or 1, 1, 6)
             char = str(effect.get("char") or ("a" if faction == "ally" else "e"))[:1]
-            self.spawn_actor(
-                name,
-                char,
-                x,
-                y,
-                hp,
-                attack,
-                clamp_int(effect.get("defense"), 0, 8),
-                faction,
-                "simple" if faction == "enemy" else None,
-                tags=set(normalize_id(str(tag)) for tag in coerce_list(effect.get("tags")) if str(tag).strip()),
-                resistances=normalize_numeric_map(effect.get("resistances"), 0, 95),
-                weaknesses=normalize_numeric_map(effect.get("weaknesses"), 0, 200),
-            )
-            return [f"{name} arrives."]
+            hp = clamp_int(effect.get("hp") or 5, 1, 20)
+            attack = clamp_int(effect.get("attack") or 2, 0, 8)
+            defense = clamp_int(effect.get("defense") or 0, 0, 8)
+            tags = set(normalize_id(str(tag)) for tag in coerce_list(effect.get("tags")) if str(tag).strip())
+            spawned = 0
+            for attempt in range(count):
+                x, y = self.effect_position(effect) if attempt == 0 else (self.state.player.x, self.state.player.y)
+                if not self.can_occupy(x, y):
+                    x, y = self.find_open_tile_near(self.state.player.x, self.state.player.y)
+                if not self.can_occupy(x, y):
+                    continue
+                self.spawn_actor(
+                    name, char, x, y, hp, attack, defense, faction,
+                    "simple" if faction == "enemy" else None,
+                    tags=tags,
+                    resistances=normalize_numeric_map(effect.get("resistances"), 0, 95),
+                    weaknesses=normalize_numeric_map(effect.get("weaknesses"), 0, 200),
+                )
+                spawned += 1
+            if spawned == 0:
+                return [f"{name} tries to arrive, but finds no room."]
+            return [f"{spawned} {name}{'' if spawned == 1 else 's'} arrive."]
         if effect_type == "spawn_item":
             name = str(effect.get("name") or effect.get("item") or "oddment")
             item_type = str(effect.get("item_type") or effect.get("item") or name)
@@ -1354,9 +2037,12 @@ class GameEngine:
             return [f"{target.name} is transformed."]
         if effect_type == "change_faction":
             target = self.resolve_target(str(effect.get("target") or "nearest_enemy"))
-            if not target:
+            if not target or target.kind == "item":
                 return []
-            target.faction = str(effect.get("faction") or "neutral")[:24]
+            new_faction = str(effect.get("faction") or "neutral")[:24]
+            if new_faction == "player" and target.id != self.state.player_id:
+                new_faction = "ally"
+            target.faction = new_faction
             target.ai = None if target.faction in {"ally", "player"} else target.ai
             return [f"{target.name} now belongs to {target.faction}."]
         if effect_type in {"add_tag", "remove_tag"}:
@@ -1377,7 +2063,7 @@ class GameEngine:
             target = self.resolve_target(str(effect.get("target") or "player"))
             if not target:
                 return []
-            damage_type = normalize_id(str(effect.get("damage_type") or "arcane"))
+            damage_type = normalize_id(str(effect.get("damage_type") or effect.get("resistance") or "arcane"))
             amount = clamp_int(effect.get("amount"), 1, 95 if effect_type == "add_resistance" else 200)
             table = target.resistances if effect_type == "add_resistance" else target.weaknesses
             table[damage_type] = clamp_int(table.get(damage_type, 0) + amount, 0, 95 if effect_type == "add_resistance" else 200)
@@ -1470,10 +2156,10 @@ class GameEngine:
         return [f"{name} appears."]
 
     def _conjure_creature(self, effect: dict[str, Any]) -> list[str]:
-        template = creature_template(str(effect.get("template") or "small_beast"))
-        count = clamp_int(effect.get("count", 1), 1, template.max_count)
+        template = creature_template(str(effect.get("template") or effect.get("creature_type") or "small_beast"))
+        count = clamp_int(effect.get("count") or effect.get("quantity") or 1, 1, template.max_count)
         name = sanitize_name(str(effect.get("name") or template.id.replace("_", " ")), template.id.replace("_", " "))
-        faction = sanitize_name(str(effect.get("faction") or template.faction), template.faction, 24)
+        faction = sanitize_name(str(effect.get("faction") or "ally"), "ally", 24)
         char = sanitize_char(str(effect.get("char") or template.char), template.char)
         tags = set(template.tags)
         tags.update(normalize_id(str(tag)) for tag in coerce_list(effect.get("tags")) if str(tag).strip())
@@ -1631,6 +2317,21 @@ def normalize_id(value: str) -> str:
     return value.lower().strip().replace(" ", "_").replace("-", "_")
 
 
+def singular_target_tag(value: str) -> str:
+    normalized = normalize_id(value)
+    if normalized.startswith("all_"):
+        normalized = normalized[4:]
+    if normalized.startswith("nearby_"):
+        normalized = normalized[7:]
+    if normalized.endswith("ies") and len(normalized) > 3:
+        return f"{normalized[:-3]}y"
+    if normalized.endswith(("ses", "xes", "ches", "shes")) and len(normalized) > 2:
+        return normalized[:-2]
+    if normalized.endswith("s") and len(normalized) > 1:
+        return normalized[:-1]
+    return normalized
+
+
 def normalize_numeric_map(value: Any, minimum: int, maximum: int) -> dict[str, int]:
     if not isinstance(value, dict):
         return {}
@@ -1656,6 +2357,16 @@ def coerce_list(value: Any) -> list[Any]:
     if value is None:
         return []
     return [value]
+
+
+def _flatten_effect(effect: dict[str, Any]) -> dict[str, Any]:
+    """Hoist fields from a nested 'details' sub-object so the engine finds them at top level."""
+    details = effect.get("details")
+    if not isinstance(details, dict):
+        return effect
+    merged = dict(details)
+    merged.update({k: v for k, v in effect.items() if k != "details"})
+    return merged
 
 
 def area_damage_affects(entity: Entity, affects: str, player_id: str) -> bool:

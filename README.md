@@ -22,6 +22,12 @@ Use `WILDMAGIC_PROVIDER=auto` if you want the old behavior: try Ollama first, th
 
 Wild spell log lines from the mock resolver are marked with `*>` instead of `>` so they are easy to distinguish from LLM-resolved spells.
 
+If Ollama fails or returns invalid JSON, the game can use fallback paths to keep playtests moving: `auto` can fall back to the mock resolver, and invalid JSON can use isolated local fallbacks for a few common spell shapes. Disable those fallback paths for strict LLM-contract testing:
+
+```powershell
+$env:WILDMAGIC_ENABLE_FALLBACKS='0'
+```
+
 ## Wild Magic Audit Logs
 
 Every live wild-magic resolver call writes a JSONL audit record to:
@@ -81,11 +87,20 @@ Use `ollama ps` after a spell cast. The `PROCESSOR` column should show `100% GPU
 - Press `Tab` to leave the spell input and move around.
 - Move with arrow keys, WASD, or vi keys.
 - Press `f` for a safe spark bolt.
+- Press `g` to pick up items under your feet.
 - Press `o` to open an adjacent closed door.
 - Press `>` to descend stairs and `<` to ascend stairs.
 - Press `.` to wait.
 - Press `Esc` to clear the spell input or quit.
+- Press `R` to restart after death or victory.
 - The map uses field of view: unseen tiles are hidden, explored tiles outside sight are dimmed.
+- The right panel shows HP/MP bars, active statuses (color-coded), visible enemies (health color changes), floor items, inventory, and curses.
+
+Commands also work in the CLI and `cast` prefix is optional for spells when playing headless:
+- `inspect` / `look` / `status` — show full game state
+- `use <item>` — use a consumable from inventory
+- `drop <item>` — drop an item
+- `pickup` / `get` — pick up items at your feet
 
 ## Smoke Test
 
@@ -113,6 +128,8 @@ python -m wildmagic.replay runs/test.json
 
 See [docs/EXECUTION_PLAN.md](docs/EXECUTION_PLAN.md) for the staged feature plan, including the headless play harness needed for agent-driven testing.
 
+See [docs/AGENT_PLAYTESTING.md](docs/AGENT_PLAYTESTING.md) for a practical guide to CLI playtesting, LLM audit logs, replays, and agent reporting.
+
 See [docs/WILD_MAGIC_SCHEMA.md](docs/WILD_MAGIC_SCHEMA.md) for the current wild-magic JSON operation surface.
 
 ## Wild Magic Contract
@@ -120,3 +137,7 @@ See [docs/WILD_MAGIC_SCHEMA.md](docs/WILD_MAGIC_SCHEMA.md) for the current wild-
 The LLM receives a compact game-state summary and must return one JSON object. Valid spell failures caused by overpowered requests consume a turn. Technical failures, such as invalid JSON, do not.
 
 The engine currently supports direct and area effects for damage, healing, mana restoration, forced movement, terrain changes, statuses, summoning, template-backed item/creature conjuration, item spawning, inventory changes, transformations, factions, tags, resistances, world flags, delayed events, and messages. It supports costs in mana, health, maximum stats, inventory items, statuses, and permanent curses.
+
+Status effects support custom `display_name` and `expiry_text` fields so the LLM can use any flavor name while preserving standardized mechanics. Over 100 flavor alias names (e.g., "petrified" for frozen, "enraged" for berserk) are recognized automatically.
+
+Environmental interactions: fire+water=mist, water extinguishes burning entities, vines snare on entry, slick ice slides movement, frost damage on water entities freezes them, fire damage on bleeding entities cauterizes. Enemies have special on-hit behaviors (spiders web, fungi poison) and slimes split on death. Undead entities have a 30% chance to reform at 1 HP before dying.

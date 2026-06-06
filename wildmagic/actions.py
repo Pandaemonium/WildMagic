@@ -21,6 +21,14 @@ DIRECTIONS = {
     "east": (1, 0),
     "e": (1, 0),
     "right": (1, 0),
+    "northeast": (1, -1),
+    "ne": (1, -1),
+    "northwest": (-1, -1),
+    "nw": (-1, -1),
+    "southeast": (1, 1),
+    "se": (1, 1),
+    "southwest": (-1, 1),
+    "sw": (-1, 1),
 }
 
 
@@ -131,10 +139,30 @@ class GameSession:
             elif verb in DIRECTIONS:
                 action = "move"
                 success = self._move(verb)
+            elif verb in {"drop", "discard"}:
+                action = "drop"
+                item_name = command_argument(original_command, tokens)
+                if item_name:
+                    success = self.engine.drop_item(item_name)
+                else:
+                    explicit_messages = ["Drop what? Specify an item name."]
+            elif verb in {"pickup", "get", "take", "grab"}:
+                action = "pickup"
+                self.engine.pick_up_items_at_player()
+                success = True
+            elif verb in {"use", "consume", "drink", "eat"}:
+                action = "use"
+                item_name = command_argument(original_command, tokens)
+                success = self.engine.use_item(item_name) if item_name else False
+                if not item_name:
+                    explicit_messages = ["Use what? Specify an item name."]
             elif verb in {"cast", "wild"}:
                 action = "cast"
                 spell = command_argument(original_command, tokens)
-                success, technical_failure, wild_magic_record = self._cast_wild(spell, replay_wild_magic)
+                if "silenced" in self.engine.state.player.statuses:
+                    explicit_messages = ["You are silenced — the spell is swallowed before it can speak."]
+                else:
+                    success, technical_failure, wild_magic_record = self._cast_wild(spell, replay_wild_magic)
             else:
                 explicit_messages = [f"Unknown command: {verb}"]
 
@@ -242,7 +270,7 @@ def command_argument(command: str, tokens: list[str]) -> str:
 
 def command_help() -> list[str]:
     return [
-        "Commands: move north/south/east/west, open, descend, ascend, wait, spark, cast <spell>, inspect, quit.",
+        "Commands: move north/south/east/west, open, descend, ascend, wait, spark, cast <spell>, use <item>, drop <item>, pickup, inspect, quit.",
         "Short movement aliases also work: n, s, e, w.",
     ]
 
@@ -253,20 +281,42 @@ def describe_state(engine: GameEngine) -> list[str]:
     inventory = ", ".join(f"{name} x{amount}" for name, amount in sorted(state.inventory.items())) or "empty"
     curses = ", ".join(f"{curse.name} x{curse.stacks}" for curse in state.curses.values()) or "none"
     flags = ", ".join(sorted(state.flags)) or "none"
-    enemies = [
-        f"{enemy.name}({enemy.hp}/{enemy.max_hp}) at {enemy.x},{enemy.y} [{enemy.faction}]"
-        for enemy in sorted(engine.living_enemies(), key=lambda entity: entity.id)
-    ]
-    return [
+    statuses = ", ".join(
+        f"{player.status_display.get(s, s)}:{v}" if v != "permanent" else f"{player.status_display.get(s, s)}:permanent"
+        for s, v in sorted(player.statuses.items())
+    ) or "none"
+    enemies = []
+    for enemy in sorted(engine.living_enemies(), key=lambda entity: entity.id):
+        e_status_str = ""
+        if enemy.statuses:
+            e_parts = ",".join(f"{enemy.status_display.get(k, k)}:{v}" for k, v in sorted(enemy.statuses.items()))
+            e_status_str = f" [{e_parts}]"
+        enemies.append(f"{enemy.name}({enemy.hp}/{enemy.max_hp}) at {enemy.x},{enemy.y} [{enemy.faction}]{e_status_str}")
+    resistances = ", ".join(f"{k}:{v}%" for k, v in sorted(player.resistances.items()) if v) or "none"
+    weaknesses = ", ".join(f"{k}:{v}%" for k, v in sorted(player.weaknesses.items()) if v) or "none"
+    lines = [
         f"Turn {state.turn} | HP {player.hp}/{player.max_hp} | MP {player.mana}/{player.max_mana}",
         f"Depth {state.depth}/{state.max_depth} | Position {player.x},{player.y} | Scenario {state.scenario}",
         f"Visible tiles: {len(state.visible)} | Explored tiles: {len(state.explored)}",
+        f"Statuses: {statuses}",
         f"Inventory: {inventory}",
         f"Curses: {curses}",
         f"Flags: {flags}",
         f"Scheduled events: {len(state.event_timers)}",
         "Enemies: " + ("; ".join(enemies) if enemies else "none"),
     ]
+    if player.resistances:
+        lines.append(f"Resistances: {resistances}")
+    if player.weaknesses:
+        lines.append(f"Weaknesses: {weaknesses}")
+    s = state.stats
+    lines.append(
+        f"Stats: spells {s.spells_cast}/{s.spells_cast + s.spells_failed} | "
+        f"kills {s.enemies_killed} | items used {s.items_used} | "
+        f"dmg out {s.damage_dealt} | dmg in {s.damage_taken} | "
+        f"healed {s.hp_healed} | curses {s.curses_gained} | floor {s.deepest_floor}"
+    )
+    return lines
 
 
 def summarize_state(engine: GameEngine) -> dict[str, Any]:

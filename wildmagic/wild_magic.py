@@ -10,6 +10,7 @@ import urllib.error
 import urllib.request
 from typing import Any, Protocol
 
+from .fallbacks import fallback_resolution_from_spell, fallbacks_enabled
 from .models import MECHANICAL_STATUSES
 
 
@@ -18,6 +19,10 @@ SUPPORTED_STATUS_TEXT = ", ".join(sorted(MECHANICAL_STATUSES))
 SYSTEM_PROMPT = """You are the Wild Magic referee for a turn-based tile roguelike.
 Resolve the player's typed spell by returning exactly one JSON object and no prose.
 Do not include chain-of-thought, markdown, comments, or <think> text.
+IMPORTANT: All fields inside each effect or cost must be at the top level of that object.
+Never use sub-keys like "data", "details", or "params" inside an effect or cost.
+Never wrap the result in an "outcome" or "result" key — the JSON object IS the result.
+Use "effects" (array) and "costs" (array) — never "effect" (singular) or "cost" (singular dict).
 
 Required top-level shape:
 {"accepted": true, "severity": "minor|moderate|major|catastrophic", "outcome_text": "short log message", "effects": [], "costs": [], "rejected_reason": null}
@@ -29,36 +34,43 @@ Catastrophic spell: dangerous effects, severe permanent costs, or rejection.
 
 Effect catalog:
 - damage: target, amount, damage_type.
-- area_damage: target, radius 0-4, amount, damage_type, include_player boolean, affects "enemies|non_player|allies|all".
+- area_damage: target (center entity or "player"), radius 0-4, amount, damage_type, include_player boolean, affects "enemies|non_player|allies|all".
+- area_status: target (center), radius 0-4, status, duration, affects "enemies|non_player|allies|all". Use for "slow all enemies in sight", "confuse everything nearby", etc.
 - heal or restore_mana: target, amount.
 - teleport: target, x, y.
 - push or pull: target, origin or dx/dy, distance.
-- create_tile or create_tiles: x/y or target, tile, radius, duration.
-- add_status or remove_status: target, status, duration.
-- summon: name, faction, x, y, hp, attack, defense, char.
+- create_tile or create_tiles: x/y or target, tile, radius, duration. Add hollow:true for a ring/perimeter pattern. Use ONE create_tiles effect for a ring — never list individual coordinates.
+- add_status or remove_status: target, status, duration. Optional display_name (shown to player instead of the status key, e.g. "petrified" for frozen) and expiry_text (message when it wears off). For single target: an actor id, "player", or "nearest_enemy". For all enemies: "all_enemies". For everyone: "all".
+- summon: name, faction ("ally" or "enemy"), hp, attack, defense, char, x, y. All at top level.
 - spawn_item: name, item_type, x, y, char, material, quantity, tags.
 - conjure_item: template, name, material, tags, target, placement, count.
-- conjure_creature: template, name, faction, tags, placement, count.
-- modify_inventory, transform_entity, change_faction, add_tag, remove_tag, add_resistance, add_weakness, set_flag, schedule_event, message.
+- conjure_creature: template, name, faction ("ally" or "enemy"), tags, placement, count. Always include faction.
+- modify_inventory, transform_entity, change_faction, add_tag, remove_tag, add_resistance (fields: target, damage_type, amount), add_weakness (fields: target, damage_type, amount), set_flag, schedule_event, message.
+
+Valid target strings: "player", "nearest_enemy", or a specific entity id from context. For add_status, you may also use "all_enemies" or "enemies" to affect all enemies, or "all" for everyone.
 
 Cost catalog:
-- mana, health, max_health, max_mana, item, status, curse.
+- mana, health, max_health, max_mana, item (fields: item name, amount), status, curse.
 - Costs are discovered after casting. Effects happen first, then costs.
 - If a cost is odd or poetic, use a curse instead of inventing a new status.
+- Item costs should match items visible in the player's inventory. Use the exact inventory key name.
 
 Balance rules:
-- If the spell is a win button, infinite resource exploit, or outside the genre, reject it or make it catastrophic.
-- Damage above 8 needs a meaningful cost. Damage above 16 needs a severe cost or rejection.
-- Area effects should usually be weaker than single-target effects.
+- Allow crazy, powerful, and dramatic spells — they should just have appropriate costs.
+- If the spell is a literal win button or infinite resource exploit with no cost, reject or make it catastrophic.
+- Big damage, big area, big effects are fine — they need commensurate costs (mana, health, curses, items).
 - Use affects "enemies" for spells that should only harm foes.
 - Keep effects local and concrete. Prefer entity ids from context.
 - For permanent terrain, omit duration or use "permanent"; otherwise duration must be 1 or more.
 - For body-part changes, use damage/status/conjure_item instead of transform_entity unless the whole creature changes.
 - For tracking, glowing shadow, locate, or reveal spells, use add_status with status "revealed" on the target.
+- For spells promising a delayed payoff or future consequence, use schedule_event to create the payoff. schedule_event fields: turns (number), event_type (summon|message|damage|heal|status|flood|curse|conjure), plus event-specific fields (name, hp, attack, faction, amount, tile, status, etc.).
+- For physically impossible global requests (reverse gravity for everything, turn all walls into X), reject with a creative reason or give a local creative interpretation using available effects.
 
 Useful tiles: floor, wall, door, open_door, stairs_down, stairs_up, water, fire, slick_ice, ice_wall, poison_cloud, vines, rubble, mist.
 Supported statuses: {supported_statuses}.
 Use status only for supported mechanical statuses.
+Key behaviors: burning/bleeding/poisoned deal 1 damage/turn; regenerating heals 1 HP/turn; slowed skips every other turn; berserk deals +2 damage but self-damages; empowered deals +2 damage; marked/cursed take extra damage; invisible reduces enemy sensing; confused moves randomly; frightened flees; frozen/stunned/rooted/silenced/webbed are disabling.
 
 Conjuration:
 - For arbitrary new objects or creatures, prefer template-backed conjuration.
@@ -71,6 +83,11 @@ Good examples:
 {"accepted": true, "severity": "moderate", "outcome_text": "A tiny sun circles you and lashes out at foes.", "effects": [{"type": "summon", "name": "tiny sun", "faction": "ally", "hp": 4, "attack": 0, "defense": 1, "char": "o"}, {"type": "area_damage", "target": "player", "radius": 3, "amount": 4, "damage_type": "fire", "include_player": false, "affects": "enemies"}], "costs": [{"type": "mana", "amount": 6}, {"type": "status", "status": "burning", "duration": 2}], "rejected_reason": null}
 {"accepted": true, "severity": "moderate", "outcome_text": "The goblin spits out a brittle little treasure.", "effects": [{"type": "damage", "target": "nearest_enemy", "amount": 3, "damage_type": "physical"}, {"type": "add_status", "target": "nearest_enemy", "status": "bleeding", "duration": 3}, {"type": "conjure_item", "template": "body_part", "name": "glass teeth", "material": "glass", "tags": ["fragile", "tooth"], "target": "nearest_enemy", "placement": "target_tile"}], "costs": [{"type": "mana", "amount": 3}], "rejected_reason": null}
 {"accepted": true, "severity": "minor", "outcome_text": "Blue webbing pins the target in place.", "effects": [{"type": "add_status", "target": "nearest_enemy", "status": "webbed", "duration": 3}, {"type": "conjure_item", "template": "generic_object", "name": "sticky blue webbing", "material": "silk", "target": "nearest_enemy", "placement": "target_tile"}], "costs": [{"type": "item", "item": "chalk", "amount": 1}], "rejected_reason": null}
+{"accepted": true, "severity": "moderate", "outcome_text": "Time thickens around your enemies.", "effects": [{"type": "area_status", "target": "player", "radius": 4, "status": "slowed", "duration": 4, "affects": "enemies"}], "costs": [{"type": "mana", "amount": 4}], "rejected_reason": null}
+{"accepted": true, "severity": "moderate", "outcome_text": "Two wolves lope out of a dark corner.", "effects": [{"type": "conjure_creature", "template": "small_beast", "name": "shadow wolf", "count": 2, "faction": "ally", "tags": ["wolf", "predator"], "placement": "near_player"}], "costs": [{"type": "mana", "amount": 5}, {"type": "curse", "id": "wild_debt", "name": "Wild Debt", "description": "The wild expects repayment."}], "rejected_reason": null}
+{"accepted": true, "severity": "major", "outcome_text": "The spell leaves and promises to come back with interest.", "effects": [{"type": "heal", "target": "player", "amount": 8}, {"type": "set_flag", "flag": "debt_owed", "value": true}, {"type": "schedule_event", "turns": 5, "event_type": "summon", "name": "debt collector", "char": "D", "hp": 10, "attack": 4, "faction": "enemy"}], "costs": [{"type": "mana", "amount": 3}], "rejected_reason": null}
+{"accepted": true, "severity": "moderate", "outcome_text": "Your bones remember fire.", "effects": [{"type": "add_resistance", "target": "player", "damage_type": "fire", "amount": 50}], "costs": [{"type": "mana", "amount": 6}, {"type": "curse", "id": "fire_debt", "name": "Fire Debt", "description": "Something hot is owed."}], "rejected_reason": null}
+{"accepted": true, "severity": "minor", "outcome_text": "Your bones lock like limestone.", "effects": [{"type": "add_status", "target": "nearest_enemy", "status": "frozen", "display_name": "petrified", "expiry_text": "The stone cracks. You can move.", "duration": 3}], "costs": [{"type": "mana", "amount": 2}], "rejected_reason": null}
 {"accepted": false, "severity": "catastrophic", "outcome_text": "", "effects": [], "costs": [], "rejected_reason": "Reality refuses to become that convenient."}
 """.replace("{supported_statuses}", SUPPORTED_STATUS_TEXT)
 
@@ -78,6 +95,7 @@ Good examples:
 SUPPORTED_EFFECTS = {
     "damage",
     "area_damage",
+    "area_status",
     "heal",
     "restore_mana",
     "teleport",
@@ -152,7 +170,9 @@ class OllamaWildMagicProvider:
                 "temperature": ollama_temperature(),
                 "top_p": 0.9,
                 "num_predict": ollama_num_predict(),
+                "num_gpu": ollama_num_gpu(),
             },
+            "keep_alive": "10m",
         }
         if ollama_json_format_enabled():
             payload["format"] = "json"
@@ -522,6 +542,8 @@ class AutoWildMagicProvider:
             self.last_provider_name = self.ollama.name
             return self.ollama.resolve(spell, context)
         except (OSError, TimeoutError, urllib.error.URLError, ValueError):
+            if not fallbacks_enabled():
+                raise
             self.last_provider_name = self.mock.name
             return self.mock.resolve(spell, context)
 
@@ -594,6 +616,19 @@ def resolve_spell(provider: WildMagicProvider, spell: str, context: dict[str, An
                 )
                 active_context = retry_context(context, raw, error)
                 continue
+            fallback = fallback_resolution_from_spell(spell) if fallbacks_enabled() else None
+            if fallback is not None and resolved_provider_name == "ollama":
+                audit_path = write_audit_log(
+                    provider,
+                    spell,
+                    active_context,
+                    raw,
+                    fallback,
+                    False,
+                    f"{error}; used local fallback",
+                    resolved_provider_name,
+                )
+                return MagicResolution(fallback, False, None, resolved_provider_name, raw, audit_path)
             audit_path = write_audit_log(provider, spell, active_context, raw, parsed_data, technical_failure, error, resolved_provider_name)
             return MagicResolution(None, True, error, resolved_provider_name, raw, audit_path)
 
@@ -612,7 +647,612 @@ def parse_resolution_json(raw: str) -> dict[str, Any]:
         parsed = json.loads(match.group(0))
     if not isinstance(parsed, dict):
         raise TypeError("wild magic response was not a JSON object")
-    return parsed
+    return _normalize_resolution(parsed)
+
+
+_STATUS_FLAVOR_ALIASES: dict[str, str] = {
+    # frozen synonyms
+    "petrified": "frozen", "stone": "frozen", "crystallized": "frozen",
+    "paralyzed": "frozen", "paralysed": "frozen", "iced": "frozen",
+    "glaciated": "frozen", "encased": "frozen",
+    # stunned synonyms
+    "dazed": "stunned", "staggered": "stunned", "concussed": "stunned",
+    "knocked_out": "stunned", "knocked_back": "stunned", "disoriented": "stunned",
+    "dazzled": "stunned",
+    # rooted synonyms
+    "immobilized": "rooted", "pinned": "rooted", "anchored": "rooted",
+    "grounded": "rooted", "earthbound": "rooted", "trapped": "rooted",
+    # webbed synonyms
+    "entangled": "webbed", "snared": "webbed", "ensnared": "webbed",
+    "bound": "webbed", "cocooned": "webbed", "wrapped": "webbed",
+    "tangled": "webbed",
+    # burning synonyms
+    "aflame": "burning", "alight": "burning", "on_fire": "burning",
+    "ignited": "burning", "flaming": "burning", "ablaze": "burning",
+    "smoldering": "burning",
+    # poisoned synonyms
+    "diseased": "poisoned", "infected": "poisoned", "plagued": "poisoned",
+    "venomous": "poisoned", "toxic": "poisoned", "envenomed": "poisoned",
+    "tainted": "poisoned", "corrupted": "poisoned",
+    # bleeding synonyms
+    "lacerated": "bleeding", "wounded": "bleeding", "cut": "bleeding",
+    "hemorrhaging": "bleeding", "bloodied": "bleeding",
+    # slowed synonyms
+    "sluggish": "slowed", "lethargic": "slowed", "lagging": "slowed",
+    "encumbered": "slowed", "weighed_down": "slowed", "dragging": "slowed",
+    # hasted synonyms
+    "hastened": "hasted", "swift": "hasted", "quickened": "hasted",
+    "accelerated": "hasted", "blurred": "hasted",
+    # invisible synonyms
+    "cloaked": "invisible", "hidden": "invisible", "shrouded": "invisible",
+    "shadowed": "invisible", "veiled": "invisible", "ethereal": "invisible",
+    "ghostly": "invisible", "transparent": "invisible",
+    # confused synonyms
+    "deluded": "confused", "disoriented": "confused", "maddened": "confused",
+    "crazed": "confused", "muddled": "confused", "lost": "confused",
+    "bewildered": "confused",
+    # frightened synonyms
+    "panicked": "frightened", "terrified": "frightened", "afraid": "frightened",
+    "scared": "frightened", "fleeing": "frightened", "cowering": "frightened",
+    "horrified": "frightened",
+    # marked synonyms
+    "doomed": "marked", "condemned": "marked", "targeted": "marked",
+    "branded": "marked", "cursed_mark": "marked", "hexed": "marked",
+    # cursed synonyms
+    "hexed_deep": "cursed", "afflicted": "cursed", "jinxed_deep": "cursed",
+    "damned": "cursed",
+    # berserk synonyms
+    "enraged": "berserk", "frenzied": "berserk", "frantic": "berserk",
+    "wrathful": "berserk", "bloodlusted": "berserk", "feral": "berserk",
+    # empowered synonyms
+    "strengthened": "empowered", "supercharged": "empowered", "buffed": "empowered",
+    "fortified": "empowered", "charged": "empowered", "bolstered": "empowered",
+    # warded synonyms
+    "protected": "warded", "shielded": "warded", "guarded": "warded",
+    "defended": "warded",
+    # regenerating synonyms
+    "healing": "regenerating", "mending": "regenerating", "recovering": "regenerating",
+    "recuperating": "regenerating", "restored": "regenerating",
+    # silenced synonyms
+    "muted": "silenced", "gagged": "silenced", "voiceless": "silenced",
+    # revealed synonyms
+    "exposed": "revealed", "uncloaked": "revealed", "illuminated": "revealed",
+    "highlighted": "revealed",
+}
+
+
+_ELEMENT_DAMAGE_ALIASES: dict[str, str] = {
+    "lightning": "lightning",
+    "thunder": "lightning",
+    "fire": "fire",
+    "flame": "fire",
+    "inferno": "fire",
+    "ice": "frost",
+    "frost": "frost",
+    "cold": "frost",
+    "freeze": "frost",
+    "poison": "poison",
+    "toxic": "poison",
+    "acid": "acid",
+    "arcane": "arcane",
+    "magic": "arcane",
+    "force": "force",
+    "radiant": "radiant",
+    "holy": "radiant",
+    "divine": "radiant",
+    "shadow": "shadow",
+    "necrotic": "shadow",
+    "dark": "shadow",
+    "physical": "physical",
+    "blunt": "physical",
+    "slash": "physical",
+    "pierce": "physical",
+    "blood": "blood",
+    "psychic": "arcane",
+    "sonic": "force",
+    "wind": "force",
+}
+
+# Map LLM-used effect type strings to canonical SUPPORTED_EFFECTS keys.
+_EFFECT_TYPE_ALIASES: dict[str, str] = {
+    "healing": "heal",
+    "restore_health": "heal",
+    "restore_hp": "heal",
+    "regenerate": "add_status",
+    "regeneration": "add_status",
+    "regen": "add_status",
+    "restore_mana_points": "restore_mana",
+    "restore_mp": "restore_mana",
+    "replenish_mana": "restore_mana",
+    "status": "add_status",
+    "apply_status": "add_status",
+    "give_status": "add_status",
+    "set_status": "add_status",
+    "status_effect": "add_status",
+    "curse": "add_curse",
+    "spawn": "summon",
+    "create_creature": "conjure_creature",
+    "spawn_creature": "conjure_creature",
+    "create_item": "conjure_item",
+    "spawn_item": "conjure_item",
+    "place_tile": "create_tiles",
+    "set_tiles": "create_tiles",
+    "tile_effect": "create_tiles",
+    "area_effect": "area_damage",
+    "explosion": "area_damage",
+    "blast": "area_damage",
+}
+
+# Status names that the LLM might use as effect type directly.
+_STATUS_AS_TYPE: dict[str, tuple[str, str]] = {
+    "regenerating": ("add_status", "regenerating"),
+    "regenerate": ("add_status", "regenerating"),
+    "burning": ("add_status", "burning"),
+    "poisoned": ("add_status", "poisoned"),
+    "frozen": ("add_status", "frozen"),
+    "stunned": ("add_status", "stunned"),
+    "slowed": ("add_status", "slowed"),
+    "hasted": ("add_status", "hasted"),
+    "invisible": ("add_status", "invisible"),
+    "berserk": ("add_status", "berserk"),
+    "empowered": ("add_status", "empowered"),
+    "warded": ("add_status", "warded"),
+    "cursed": ("add_status", "cursed"),
+    "bleeding": ("add_status", "bleeding"),
+    "rooted": ("add_status", "rooted"),
+    "webbed": ("add_status", "webbed"),
+    "confused": ("add_status", "confused"),
+    "frightened": ("add_status", "frightened"),
+    "marked": ("add_status", "marked"),
+    "silenced": ("add_status", "silenced"),
+}
+
+
+def _normalize_resolution(data: dict[str, Any]) -> dict[str, Any]:
+    if isinstance(data.get("outcome"), dict):
+        outcome = data["outcome"]
+        merged = dict(data)
+        if not merged.get("effects"):
+            if outcome.get("effects") is not None:
+                merged["effects"] = outcome["effects"]
+            elif outcome.get("effect") is not None:
+                merged["effect"] = outcome["effect"]
+        if not merged.get("costs"):
+            if outcome.get("costs") is not None:
+                merged["costs"] = outcome["costs"]
+            elif outcome.get("cost") is not None:
+                merged["cost"] = outcome["cost"]
+        if not merged.get("outcome_text"):
+            for key in ("message", "description", "visual", "text"):
+                if isinstance(outcome.get(key), str) and outcome[key].strip():
+                    merged["outcome_text"] = outcome[key]
+                    break
+        data = merged
+
+    # If the entire resolution is wrapped inside an "outcome" key, unwrap it.
+    if isinstance(data.get("outcome"), dict) and (
+        "effects" in data["outcome"] or "costs" in data["outcome"]
+    ):
+        data = data["outcome"]
+
+    # Coerce explicit null effects/costs to empty lists so the validator doesn't choke.
+    if data.get("effects") is None and "effects" in data:
+        data = dict(data)
+        data["effects"] = []
+    if data.get("costs") is None and "costs" in data:
+        data = dict(data)
+        data["costs"] = []
+
+    # Provide a default rejected_reason when accepted is False but no reason given.
+    if data.get("accepted") is False and not str(data.get("rejected_reason") or "").strip():
+        data = dict(data)
+        data["rejected_reason"] = "The wild magic refuses."
+
+    # Accept common flavor fields. Prefer actual prose over status words like "success".
+    if not data.get("outcome_text"):
+        for alias in ("message", "response", "text", "description", "outcome"):
+            if isinstance(data.get(alias), str) and data[alias].strip():
+                data = dict(data)
+                data["outcome_text"] = data[alias]
+                break
+
+    # Coerce costs dict {"mana": 5} into a list [{type: mana, amount: 5}].
+    if isinstance(data.get("costs"), dict):
+        raw_dict = data["costs"]
+        coerced = _coerce_cost_dict(raw_dict)
+        data = dict(data)
+        data["costs"] = coerced
+
+    # Normalize "cost" (singular string like "mana 5" or "5 mana") into the costs list.
+    if "costs" not in data and isinstance(data.get("cost"), str):
+        _cost_str = data["cost"].strip().lower()
+        if _cost_str == "item" and data.get("item_used"):
+            data = dict(data)
+            data["costs"] = [
+                {
+                    "type": "item",
+                    "item": str(data.get("item_used")),
+                    "amount": int(data.get("quantity_used") or data.get("amount") or 1),
+                }
+            ]
+        else:
+            _cost_match = re.match(r"(\w+)\s+(\d+)|(\d+)\s+(\w+)", _cost_str)
+            if _cost_match:
+                g = _cost_match.groups()
+                _ctype, _camt = (g[0], g[1]) if g[0] else (g[3], g[2])
+                if _ctype in {"mana", "health", "hp", "max_health", "max_mana"}:
+                    _ctype = "health" if _ctype == "hp" else _ctype
+                    try:
+                        data = dict(data)
+                        data["costs"] = [{"type": _ctype, "amount": int(_camt)}]
+                    except (ValueError, TypeError):
+                        pass
+
+    # Normalize "cost" (singular dict like {"mana": 3}) into the costs list.
+    if "costs" not in data and isinstance(data.get("cost"), dict):
+        costs = _coerce_cost_dict(data["cost"])
+        if costs:
+            data = dict(data)
+            data["costs"] = costs
+
+    # If effects is missing/empty, try to reconstruct from common alternate structures.
+    if not data.get("effects"):
+        # Case 1: "effect" (singular) at top level — may be a string ("damage") or dict ({"type": "damage", ...}).
+        if data.get("effect"):
+            effect_raw = data["effect"]
+            if isinstance(effect_raw, dict):
+                # Already a full effect object — use directly, merge details if present.
+                effect_obj: dict[str, Any] = dict(effect_raw)
+                outer_details = data.get("details")
+                if isinstance(outer_details, dict):
+                    for k, v in outer_details.items():
+                        if k not in effect_obj:
+                            effect_obj[k] = v
+            else:
+                effect_obj = _effect_from_text(str(effect_raw)) or {"type": str(effect_raw)}
+                # Merge safe top-level fields into the effect so that patterns like
+                # {"effect":"area_status","target":"all enemies","status":"slowed",...}
+                # produce a complete effect object.
+                _EFFECT_TOP_FIELDS = {
+                    "target", "status", "duration", "radius", "tile", "amount",
+                    "damage_type", "x", "y", "name", "faction", "template", "hp",
+                    "max_hp", "attack", "defense", "char", "count", "tags",
+                    "hollow", "ring", "perimeter", "include_player", "affects",
+                    "display_name", "expiry_text", "item", "material", "quantity",
+                    "dx", "dy", "distance", "positions", "tiles", "creature",
+                }
+                for _k in _EFFECT_TOP_FIELDS:
+                    if _k in data and _k not in effect_obj:
+                        effect_obj[_k] = data[_k]
+            details = data.get("details")
+            if isinstance(details, dict):
+                for k, v in details.items():
+                    if k not in {"costs", "cost", "rules_applied", "supported_effects_used",
+                                 "supported_costs_used", "description"}:
+                        effect_obj[k] = v
+                # Rescue costs nested inside details if not already at top level.
+                if not data.get("costs") and isinstance(details.get("costs"), dict):
+                    raw_costs = details["costs"]
+                    rescued: list[dict[str, Any]] = []
+                    for key, val in raw_costs.items():
+                        if key == "quantity":
+                            continue
+                        if key in {"mana", "health", "max_health", "max_mana"}:
+                            try:
+                                rescued.append({"type": key, "amount": int(val)})
+                            except (TypeError, ValueError):
+                                pass
+                        elif key == "item":
+                            rescued.append({
+                                "type": "item",
+                                "item": str(val),
+                                "amount": int(details.get("quantity", 1)),
+                            })
+                    if rescued:
+                        data = dict(data)
+                        data["costs"] = rescued
+            data = dict(data)
+            data["effects"] = [effect_obj]
+        # Case 2: "details" at resolution level describes a single effect.
+        elif isinstance(data.get("details"), dict):
+            details = data["details"]
+            if "effect" in details or "type" in details:
+                effect = dict(details)
+                if "effect" in effect and "type" not in effect:
+                    effect["type"] = effect.pop("effect")
+                if effect.get("type"):
+                    data = dict(data)
+                    data["effects"] = [effect]
+
+    # Normalize element-name effect types and flavor status names.
+    effects = data.get("effects")
+    if isinstance(effects, list):
+        # Flatten: if an effect's "type" field is itself a list of effect dicts, inline them.
+        expanded: list[Any] = []
+        for e in effects:
+            if isinstance(e, list):
+                expanded.extend(e)
+            elif isinstance(e, dict) and isinstance(e.get("type"), list):
+                for nested in e["type"]:
+                    if isinstance(nested, dict):
+                        expanded.append(nested)
+            else:
+                expanded.append(e)
+        effects = expanded
+        normalized_effects = []
+        for e in effects:
+            if isinstance(e, dict):
+                e = _flatten_nested_effect(e)
+                et = str(e.get("type") or "").lower().strip()
+                # Infer type from fields when absent.
+                if not et:
+                    if "status" in e:
+                        et = "add_status"
+                    elif "amount" in e or "damage" in e:
+                        et = "damage"
+                    elif "hp" in e or "heal" in e:
+                        et = "heal"
+                    elif "mana" in e:
+                        et = "restore_mana"
+                    elif "tile" in e:
+                        et = "create_tiles"
+                    elif "creature" in e or "name" in e:
+                        et = "conjure_creature"
+                    if et:
+                        e = dict(e)
+                        e["type"] = et
+                # Apply effect type aliases.
+                if et and et not in SUPPORTED_EFFECTS:
+                    if et in _EFFECT_TYPE_ALIASES:
+                        mapped = _EFFECT_TYPE_ALIASES[et]
+                        e = dict(e)
+                        # "regenerate"/"regen" aliases need status inferred.
+                        if mapped == "add_status" and not e.get("status"):
+                            if et in {"regenerate", "regeneration", "regen"}:
+                                e["status"] = "regenerating"
+                        e["type"] = mapped
+                        et = mapped
+                    elif et in _STATUS_AS_TYPE:
+                        mapped_type, mapped_status = _STATUS_AS_TYPE[et]
+                        e = dict(e)
+                        if not e.get("status"):
+                            e["status"] = mapped_status
+                        e["type"] = mapped_type
+                        et = mapped_type
+                    elif et in _ELEMENT_DAMAGE_ALIASES:
+                        e = dict(e)
+                        e["damage_type"] = _ELEMENT_DAMAGE_ALIASES[et]
+                        e["type"] = "damage"
+                        et = "damage"
+                        if "target" not in e:
+                            e["target"] = "nearest_enemy"
+                        if "amount" not in e:
+                            e["amount"] = 5
+                    else:
+                        recovered = _effect_from_text(et)
+                        if recovered:
+                            e = recovered
+                            et = str(e.get("type") or "").lower().strip()
+                # Legacy element-type path (already in ELEMENT_DAMAGE_ALIASES but not in SUPPORTED_EFFECTS).
+                elif et in _ELEMENT_DAMAGE_ALIASES and et not in SUPPORTED_EFFECTS:
+                    e = dict(e)
+                    e["damage_type"] = _ELEMENT_DAMAGE_ALIASES[et]
+                    e["type"] = "damage"
+                    et = "damage"
+                    if "target" not in e:
+                        e["target"] = "nearest_enemy"
+                    if "amount" not in e:
+                        e["amount"] = 5
+                # Normalize flavor status names in add_status / area_status effects.
+                if et in {"add_status", "area_status"}:
+                    raw_status = str(e.get("status") or "").strip().lower().replace(" ", "_")
+                    if raw_status and raw_status not in MECHANICAL_STATUSES:
+                        canonical = _STATUS_FLAVOR_ALIASES.get(raw_status)
+                        if canonical:
+                            e = dict(e)
+                            if not e.get("display_name"):
+                                e["display_name"] = raw_status.replace("_", " ")
+                            e["status"] = canonical
+                # Ensure add_status effects that inferred status from regen/type have a target.
+                if et == "add_status" and "target" not in e:
+                        e = dict(e)
+                        e["target"] = "player"
+                if "target" in e:
+                    e = dict(e)
+                    e["target"] = _normalize_target_text(e["target"])
+                if "origin" in e:
+                    e = dict(e)
+                    e["origin"] = _normalize_target_text(e["origin"])
+                # Flatten conjure_creature "creature" sub-dict into the effect.
+                if et in {"conjure_creature", "summon"} and isinstance(e.get("creature"), dict):
+                    e = dict(e)
+                    creature_data = e.pop("creature")
+                    for _ck, _cv in creature_data.items():
+                        if _ck not in e:
+                            e[_ck] = _cv
+                # Normalize "positions" array → "tiles" array for create_tiles.
+                if et in {"conjure_item", "spawn_item"} and isinstance(e.get("item"), dict):
+                    e = dict(e)
+                    item_data = e.pop("item")
+                    for _ik, _iv in item_data.items():
+                        if _ik not in e:
+                            e[_ik] = _iv
+                if et == "schedule_event":
+                    e = _normalize_schedule_event(e)
+                if et in {"create_tiles", "create_tile", "set_tile"} and "positions" in e and "tiles" not in e:
+                    e = dict(e)
+                    raw_tile = str(e.get("tile") or ".").lower()
+                    e["tiles"] = [
+                        {"x": p.get("x", 0), "y": p.get("y", 0), "tile": str(p.get("tile") or raw_tile)}
+                        for p in e.pop("positions")
+                        if isinstance(p, dict)
+                    ]
+            normalized_effects.append(e)
+        data = dict(data)
+        data["effects"] = normalized_effects
+
+    # Flatten "data"/"details"/"params" nesting in both effects and costs.
+    effects = data.get("effects")
+    if isinstance(effects, list):
+        data = dict(data)
+        data["effects"] = [_flatten_nested_effect(e) if isinstance(e, dict) else e for e in effects]
+
+    costs = data.get("costs")
+    if isinstance(costs, list):
+        data = dict(data)
+        data["costs"] = [_flatten_nested_effect(c) if isinstance(c, dict) else c for c in costs]
+
+    return data
+
+
+def _coerce_cost_dict(raw_dict: dict[str, Any]) -> list[dict[str, Any]]:
+    if isinstance(raw_dict.get("type"), str):
+        cost = dict(raw_dict)
+        if "quantity" in cost and "amount" not in cost:
+            cost["amount"] = cost["quantity"]
+        return [cost]
+    coerced: list[dict[str, Any]] = []
+    for key, val in raw_dict.items():
+        if key in {"mana", "health", "max_health", "max_mana", "hp"}:
+            try:
+                amount = int(val)
+                if amount > 0:
+                    coerced.append({"type": "health" if key == "hp" else key, "amount": amount})
+            except (TypeError, ValueError):
+                pass
+        elif key == "item":
+                coerced.append({"type": "item", "item": str(val), "amount": int(raw_dict.get("quantity", 1))})
+    return coerced
+
+
+def _effect_from_text(text: str) -> dict[str, Any] | None:
+    normalized = text.lower().strip()
+    if not normalized:
+        return None
+    digit_turns = re.search(r"\b(?:in|after)\s+(\d+)\s+turn", normalized)
+    if digit_turns:
+        turns = int(digit_turns.group(1))
+    else:
+        word_numbers = {
+            "one": 1,
+            "two": 2,
+            "three": 3,
+            "four": 4,
+            "five": 5,
+            "six": 6,
+            "seven": 7,
+            "eight": 8,
+            "nine": 9,
+            "ten": 10,
+        }
+        word_turns = re.search(r"\b(?:in|after)\s+(one|two|three|four|five|six|seven|eight|nine|ten)\s+turn", normalized)
+        turns = word_numbers.get(word_turns.group(1), 3) if word_turns else 3
+    if not any(word in normalized for word in ["arrive", "appears", "appear", "summon"]):
+        return None
+
+    name = "debt collector"
+    for pattern in [
+        r"scheduled\s+(?:a|an|the)?\s*([a-z][a-z _-]+?)\s+to\s+arrive",
+        r"(?:a|an|the)\s+([a-z][a-z _-]+?)\s+(?:should|will|shall)?\s*arrive",
+        r"summon\s+(?:a|an|the)?\s*([a-z][a-z _-]+)",
+    ]:
+        match = re.search(pattern, normalized)
+        if match:
+            candidate = " ".join(match.group(1).split())
+            if candidate:
+                name = candidate[:40]
+                break
+    faction = "ally" if any(word in normalized for word in ["friendly", "ally", "helpful"]) else "enemy"
+    return {
+        "type": "schedule_event",
+        "turns": turns,
+        "event_type": "summon",
+        "name": name,
+        "char": _effect_char(name),
+        "hp": 8,
+        "attack": 3,
+        "faction": faction,
+    }
+
+
+def _effect_char(name: str) -> str:
+    for char in name:
+        if char.isascii() and char.isalpha():
+            return char.lower()
+    return "e"
+
+
+def _normalize_schedule_event(effect: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(effect)
+    if "turn" in normalized and "turns" not in normalized:
+        normalized["turns"] = normalized["turn"]
+    entity = normalized.get("entity")
+    if not isinstance(entity, dict) and isinstance(normalized.get("data"), dict):
+        nested_data = normalized["data"]
+        if isinstance(nested_data.get("entity"), dict):
+            entity = nested_data["entity"]
+            normalized["entity"] = entity
+    if isinstance(entity, dict):
+        for key in ["name", "char", "hp", "max_hp", "attack", "defense", "faction", "tags", "resistances", "weaknesses"]:
+            if key in entity and key not in normalized:
+                normalized[key] = entity[key]
+    event_text = str(normalized.get("event") or normalized.get("event_type") or "").lower().strip().replace(" ", "_").replace("-", "_")
+    if "event_type" not in normalized:
+        if isinstance(entity, dict) or "arrival" in event_text or "summon" in event_text:
+            normalized["event_type"] = "summon"
+        elif any(key in normalized for key in ["amount", "damage_type"]):
+            normalized["event_type"] = "damage"
+        else:
+            normalized["event_type"] = "message"
+    if normalized.get("event_type") == "summon":
+        normalized.setdefault("name", "debt collector")
+        normalized.setdefault("char", _effect_char(str(normalized["name"])))
+        normalized.setdefault("hp", normalized.get("max_hp", 8))
+        normalized.setdefault("attack", 3)
+        normalized.setdefault("faction", "enemy")
+    return normalized
+
+
+def _normalize_target_text(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    normalized = value.lower().strip().replace("-", "_").replace(" ", "_")
+    target_aliases = {
+        "self": "player",
+        "you": "player",
+        "me": "player",
+        "caster": "player",
+        "all_enemies": "all_enemies",
+        "all_foes": "all_enemies",
+        "all_hostiles": "all_enemies",
+        "every_enemy": "all_enemies",
+        "enemies": "all_enemies",
+        "foes": "all_enemies",
+        "all_creatures": "all",
+        "everyone": "all",
+        "everything": "all",
+    }
+    if normalized in target_aliases:
+        return target_aliases[normalized]
+    if normalized.startswith("nearest_") and any(
+        word in normalized for word in ["enemy", "foe", "hostile", "monster", "creature", "goblin", "slime", "bat"]
+    ):
+        return "nearest_enemy"
+    if normalized.startswith("closest_") and any(
+        word in normalized for word in ["enemy", "foe", "hostile", "monster", "creature", "goblin", "slime", "bat"]
+    ):
+        return "nearest_enemy"
+    return value
+
+
+def _flatten_nested_effect(effect: dict[str, Any]) -> dict[str, Any]:
+    for key in ("data", "details", "params", "parameters"):
+        nested = effect.get(key)
+        if isinstance(nested, dict):
+            merged = dict(nested)
+            merged.update({k: v for k, v in effect.items() if k != key})
+            return merged
+    return effect
 
 
 def strip_thinking(raw: str) -> str:
@@ -632,6 +1272,8 @@ def validate_resolution(data: dict[str, Any]) -> str | None:
         return "effects must be a list"
     if not isinstance(costs, list):
         return "costs must be a list"
+    if not effects:
+        return "accepted spells must have at least one effect"
     if len(effects) > 12:
         return "effects must contain at most 12 entries"
     if len(costs) > 8:
@@ -642,13 +1284,11 @@ def validate_resolution(data: dict[str, Any]) -> str | None:
         effect_type = str(effect.get("type") or "").lower()
         if effect_type not in SUPPORTED_EFFECTS:
             return f"unsupported effect type: {effect_type or '(missing)'}"
-        if effect_type in {"create_tiles", "area_damage"} and "radius" in effect:
+        if effect_type in {"create_tiles", "area_damage", "area_status"} and "radius" in effect:
             try:
-                radius = int(effect["radius"])
+                int(effect["radius"])
             except (TypeError, ValueError):
                 return f"{effect_type} radius must be an integer"
-            if radius < 0 or radius > 4:
-                return f"{effect_type} radius must be between 0 and 4"
         if effect_type == "conjure_creature" and "count" in effect:
             try:
                 count = int(effect["count"])
@@ -767,11 +1407,11 @@ def ollama_timeout_seconds() -> float:
 
 
 def ollama_num_predict() -> int:
-    value = os.environ.get("WILDMAGIC_OLLAMA_NUM_PREDICT", "512")
+    value = os.environ.get("WILDMAGIC_OLLAMA_NUM_PREDICT", "800")
     try:
         parsed = int(value)
     except ValueError:
-        return 512
+        return 800
     return max(128, min(2048, parsed))
 
 
@@ -792,6 +1432,15 @@ def ollama_thinking_enabled() -> bool:
 def ollama_json_format_enabled() -> bool:
     value = os.environ.get("WILDMAGIC_OLLAMA_FORMAT", "json").lower().strip()
     return value in {"1", "true", "yes", "on", "json"}
+
+
+def ollama_num_gpu() -> int:
+    value = os.environ.get("WILDMAGIC_OLLAMA_NUM_GPU", "999")
+    try:
+        parsed = int(value)
+    except ValueError:
+        return 999
+    return max(0, min(999, parsed))
 
 
 def ollama_resolution_attempts() -> int:
