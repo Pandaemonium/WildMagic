@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import json
 import os
 import textwrap
+from typing import Any
 
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
 import pygame
 
-from .actions import GameSession
+from .actions import ActionResult, GameSession
+from .wild_magic import SYSTEM_PROMPT, extract_thinking, strip_thinking
 from .models import (
     DOOR,
     FIRE,
@@ -31,8 +34,10 @@ TILE_SIZE = 18
 MAP_PIXEL_WIDTH = 42 * TILE_SIZE
 MAP_PIXEL_HEIGHT = 28 * TILE_SIZE
 PANEL_WIDTH = 430
-WINDOW_WIDTH = MAP_PIXEL_WIDTH + PANEL_WIDTH
-WINDOW_HEIGHT = 720
+LLM_PANEL_WIDTH = 520
+MAP_OFFSET_X = LLM_PANEL_WIDTH
+WINDOW_WIDTH = LLM_PANEL_WIDTH + MAP_PIXEL_WIDTH + PANEL_WIDTH
+WINDOW_HEIGHT = 800
 BACKGROUND = (13, 14, 18)
 PANEL = (27, 29, 34)
 PANEL_EDGE = (62, 66, 76)
@@ -80,7 +85,7 @@ class GameUI:
         self.tile_font = pygame.font.SysFont("consolas", 20, bold=True)
         self.ui_font = pygame.font.SysFont("consolas", 17)
         self.small_font = pygame.font.SysFont("consolas", 14)
-        self.session = GameSession()
+        self.session = GameSession(scenario="frontier")
         self.engine = self.session.engine
         self.input_text = ""
         self.input_active = True
@@ -89,8 +94,23 @@ class GameUI:
         self.log_selection_anchor: int | None = None
         self.log_selection_focus: int | None = None
         self.dragging_log_selection = False
-        self.log_area = pygame.Rect(MAP_PIXEL_WIDTH + 20, 0, PANEL_WIDTH - 40, 0)
-        self.spell_box_rect = pygame.Rect(MAP_PIXEL_WIDTH + 20, WINDOW_HEIGHT - 92, PANEL_WIDTH - 40, 54)
+        self.log_area = pygame.Rect(MAP_OFFSET_X + MAP_PIXEL_WIDTH + 20, 0, PANEL_WIDTH - 40, 0)
+        self.spell_box_rect = pygame.Rect(MAP_OFFSET_X + MAP_PIXEL_WIDTH + 20, WINDOW_HEIGHT - 92, PANEL_WIDTH - 40, 54)
+
+        self.llm_debug_entries: list[dict[str, Any]] = []
+        self._llm_lines_cache: list[tuple[str, tuple[int, int, int]]] | None = None
+        self.llm_scroll_offset = 0
+        self.llm_autoscroll = True
+        self.llm_dragging_scrollbar = False
+        self.llm_drag_grab_dy = 0
+        self.llm_content_rect = pygame.Rect(0, 0, LLM_PANEL_WIDTH, WINDOW_HEIGHT)
+        self.llm_scrollbar_track_rect: pygame.Rect | None = None
+        self.llm_scrollbar_thumb_rect: pygame.Rect | None = None
+        self._llm_max_scroll = 0
+        self.llm_line_rects: list[tuple[pygame.Rect, int]] = []
+        self.llm_selection_anchor: int | None = None
+        self.llm_selection_focus: int | None = None
+        self.dragging_llm_selection = False
 
     def run(self) -> None:
         running = True
@@ -100,6 +120,8 @@ class GameUI:
                     running = False
                 elif event.type in {pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP, pygame.MOUSEMOTION}:
                     self.handle_mouse(event)
+                elif event.type == pygame.MOUSEWHEEL:
+                    self.handle_mouse_wheel(event)
                 elif event.type == pygame.KEYDOWN:
                     self.handle_key(event)
             self.draw()
@@ -109,12 +131,20 @@ class GameUI:
 
     def handle_key(self, event: pygame.event.Event) -> None:
         if event.mod & pygame.KMOD_CTRL:
+            hovering_llm = self.llm_content_rect.collidepoint(pygame.mouse.get_pos())
             if event.key == pygame.K_c:
-                self.copy_log_selection()
+                if hovering_llm:
+                    self.copy_llm_selection()
+                else:
+                    self.copy_log_selection()
                 return
-            if event.key == pygame.K_a and self.log_line_rects:
-                self.log_selection_anchor = 0
-                self.log_selection_focus = len(self.log_line_rects) - 1
+            if event.key == pygame.K_a:
+                if hovering_llm and self._llm_lines_cache:
+                    self.llm_selection_anchor = 0
+                    self.llm_selection_focus = len(self._llm_lines_cache) - 1
+                elif self.log_line_rects:
+                    self.log_selection_anchor = 0
+                    self.log_selection_focus = len(self.log_line_rects) - 1
                 return
 
         if event.key == pygame.K_r and self.engine.state.game_over:
@@ -180,20 +210,60 @@ class GameUI:
 
     def handle_mouse(self, event: pygame.event.Event) -> None:
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.llm_scrollbar_thumb_rect and self.llm_scrollbar_thumb_rect.collidepoint(event.pos):
+                self.llm_dragging_scrollbar = True
+                self.llm_drag_grab_dy = event.pos[1] - self.llm_scrollbar_thumb_rect.y
+                return
+            if self.llm_scrollbar_track_rect and self.llm_scrollbar_track_rect.collidepoint(event.pos):
+                thumb = self.llm_scrollbar_thumb_rect
+                self.llm_drag_grab_dy = thumb.height // 2 if thumb else 0
+                track = self.llm_scrollbar_track_rect
+                thumb_height = thumb.height if thumb else 0
+                usable = max(1, track.height - thumb_height)
+                fraction = (event.pos[1] - self.llm_drag_grab_dy - track.y) / usable
+                self._llm_scroll_to_fraction(fraction)
+                self.llm_dragging_scrollbar = True
+                return
             if self.spell_box_rect.collidepoint(event.pos):
                 self.input_active = True
                 self.dragging_log_selection = False
                 self.log_selection_anchor = None
                 self.log_selection_focus = None
+                self.dragging_llm_selection = False
+                self.llm_selection_anchor = None
+                self.llm_selection_focus = None
+                return
+            llm_index = self.llm_line_index_at(event.pos)
+            if llm_index is not None:
+                self.llm_selection_anchor = llm_index
+                self.llm_selection_focus = llm_index
+                self.dragging_llm_selection = True
+                self.dragging_log_selection = False
+                self.log_selection_anchor = None
+                self.log_selection_focus = None
+                self.input_active = False
                 return
             index = self.log_line_index_at(event.pos)
             if index is not None:
                 self.log_selection_anchor = index
                 self.log_selection_focus = index
                 self.dragging_log_selection = True
+                self.dragging_llm_selection = False
+                self.llm_selection_anchor = None
+                self.llm_selection_focus = None
                 self.input_active = False
             else:
                 self.dragging_log_selection = False
+            return
+        if event.type == pygame.MOUSEMOTION and self.llm_dragging_scrollbar:
+            fraction = self._llm_scrollbar_fraction_at(event.pos[1])
+            if fraction is not None:
+                self._llm_scroll_to_fraction(fraction)
+            return
+        if event.type == pygame.MOUSEMOTION and self.dragging_llm_selection:
+            index = self.llm_line_index_at(event.pos)
+            if index is not None:
+                self.llm_selection_focus = index
             return
         if event.type == pygame.MOUSEMOTION and self.dragging_log_selection:
             index = self.log_line_index_at(event.pos)
@@ -201,6 +271,15 @@ class GameUI:
                 self.log_selection_focus = index
             return
         if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            if self.llm_dragging_scrollbar:
+                self.llm_dragging_scrollbar = False
+                return
+            if self.dragging_llm_selection:
+                index = self.llm_line_index_at(event.pos)
+                if index is not None:
+                    self.llm_selection_focus = index
+                self.dragging_llm_selection = False
+                return
             if self.dragging_log_selection:
                 index = self.log_line_index_at(event.pos)
                 if index is not None:
@@ -208,11 +287,19 @@ class GameUI:
             self.dragging_log_selection = False
 
     def restart_run(self) -> None:
-        self.session = GameSession()
+        self.session = GameSession(scenario="frontier")
         self.engine = self.session.engine
         self.input_text = ""
         self.input_active = True
         self.provider_label = self.session.provider_label
+        self.llm_debug_entries = []
+        self._llm_lines_cache = None
+        self.llm_scroll_offset = 0
+        self.llm_autoscroll = True
+        self.llm_line_rects = []
+        self.llm_selection_anchor = None
+        self.llm_selection_focus = None
+        self.dragging_llm_selection = False
 
     def log_line_index_at(self, pos: tuple[int, int]) -> int | None:
         if not self.log_area.collidepoint(pos):
@@ -255,6 +342,45 @@ class GameUI:
             return []
         return [line for _rect, line in self.log_line_rects[start : end + 1]]
 
+    def llm_line_index_at(self, pos: tuple[int, int]) -> int | None:
+        if not self.llm_content_rect.collidepoint(pos):
+            return None
+        x, y = pos
+        for rect, abs_index in self.llm_line_rects:
+            expanded = rect.inflate(0, 4)
+            expanded.x = self.llm_content_rect.x
+            expanded.width = self.llm_content_rect.width
+            if expanded.collidepoint(x, y):
+                return abs_index
+        if self.llm_line_rects:
+            if y < self.llm_line_rects[0][0].top:
+                return self.llm_line_rects[0][1]
+            if y > self.llm_line_rects[-1][0].bottom:
+                return self.llm_line_rects[-1][1]
+        return None
+
+    def copy_llm_selection(self) -> None:
+        lines = self.selected_llm_lines()
+        if not lines:
+            return
+        text = "\n".join(lines)
+        try:
+            if not pygame.scrap.get_init():
+                pygame.scrap.init()
+            pygame.scrap.put(pygame.SCRAP_TEXT, text.encode("utf-8"))
+            self.engine.state.add_message(f"Copied {len(lines)} line(s) from the LLM debug view.")
+        except pygame.error:
+            self.engine.state.add_message("Could not access the system clipboard.")
+
+    def selected_llm_lines(self) -> list[str]:
+        if self.llm_selection_anchor is None or self.llm_selection_focus is None or not self._llm_lines_cache:
+            return []
+        start = max(0, min(self.llm_selection_anchor, self.llm_selection_focus))
+        end = min(len(self._llm_lines_cache) - 1, max(self.llm_selection_anchor, self.llm_selection_focus))
+        if start > end:
+            return []
+        return [text for text, _color in self._llm_lines_cache[start : end + 1]]
+
     def cast_input_spell(self) -> None:
         spell = self.input_text.strip()
         if not spell:
@@ -264,9 +390,35 @@ class GameUI:
         result = self.session.cast_wild(spell)
         if result.wild_magic:
             self.provider_label = str(result.wild_magic.get("provider") or self.session.provider_label)
+        self._record_llm_debug_entry(result)
+
+    def _record_llm_debug_entry(self, result: ActionResult) -> None:
+        wild_magic = result.wild_magic
+        if not wild_magic:
+            return
+        raw = wild_magic.get("raw_response") or ""
+        thinking = extract_thinking(raw) if raw else None
+        response = strip_thinking(raw) if raw else ""
+        if not response and wild_magic.get("data") is not None:
+            response = json.dumps(wild_magic["data"], indent=2, ensure_ascii=False)
+        self.llm_debug_entries.append(
+            {
+                "turn": self.engine.state.turn,
+                "spell": wild_magic.get("spell", ""),
+                "provider": wild_magic.get("provider", ""),
+                "technical_failure": bool(wild_magic.get("technical_failure")),
+                "error": wild_magic.get("error"),
+                "context": result.llm_context,
+                "thinking": thinking,
+                "response": response or "(no response captured)",
+            }
+        )
+        self._llm_lines_cache = None
+        self.llm_autoscroll = True
 
     def draw(self) -> None:
         self.screen.fill(BACKGROUND)
+        self.draw_llm_panel()
         self.draw_map()
         self.draw_panel()
 
@@ -294,7 +446,7 @@ class GameUI:
 
     def draw_glyph(self, glyph: str, x: int, y: int, color: tuple[int, int, int]) -> None:
         surface = self.tile_font.render(glyph, True, color)
-        rect = surface.get_rect(center=(x * TILE_SIZE + TILE_SIZE // 2, y * TILE_SIZE + TILE_SIZE // 2))
+        rect = surface.get_rect(center=(MAP_OFFSET_X + x * TILE_SIZE + TILE_SIZE // 2, y * TILE_SIZE + TILE_SIZE // 2))
         self.screen.blit(surface, rect)
 
     def entity_color(self, entity: Entity) -> tuple[int, int, int]:
@@ -317,15 +469,19 @@ class GameUI:
         return base
 
     def draw_panel(self) -> None:
-        x = MAP_PIXEL_WIDTH
+        x = MAP_OFFSET_X + MAP_PIXEL_WIDTH
         pygame.draw.rect(self.screen, PANEL, (x, 0, PANEL_WIDTH, WINDOW_HEIGHT))
         pygame.draw.line(self.screen, PANEL_EDGE, (x, 0), (x, WINDOW_HEIGHT), 2)
         state = self.engine.state
         player = state.player
         cursor_y = 18
         cursor_y = self.draw_text("Wild Magic", x + 20, cursor_y, self.ui_font, ACCENT)
+        if state.scenario == "frontier":
+            location = f"Zone ({state.zone_x},{state.zone_y}) — {state.zone_type}"
+        else:
+            location = f"Depth {state.depth}/{state.max_depth}"
         cursor_y = self.draw_text(
-            f"Turn {state.turn}  Depth {state.depth}/{state.max_depth}  Resolver {self.provider_label}",
+            f"Turn {state.turn}  {location}  Resolver {self.provider_label}",
             x + 20,
             cursor_y + 8,
             self.small_font,
@@ -346,7 +502,7 @@ class GameUI:
         if state.game_over:
             overlay = pygame.Surface((MAP_PIXEL_WIDTH, MAP_PIXEL_HEIGHT), pygame.SRCALPHA)
             overlay.fill((0, 0, 0, 150))
-            self.screen.blit(overlay, (0, 0))
+            self.screen.blit(overlay, (MAP_OFFSET_X, 0))
             big_font = pygame.font.SysFont("consolas", 48, bold=True)
             if state.victory:
                 message = "YOU ESCAPED"
@@ -355,10 +511,10 @@ class GameUI:
                 message = "YOU DIED"
                 color = DANGER
             surface = big_font.render(message, True, color)
-            rect = surface.get_rect(center=(MAP_PIXEL_WIDTH // 2, MAP_PIXEL_HEIGHT // 2))
+            rect = surface.get_rect(center=(MAP_OFFSET_X + MAP_PIXEL_WIDTH // 2, MAP_PIXEL_HEIGHT // 2))
             self.screen.blit(surface, rect)
             sub = pygame.font.SysFont("consolas", 18).render("Press R to restart", True, MUTED)
-            sub_rect = sub.get_rect(center=(MAP_PIXEL_WIDTH // 2, MAP_PIXEL_HEIGHT // 2 + 50))
+            sub_rect = sub.get_rect(center=(MAP_OFFSET_X + MAP_PIXEL_WIDTH // 2, MAP_PIXEL_HEIGHT // 2 + 50))
             self.screen.blit(sub, sub_rect)
 
     def draw_bars(self, x: int, y: int, player: Entity) -> int:
@@ -546,6 +702,151 @@ class GameUI:
             visible_lines[0] = "..." + visible_lines[0][-39:]
         for index, line in enumerate(visible_lines):
             self.draw_text(line, x + 10, y + 9 + index * 18, self.ui_font, TEXT)
+
+    def draw_llm_panel(self) -> None:
+        x = 0
+        pygame.draw.rect(self.screen, PANEL, (x, 0, LLM_PANEL_WIDTH, WINDOW_HEIGHT))
+        pygame.draw.line(self.screen, PANEL_EDGE, (LLM_PANEL_WIDTH, 0), (LLM_PANEL_WIDTH, WINDOW_HEIGHT), 2)
+        cursor_y = self.draw_text("LLM Debug", x + 16, 16, self.ui_font, ACCENT)
+        cursor_y = self.draw_text(
+            "Full prompt, the model's <think> reasoning, and its raw response. Scroll with the wheel or the bar; "
+            "click and drag to select text, Ctrl+A to select all, Ctrl+C to copy.",
+            x + 16,
+            cursor_y + 2,
+            self.small_font,
+            MUTED,
+        )
+        pygame.draw.line(self.screen, PANEL_EDGE, (x + 16, cursor_y + 10), (LLM_PANEL_WIDTH - 16, cursor_y + 10), 1)
+        content_y = cursor_y + 20
+        content_height = WINDOW_HEIGHT - content_y - 16
+        self.draw_llm_content(x + 16, content_y, LLM_PANEL_WIDTH - 32, content_height)
+
+    def draw_llm_content(self, x: int, y: int, width: int, height: int) -> None:
+        scrollbar_width = 10
+        text_width = max(20, width - scrollbar_width - 6)
+        self.llm_content_rect = pygame.Rect(x, y, width, height)
+
+        char_width = max(1, self.small_font.size("M")[0])
+        wrap_chars = max(10, text_width // char_width)
+        if self._llm_lines_cache is None:
+            self._llm_lines_cache = self._build_llm_lines(wrap_chars)
+        lines = self._llm_lines_cache
+
+        line_height = self.small_font.get_linesize() + 1
+        max_visible = max(1, height // line_height)
+        self._llm_max_scroll = max(0, len(lines) - max_visible)
+        if self.llm_autoscroll:
+            self.llm_scroll_offset = self._llm_max_scroll
+        self.llm_scroll_offset = max(0, min(self.llm_scroll_offset, self._llm_max_scroll))
+
+        sel_lo, sel_hi = None, None
+        if self.llm_selection_anchor is not None and self.llm_selection_focus is not None:
+            sel_lo = min(self.llm_selection_anchor, self.llm_selection_focus)
+            sel_hi = max(self.llm_selection_anchor, self.llm_selection_focus)
+
+        clip = self.screen.get_clip()
+        self.screen.set_clip(pygame.Rect(x, y, width, height))
+        self.llm_line_rects = []
+        line_y = y
+        visible_slice = lines[self.llm_scroll_offset : self.llm_scroll_offset + max_visible + 1]
+        for offset, (text, color) in enumerate(visible_slice):
+            abs_index = self.llm_scroll_offset + offset
+            rect = pygame.Rect(x - 4, line_y - 1, width - scrollbar_width - 2, line_height)
+            if sel_lo is not None and sel_lo <= abs_index <= sel_hi:
+                pygame.draw.rect(self.screen, SELECTED, rect, border_radius=3)
+            if text:
+                self.draw_text(text, x, line_y, self.small_font, color)
+            self.llm_line_rects.append((rect, abs_index))
+            line_y += line_height
+        self.screen.set_clip(clip)
+
+        self.draw_llm_scrollbar(x + width - scrollbar_width, y, scrollbar_width, height, len(lines), max_visible)
+
+    def draw_llm_scrollbar(self, x: int, y: int, width: int, height: int, total_lines: int, visible_lines: int) -> None:
+        track = pygame.Rect(x, y, width, height)
+        pygame.draw.rect(self.screen, (20, 22, 27), track, border_radius=4)
+        if total_lines <= visible_lines or self._llm_max_scroll <= 0:
+            self.llm_scrollbar_track_rect = None
+            self.llm_scrollbar_thumb_rect = None
+            return
+        thumb_height = max(28, int(height * (visible_lines / total_lines)))
+        usable = max(1, height - thumb_height)
+        thumb_y = y + int(usable * (self.llm_scroll_offset / self._llm_max_scroll))
+        thumb = pygame.Rect(x, thumb_y, width, thumb_height)
+        thumb_color = ACCENT if self.llm_dragging_scrollbar else PANEL_EDGE
+        pygame.draw.rect(self.screen, thumb_color, thumb, border_radius=4)
+        self.llm_scrollbar_track_rect = track
+        self.llm_scrollbar_thumb_rect = thumb
+
+    def _build_llm_lines(self, wrap_chars: int) -> list[tuple[str, tuple[int, int, int]]]:
+        lines: list[tuple[str, tuple[int, int, int]]] = []
+
+        def emit(text: str, color: tuple[int, int, int]) -> None:
+            for raw_line in text.splitlines() or [""]:
+                for wrapped in wrap_text(raw_line, wrap_chars):
+                    lines.append((wrapped, color))
+
+        emit("SYSTEM PROMPT (sent with every cast)", ACCENT)
+        emit(SYSTEM_PROMPT.strip(), MUTED)
+        lines.append(("", MUTED))
+        lines.append(("=" * wrap_chars, PANEL_EDGE))
+
+        if not self.llm_debug_entries:
+            lines.append(("", MUTED))
+            emit("No spells cast yet — type one in the spell box and press Enter to see it here.", MUTED)
+            return lines
+
+        for entry in self.llm_debug_entries:
+            lines.append(("", MUTED))
+            header = f"— Turn {entry['turn']}  ·  \"{entry['spell']}\"  ·  provider: {entry['provider']}"
+            emit(header, DANGER if entry["technical_failure"] else GOLD)
+            if entry.get("error"):
+                emit(f"error: {entry['error']}", DANGER)
+
+            emit("CONTEXT SENT TO MODEL:", ACCENT)
+            context = entry.get("context")
+            if context is not None:
+                emit(json.dumps(context, indent=2, ensure_ascii=False), TEXT)
+            else:
+                emit("(context unavailable — this cast came from a replay)", MUTED)
+
+            emit("MODEL THOUGHTS:", ACCENT)
+            thinking = entry.get("thinking")
+            if thinking:
+                emit(thinking, MUTED)
+            else:
+                emit("(model returned no <think> reasoning block)", MUTED)
+
+            emit("MODEL RESPONSE:", ACCENT)
+            emit(entry.get("response") or "(no response captured)", TEXT)
+
+        return lines
+
+    def handle_mouse_wheel(self, event: pygame.event.Event) -> None:
+        pos = pygame.mouse.get_pos()
+        if not self.llm_content_rect.collidepoint(pos):
+            return
+        self.llm_scroll_offset -= event.y * 3
+        self.llm_scroll_offset = max(0, min(self.llm_scroll_offset, self._llm_max_scroll))
+        self.llm_autoscroll = self._llm_max_scroll > 0 and self.llm_scroll_offset >= self._llm_max_scroll
+
+    def _llm_scroll_to_fraction(self, fraction: float) -> None:
+        if self._llm_max_scroll <= 0:
+            return
+        fraction = max(0.0, min(1.0, fraction))
+        self.llm_scroll_offset = int(round(fraction * self._llm_max_scroll))
+        self.llm_autoscroll = self.llm_scroll_offset >= self._llm_max_scroll
+
+    def _llm_scrollbar_fraction_at(self, mouse_y: int) -> float | None:
+        track = self.llm_scrollbar_track_rect
+        thumb = self.llm_scrollbar_thumb_rect
+        if track is None or thumb is None:
+            return None
+        usable = track.height - thumb.height
+        if usable <= 0:
+            return None
+        target_thumb_y = mouse_y - self.llm_drag_grab_dy
+        return (target_thumb_y - track.y) / usable
 
     def draw_text(
         self,

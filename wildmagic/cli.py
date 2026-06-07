@@ -11,7 +11,7 @@ from .replay import save_replay
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Play Wild Magic from the terminal.")
     parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--scenario", default="dungeon", choices=["dungeon", "test_chamber"])
+    parser.add_argument("--scenario", default="dungeon", choices=["dungeon", "test_chamber", "empire_compound", "frontier"])
     parser.add_argument("--provider", default=None, choices=["auto", "mock", "ollama"])
     parser.add_argument("--record", type=Path, default=None, help="Write a replay JSON file at exit.")
     parser.add_argument("--script", type=Path, default=None, help="Read commands from a text file.")
@@ -83,9 +83,13 @@ def render_screen(session: GameSession) -> str:
     player = state.player
     inventory = ", ".join(f"{name} x{amount}" for name, amount in sorted(state.inventory.items())) or "empty"
     curses = ", ".join(curse.name for curse in state.curses.values()) or "none"
+    if state.scenario == "frontier":
+        location = f"Zone ({state.zone_x},{state.zone_y}) [{state.zone_type}]"
+    else:
+        location = f"Depth {state.depth}/{state.max_depth}"
     footer = [
         "",
-        f"Turn {state.turn} | Depth {state.depth}/{state.max_depth} | HP {player.hp}/{player.max_hp} | MP {player.mana}/{player.max_mana}",
+        f"Turn {state.turn} | {location} | HP {player.hp}/{player.max_hp} | MP {player.mana}/{player.max_mana}",
         f"Inventory: {inventory}",
         f"Curses: {curses}",
         "Recent log:",

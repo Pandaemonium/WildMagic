@@ -43,6 +43,7 @@ class ActionResult:
     messages: list[str] = field(default_factory=list)
     technical_failure: bool = False
     wild_magic: dict[str, Any] | None = None
+    llm_context: dict[str, Any] | None = None
     should_quit: bool = False
 
     def to_record(self) -> dict[str, Any]:
@@ -86,6 +87,7 @@ class GameSession:
         success = False
         technical_failure = False
         wild_magic_record: dict[str, Any] | None = None
+        llm_context: dict[str, Any] | None = None
         should_quit = False
         explicit_messages: list[str] | None = None
 
@@ -162,7 +164,7 @@ class GameSession:
                 if "silenced" in self.engine.state.player.statuses:
                     explicit_messages = ["You are silenced — the spell is swallowed before it can speak."]
                 else:
-                    success, technical_failure, wild_magic_record = self._cast_wild(spell, replay_wild_magic)
+                    success, technical_failure, wild_magic_record, llm_context = self._cast_wild(spell, replay_wild_magic)
             else:
                 explicit_messages = [f"Unknown command: {verb}"]
 
@@ -179,6 +181,7 @@ class GameSession:
             messages=messages,
             technical_failure=technical_failure,
             wild_magic=wild_magic_record,
+            llm_context=llm_context,
             should_quit=should_quit,
         )
         if record:
@@ -198,7 +201,7 @@ class GameSession:
         self,
         spell: str,
         replay_wild_magic: dict[str, Any] | None,
-    ) -> tuple[bool, bool, dict[str, Any]]:
+    ) -> tuple[bool, bool, dict[str, Any], dict[str, Any] | None]:
         spell = spell.strip()
         if not spell:
             return False, False, {
@@ -207,8 +210,9 @@ class GameSession:
                 "technical_failure": False,
                 "error": "missing spell text",
                 "data": None,
-            }
+            }, None
 
+        context: dict[str, Any] | None = None
         if replay_wild_magic is not None:
             resolution = MagicResolution(
                 data=replay_wild_magic.get("data"),
@@ -236,10 +240,10 @@ class GameSession:
         }
         if resolution.technical_failure or resolution.data is None:
             self.engine.state.add_message(f"Wild magic misfired technically: {resolution.error}")
-            return False, True, wild_magic_record
+            return False, True, wild_magic_record, context
 
         outcome = self.engine.apply_wild_magic_resolution(resolution.data)
-        return outcome.consumed_turn, False, wild_magic_record
+        return outcome.consumed_turn, False, wild_magic_record, context
 
     def to_replay(self) -> dict[str, Any]:
         return {

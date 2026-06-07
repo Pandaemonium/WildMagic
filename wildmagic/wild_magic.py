@@ -140,6 +140,7 @@ SUPPORTED_EFFECTS = {
     "spawn_item",
     "conjure_item",
     "conjure_creature",
+    "transform_item",
     "modify_inventory",
     "transform_entity",
     "change_faction",
@@ -201,6 +202,7 @@ class OllamaWildMagicProvider:
                 "temperature": ollama_temperature(),
                 "top_p": 0.9,
                 "num_predict": ollama_num_predict(),
+                "num_ctx": ollama_num_ctx(),
                 "num_gpu": ollama_num_gpu(),
             },
             "keep_alive": "10m",
@@ -487,7 +489,19 @@ class MockWildMagicProvider:
                 }
             )
 
-        if any(word in text for word in ["transmute", "glass", "gold", "change my body"]):
+        if any(word in text for word in ["transmute", "glass", "change chalk"]):
+            return json.dumps(
+                {
+                    "accepted": True,
+                    "severity": "minor",
+                    "outcome_text": "The chalk turns to glass.",
+                    "effects": [{"type": "transform_item", "target": "inventory", "item": "chalk", "new_item_type": "glass chalk", "material": "glass", "tags": ["fragile"]}],
+                    "costs": [{"type": "mana", "amount": 2}],
+                    "rejected_reason": None,
+                }
+            )
+
+        if any(word in text for word in ["transmute", "gold", "change my body"]):
             return json.dumps(
                 {
                     "accepted": True,
@@ -533,6 +547,46 @@ class MockWildMagicProvider:
                         },
                     ],
                     "costs": [{"type": "mana", "amount": 2}],
+                    "rejected_reason": None,
+                }
+            )
+
+        if any(word in text for word in ["force", "push", "shove"]):
+            return json.dumps(
+                {
+                    "accepted": True,
+                    "severity": "minor",
+                    "outcome_text": "An invisible hand shoves the target.",
+                    "effects": [
+                        {"type": "damage", "target": nearest_enemy or "nearest_enemy", "amount": 2, "damage_type": "force"}
+                    ],
+                    "costs": [{"type": "mana", "amount": 2}],
+                    "rejected_reason": None,
+                }
+            )
+
+        if any(word in text for word in ["transform item on ground"]):
+            return json.dumps(
+                {
+                    "accepted": True,
+                    "severity": "minor",
+                    "outcome_text": "The ground shimmers.",
+                    "effects": [{"type": "transform_item", "target": "nearest_item", "item": "potion", "new_item_type": "poison flask", "material": "glass", "tags": ["toxic"]}],
+                    "costs": [{"type": "mana", "amount": 2}],
+                    "rejected_reason": None,
+                }
+            )
+
+        if any(word in text for word in ["acid", "melt", "dissolve"]):
+            return json.dumps(
+                {
+                    "accepted": True,
+                    "severity": "minor",
+                    "outcome_text": "Acid splashes the target.",
+                    "effects": [
+                        {"type": "damage", "target": nearest_enemy or "nearest_enemy", "amount": 6, "damage_type": "acid"}
+                    ],
+                    "costs": [{"type": "mana", "amount": 3}],
                     "rejected_reason": None,
                 }
             )
@@ -1461,6 +1515,16 @@ def strip_thinking(raw: str) -> str:
     return re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL | re.IGNORECASE).strip()
 
 
+def extract_thinking(raw: str) -> str | None:
+    if not raw:
+        return None
+    match = re.search(r"<think>(.*?)</think>", raw, flags=re.DOTALL | re.IGNORECASE)
+    if not match:
+        return None
+    thought = match.group(1).strip()
+    return thought or None
+
+
 def validate_resolution(data: dict[str, Any]) -> str | None:
     if "accepted" in data and not isinstance(data["accepted"], bool):
         return "accepted must be a boolean"
@@ -1618,7 +1682,24 @@ def ollama_num_predict() -> int:
         parsed = int(value)
     except ValueError:
         return 800
-    return max(128, min(2048, parsed))
+    return max(128, min(4096, parsed))
+
+
+def ollama_num_ctx() -> int:
+    """Context window size (prompt + response, in tokens).
+
+    Ollama defaults to 2048 when a model's Modelfile doesn't set num_ctx, and
+    qwen3:8b doesn't. Our system prompt alone is ~3,600 tokens, so the default
+    silently truncates it from the conversation — the model then sees only a
+    JSON blob with no instructions and echoes it back instead of resolving the
+    spell. Default high enough to comfortably fit prompt + context + response.
+    """
+    value = os.environ.get("WILDMAGIC_OLLAMA_NUM_CTX", "8192")
+    try:
+        parsed = int(value)
+    except ValueError:
+        return 8192
+    return max(2048, min(32768, parsed))
 
 
 def ollama_temperature() -> float:

@@ -40,6 +40,26 @@ MAP_WIDTH = 42
 MAP_HEIGHT = 28
 
 
+# (name, char, hp, attack, defense, ai, tags, resistances, weaknesses)
+WILD_ENEMY_TEMPLATES: list[tuple[str, str, int, int, int, str, set[str], dict[str, int], dict[str, int]]] = [
+    ("goblin cutpurse", "g", 8, 3, 0, "goblin", {"goblin", "humanoid", "flesh"}, {}, {}),
+    ("glass bat", "b", 5, 2, 0, "bat", {"beast", "glass"}, {"poison": 25}, {"force": 25}),
+    ("ash slime", "s", 10, 2, 1, "slime", {"slime", "ash"}, {"fire": 35, "poison": 50}, {"frost": 25}),
+    ("bone skeleton", "k", 7, 3, 1, "simple", {"undead", "bone"}, {"poison": 100, "frost": 50}, {"force": 50, "radiant": 50}),
+    ("cave spider", "x", 6, 2, 0, "simple", {"beast", "spider"}, {}, {"fire": 25}),
+    ("shadow wraith", "W", 4, 4, 0, "simple", {"undead", "shadow"}, {"physical": 25, "poison": 100}, {"radiant": 75, "fire": 25}),
+    ("fungal crawler", "c", 9, 2, 0, "simple", {"beast", "fungus"}, {"acid": 50}, {"fire": 50}),
+]
+
+LEGION_ENEMY_TEMPLATES: list[tuple[str, str, int, int, int, str, set[str], dict[str, int], dict[str, int]]] = [
+    ("drill initiate", "i", 6, 2, 0, "legion", {"empire", "human", "soldier", "disciplined"}, {}, {"force": 25}),
+    ("legion spearman", "l", 9, 3, 1, "legion", {"empire", "human", "soldier", "disciplined"}, {"physical": 15}, {}),
+    ("wall sergeant", "m", 10, 3, 2, "legion", {"empire", "human", "soldier", "officer", "disciplined"}, {"physical": 15}, {}),
+    ("iron chaplain", "h", 7, 2, 1, "legion", {"empire", "human", "priest", "disciplined"}, {"radiant": 25}, {"poison": 25}),
+    ("exemplar of the line", "e", 12, 4, 2, "legion", {"empire", "human", "soldier", "elite", "disciplined"}, {"physical": 25}, {}),
+]
+
+
 ITEM_USE_SPECS: dict[str, dict[str, Any]] = {
     "mana_crystal": {
         "effects": [{"kind": "restore_mana", "amount": 6}],
@@ -144,6 +164,18 @@ class Room:
 
 
 @dataclass
+class ZoneSnapshot:
+    """A cached, persisted record of a previously-visited frontier zone (sans player)."""
+
+    tiles: list[list[str]]
+    tile_tags: dict[str, list[str]]
+    tile_durations: dict[str, int]
+    entities: dict[str, Entity]
+    explored: set[str]
+    zone_type: str
+
+
+@dataclass
 class GameState:
     width: int = MAP_WIDTH
     height: int = MAP_HEIGHT
@@ -169,6 +201,10 @@ class GameState:
     depth: int = 1
     max_depth: int = 3
     stats: GameStats = field(default_factory=GameStats)
+    zone_x: int = 0
+    zone_y: int = 0
+    zone_type: str = "frontier"
+    zones: dict[tuple[int, int], ZoneSnapshot] = field(default_factory=dict)
 
     @property
     def player(self) -> Entity:
@@ -186,6 +222,10 @@ class GameEngine:
         self._next_entity_number = 1
         if scenario == "test_chamber":
             self._generate_test_chamber()
+        elif scenario == "empire_compound":
+            self._generate_empire_compound()
+        elif scenario == "frontier":
+            self._generate_frontier_start()
         else:
             self._generate_new_run()
 
@@ -254,15 +294,7 @@ class GameEngine:
         if state.depth > 1:
             state.tiles[py][px] = STAIRS_UP
 
-        enemy_templates = [
-            ("goblin cutpurse", "g", 8, 3, 0, "goblin", {"goblin", "humanoid", "flesh"}, {}, {}),
-            ("glass bat", "b", 5, 2, 0, "bat", {"beast", "glass"}, {"poison": 25}, {"force": 25}),
-            ("ash slime", "s", 10, 2, 1, "slime", {"slime", "ash"}, {"fire": 35, "poison": 50}, {"frost": 25}),
-            ("bone skeleton", "k", 7, 3, 1, "simple", {"undead", "bone"}, {"poison": 100, "frost": 50}, {"force": 50, "radiant": 50}),
-            ("cave spider", "x", 6, 2, 0, "simple", {"beast", "spider"}, {}, {"fire": 25}),
-            ("shadow wraith", "W", 4, 4, 0, "simple", {"undead", "shadow"}, {"physical": 25, "poison": 100}, {"radiant": 75, "fire": 25}),
-            ("fungal crawler", "c", 9, 2, 0, "simple", {"beast", "fungus"}, {"acid": 50}, {"fire": 50}),
-        ]
+        enemy_templates = WILD_ENEMY_TEMPLATES + LEGION_ENEMY_TEMPLATES
         for room in rooms[1:]:
             if self.rng.random() < 0.85:
                 name, char, hp, attack, defense, ai, tags, resistances, weaknesses = self.rng.choice(enemy_templates)
@@ -350,6 +382,391 @@ class GameEngine:
         state.add_message("Use CLI commands or type wild spells in the panel.")
         self.update_fov()
 
+    def _generate_empire_compound(self) -> None:
+        """A bilaterally-symmetric Imperial garrison — the Grand Empire does not build by accident.
+
+        Every room, corridor, door, and patrol on one side of the central axis has an
+        identical mirror on the other. Room/corridor dimensions are kept odd so that
+        reflecting a shape's bounds also reflects its center exactly (no off-by-one drift).
+        """
+        state = self.state
+        state.tiles = [[WALL for _ in range(state.width)] for _ in range(state.height)]
+        state.visible.clear()
+        state.explored.clear()
+        state.tile_tags.clear()
+        state.tile_durations.clear()
+        state.entities = {}
+
+        axis_x = state.width // 2
+
+        courtyard = Room(axis_x - 4, 10, 9, 7)
+        self._carve_room(courtyard)
+
+        garrison_roster = [
+            ("legion spearman", "l", 9, 3, 1, "legion", {"empire", "human", "soldier", "disciplined"}, {"physical": 15}, {}),
+            ("drill initiate", "i", 6, 2, 0, "legion", {"empire", "human", "soldier", "disciplined"}, {}, {"force": 25}),
+            ("iron chaplain", "h", 7, 2, 1, "legion", {"empire", "human", "priest", "disciplined"}, {"radiant": 25}, {"poison": 25}),
+        ]
+
+        cell_rooms: dict[int, Room] = {}
+        for cell_y in (5, 18):
+            cell = Room(axis_x + 7, cell_y, 5, 5)
+            self._carve_room_mirrored(cell, axis_x)
+            self._carve_corridor_mirrored(courtyard.center, cell.center, axis_x)
+            cell_rooms[cell_y] = cell
+            name, char, hp, attack, defense, ai, tags, resistances, weaknesses = self.rng.choice(garrison_roster)
+            ox, oy = self._random_open_tile_in_room(cell)
+            self.spawn_actor(name, char, ox, oy, hp, attack, defense, "enemy", ai,
+                             tags=set(tags), resistances=dict(resistances), weaknesses=dict(weaknesses))
+            self.spawn_actor(name, char, 2 * axis_x - ox, oy, hp, attack, defense, "enemy", ai,
+                             tags=set(tags), resistances=dict(resistances), weaknesses=dict(weaknesses))
+
+        for tower_y, partner_cell_y in ((2, 5), (23, 18)):
+            tower = Room(axis_x + 14, tower_y, 3, 3)
+            self._carve_room_mirrored(tower, axis_x)
+            self._carve_corridor_mirrored(tower.center, cell_rooms[partner_cell_y].center, axis_x)
+
+        self._place_doors_mirrored(axis_x, count=4)
+
+        cx, cy = courtyard.center
+        player = Entity(
+            id="player",
+            name="You",
+            kind="player",
+            x=cx,
+            y=cy - 2,
+            char="@",
+            hp=24,
+            max_hp=24,
+            mana=14,
+            max_mana=14,
+            attack=4,
+            defense=1,
+            blocks=True,
+            faction="player",
+        )
+        state.entities[player.id] = player
+        state.tiles[cy + 2][cx] = STAIRS_DOWN
+        self.spawn_actor(
+            "wall sergeant", "m", cx, cy, 10, 3, 2, "enemy", "legion",
+            tags={"empire", "human", "soldier", "officer", "disciplined"},
+            resistances={"physical": 15},
+        )
+
+        state.add_message("Stone walls rise in perfect symmetry — the Grand Empire does not build by accident.")
+        state.add_message("Somewhere ahead, boots strike the ground in unison.")
+        self.update_fov()
+
+    # ------------------------------------------------------------------
+    # Frontier: a Qud-style grid of open-country zones you cross by foot,
+    # each an open stretch of ground dotted with standalone buildings
+    # rather than a wall-filled warren of rooms and corridors.
+    # ------------------------------------------------------------------
+
+    def _generate_frontier_start(self) -> None:
+        state = self.state
+        state.zone_x = 0
+        state.zone_y = 0
+        state.zones = {}
+        state.depth = 1
+        state.max_depth = 1
+        state.entities = {}
+        state.tile_tags = {}
+        state.tile_durations = {}
+        state.explored = set()
+
+        state.zone_type = self._generate_open_zone(0, 0)
+
+        px, py = state.width // 2, state.height // 2
+        player = Entity(
+            id="player",
+            name="You",
+            kind="player",
+            x=px,
+            y=py,
+            char="@",
+            hp=24,
+            max_hp=24,
+            mana=14,
+            max_mana=14,
+            attack=4,
+            defense=1,
+            blocks=True,
+            faction="player",
+        )
+        state.entities[player.id] = player
+        if not self.can_occupy(px, py):
+            player.x, player.y = self._find_entry_tile(px, py)
+
+        state.add_message("Open country stretches in every direction beneath a wide sky.")
+        state.add_message("Walk to the edge of the land to cross into the next stretch of it.")
+        self.update_fov()
+
+    def _imperial_density(self, zx: int, zy: int) -> float:
+        """How strongly the Grand Empire holds a zone — higher to the northeast, lower to the southwest."""
+        gradient = (zx + zy) / 8.0
+        return max(0.05, min(0.95, 0.5 + gradient))
+
+    def _generate_open_zone(self, zx: int, zy: int) -> str:
+        """Open ground dotted with standalone buildings — Caves-of-Qud overworld style, not carved corridors."""
+        state = self.state
+        state.tiles = [[FLOOR for _ in range(state.width)] for _ in range(state.height)]
+        state.visible.clear()
+        state.tile_tags.clear()
+        state.tile_durations.clear()
+
+        zone_rng = random.Random(hash((state.rng_seed, "frontier_zone", zx, zy)))
+        imperial_density = self._imperial_density(zx, zy)
+
+        self._scatter_terrain_features(zone_rng)
+        buildings = self._place_zone_buildings(zone_rng, imperial_density)
+        self._populate_zone(zone_rng, buildings, imperial_density)
+
+        if imperial_density >= 0.7:
+            zone_type = "imperial reach"
+            state.add_message("Banners of the Grand Empire snap overhead — the land itself stands at attention.")
+        elif imperial_density <= 0.3:
+            zone_type = "wilds"
+            state.add_message("No order rules out here. The wind moves through open country untouched by the legions.")
+        else:
+            zone_type = "borderlands"
+            state.add_message("The land is a patchwork — wild growth pressing against straight Imperial walls.")
+        return zone_type
+
+    def _scatter_terrain_features(self, zone_rng: random.Random) -> None:
+        """Sprinkle small clusters of natural terrain across the open ground for texture."""
+        state = self.state
+        width, height = state.width, state.height
+        for _ in range(zone_rng.randint(2, 4)):
+            kind = zone_rng.choice([VINES, RUBBLE, WATER])
+            cx = zone_rng.randint(3, width - 4)
+            cy = zone_rng.randint(3, height - 4)
+            radius = zone_rng.randint(1, 3)
+            for y in range(cy - radius, cy + radius + 1):
+                for x in range(cx - radius, cx + radius + 1):
+                    if not self.in_bounds(x, y):
+                        continue
+                    if (x - cx) ** 2 + (y - cy) ** 2 > radius * radius:
+                        continue
+                    if zone_rng.random() < 0.7 and state.tiles[y][x] == FLOOR:
+                        state.tiles[y][x] = kind
+
+    def _place_zone_buildings(self, zone_rng: random.Random, imperial_density: float) -> list[dict[str, Any]]:
+        """Place a handful of free-standing, non-overlapping buildings within the open ground.
+
+        A margin keeps every building clear of the outer ring of tiles so the edges of
+        the zone — where the player crosses to neighboring zones — always stay walkable.
+        """
+        state = self.state
+        margin = 3
+        placed: list[Room] = []
+        buildings: list[dict[str, Any]] = []
+        attempts = 0
+        target = zone_rng.randint(2, 5)
+        while len(placed) < target and attempts < 80:
+            attempts += 1
+            imperial = zone_rng.random() < imperial_density
+            if imperial:
+                w = zone_rng.choice([5, 7, 9])
+                h = zone_rng.choice([5, 7])
+            else:
+                w = zone_rng.randint(4, 8)
+                h = zone_rng.randint(4, 7)
+            x = zone_rng.randint(margin, state.width - w - margin)
+            y = zone_rng.randint(margin, state.height - h - margin)
+            room = Room(x, y, w, h)
+            if any(room.intersects(existing) for existing in placed):
+                continue
+            placed.append(room)
+            if imperial:
+                self._build_imperial_structure(room)
+                buildings.append({"room": room, "kind": "imperial"})
+            else:
+                self._build_common_structure(room, zone_rng)
+                buildings.append({"room": room, "kind": "common"})
+        return buildings
+
+    def _build_common_structure(self, room: Room, zone_rng: random.Random) -> None:
+        """A plain walled structure — a shack, outpost, or ruin — with one door on a random side."""
+        self._wall_room_perimeter(room)
+        side = zone_rng.choice(["north", "south", "east", "west"])
+        if side == "north":
+            door = (zone_rng.randint(room.x + 1, room.x + room.w - 2), room.y)
+        elif side == "south":
+            door = (zone_rng.randint(room.x + 1, room.x + room.w - 2), room.y + room.h - 1)
+        elif side == "west":
+            door = (room.x, zone_rng.randint(room.y + 1, room.y + room.h - 2))
+        else:
+            door = (room.x + room.w - 1, zone_rng.randint(room.y + 1, room.y + room.h - 2))
+        self.state.tiles[door[1]][door[0]] = DOOR
+
+    def _build_imperial_structure(self, room: Room) -> None:
+        """A symmetrical Imperial outpost — the Grand Empire does not build by accident.
+
+        Door and central marker both sit on the room's own vertical axis, so the
+        structure mirrors itself perfectly without needing a paired twin.
+        """
+        self._wall_room_perimeter(room)
+        axis_x = room.x + room.w // 2
+        cy = room.y + room.h // 2
+        self.state.tiles[room.y + room.h - 1][axis_x] = DOOR
+        if room.w >= 5 and room.h >= 5:
+            self.state.tiles[cy][axis_x] = RUBBLE
+
+    def _wall_room_perimeter(self, room: Room) -> None:
+        for y in range(room.y, room.y + room.h):
+            for x in range(room.x, room.x + room.w):
+                on_edge = x in (room.x, room.x + room.w - 1) or y in (room.y, room.y + room.h - 1)
+                self.state.tiles[y][x] = WALL if on_edge else FLOOR
+
+    def _populate_zone(self, zone_rng: random.Random, buildings: list[dict[str, Any]], imperial_density: float) -> None:
+        state = self.state
+        occupied: set[tuple[int, int]] = {(state.player.x, state.player.y)} if state.player_id in state.entities else set()
+
+        for building in buildings:
+            room: Room = building["room"]
+            if building["kind"] == "imperial":
+                for _ in range(zone_rng.randint(1, 2)):
+                    spot = self._random_open_tile_in_room(room)
+                    if spot in occupied:
+                        continue
+                    self._spawn_from_template(zone_rng.choice(LEGION_ENEMY_TEMPLATES), spot[0], spot[1])
+                    occupied.add(spot)
+            elif zone_rng.random() < 0.5:
+                spot = self._random_open_tile_in_room(room)
+                if spot not in occupied:
+                    self._spawn_from_template(zone_rng.choice(WILD_ENEMY_TEMPLATES), spot[0], spot[1])
+                    occupied.add(spot)
+
+        for _ in range(zone_rng.randint(1, 3)):
+            spot = self._random_open_ground_tile(zone_rng, occupied)
+            if spot is None:
+                break
+            roster = LEGION_ENEMY_TEMPLATES if zone_rng.random() < imperial_density else WILD_ENEMY_TEMPLATES
+            self._spawn_from_template(zone_rng.choice(roster), spot[0], spot[1])
+            occupied.add(spot)
+
+        for _ in range(zone_rng.randint(0, 2)):
+            spot = self._random_open_ground_tile(zone_rng, occupied)
+            if spot is None:
+                break
+            name, char, item_type = zone_rng.choice(
+                [
+                    ("mana crystal", "!", "mana crystal"),
+                    ("blood moss", ",", "blood moss"),
+                    ("bone charm", "?", "bone charm"),
+                ]
+            )
+            self.spawn_item(name, char, spot[0], spot[1], item_type)
+            occupied.add(spot)
+
+    def _spawn_from_template(
+        self,
+        template: tuple[str, str, int, int, int, str, set[str], dict[str, int], dict[str, int]],
+        x: int,
+        y: int,
+        faction: str = "enemy",
+    ) -> Entity:
+        name, char, hp, attack, defense, ai, tags, resistances, weaknesses = template
+        return self.spawn_actor(
+            name, char, x, y, hp, attack, defense, faction, ai,
+            tags=set(tags), resistances=dict(resistances), weaknesses=dict(weaknesses),
+        )
+
+    def _random_open_ground_tile(
+        self, zone_rng: random.Random, avoid: set[tuple[int, int]]
+    ) -> tuple[int, int] | None:
+        state = self.state
+        for _ in range(100):
+            x = zone_rng.randint(2, state.width - 3)
+            y = zone_rng.randint(2, state.height - 3)
+            if (x, y) in avoid or state.tiles[y][x] != FLOOR:
+                continue
+            if self.can_occupy(x, y):
+                return x, y
+        return None
+
+    def _cross_zone_edge(self, target_x: int, target_y: int) -> bool:
+        """Step off the edge of the map to arrive at the corresponding edge of the neighboring zone."""
+        state = self.state
+        width, height = state.width, state.height
+        new_zx, new_zy = state.zone_x, state.zone_y
+        entry_x, entry_y = target_x, target_y
+        crossed = False
+        if target_x < 0:
+            new_zx -= 1
+            entry_x = width - 1
+            crossed = True
+        elif target_x >= width:
+            new_zx += 1
+            entry_x = 0
+            crossed = True
+        if target_y < 0:
+            new_zy -= 1
+            entry_y = height - 1
+            crossed = True
+        elif target_y >= height:
+            new_zy += 1
+            entry_y = 0
+            crossed = True
+        if not crossed:
+            return False
+        entry_x = max(0, min(width - 1, entry_x))
+        entry_y = max(0, min(height - 1, entry_y))
+
+        self._save_current_zone()
+        state.zone_x, state.zone_y = new_zx, new_zy
+        self._load_or_generate_zone(new_zx, new_zy, entry_x, entry_y)
+        state.add_message(f"You cross into new territory — the {state.zone_type} of zone ({new_zx}, {new_zy}).")
+        return True
+
+    def _save_current_zone(self) -> None:
+        state = self.state
+        state.zones[(state.zone_x, state.zone_y)] = ZoneSnapshot(
+            tiles=[row[:] for row in state.tiles],
+            tile_tags={key: list(value) for key, value in state.tile_tags.items()},
+            tile_durations=dict(state.tile_durations),
+            entities={
+                entity_id: entity
+                for entity_id, entity in state.entities.items()
+                if entity_id != state.player_id
+            },
+            explored=set(state.explored),
+            zone_type=state.zone_type,
+        )
+
+    def _load_or_generate_zone(self, zx: int, zy: int, entry_x: int, entry_y: int) -> None:
+        state = self.state
+        player = state.entities[state.player_id]
+        key = (zx, zy)
+        state.entities = {}
+        if key in state.zones:
+            snapshot = state.zones[key]
+            state.tiles = [row[:] for row in snapshot.tiles]
+            state.tile_tags = {key_: list(value) for key_, value in snapshot.tile_tags.items()}
+            state.tile_durations = dict(snapshot.tile_durations)
+            state.explored = set(snapshot.explored)
+            state.entities = dict(snapshot.entities)
+            state.zone_type = snapshot.zone_type
+        else:
+            state.explored = set()
+            state.zone_type = self._generate_open_zone(zx, zy)
+        state.entities[player.id] = player
+        player.x, player.y = self._find_entry_tile(entry_x, entry_y)
+        state.visible.clear()
+        self.update_fov()
+
+    def _find_entry_tile(self, x: int, y: int) -> tuple[int, int]:
+        if self.can_occupy(x, y):
+            return x, y
+        for radius in range(1, 6):
+            for dy in range(-radius, radius + 1):
+                for dx in range(-radius, radius + 1):
+                    nx, ny = x + dx, y + dy
+                    if self.in_bounds(nx, ny) and self.can_occupy(nx, ny):
+                        return nx, ny
+        return x, y
+
     def _carve_room(self, room: Room) -> None:
         for y in range(room.y, room.y + room.h):
             for x in range(room.x, room.x + room.w):
@@ -372,6 +789,57 @@ class GameEngine:
     def _carve_v_tunnel(self, y1: int, y2: int, x: int) -> None:
         for y in range(min(y1, y2), max(y1, y2) + 1):
             self.state.tiles[y][x] = FLOOR
+
+    def _mirror_room(self, room: Room, axis_x: int) -> Room:
+        return Room(2 * axis_x - room.x - room.w + 1, room.y, room.w, room.h)
+
+    def _carve_room_mirrored(self, room: Room, axis_x: int) -> Room:
+        """Carve a room and its reflection across the vertical line x=axis_x. Returns the mirror."""
+        self._carve_room(room)
+        mirrored = self._mirror_room(room, axis_x)
+        self._carve_room(mirrored)
+        return mirrored
+
+    def _carve_corridor_straight(
+        self, start: tuple[int, int], end: tuple[int, int], horizontal_first: bool = True
+    ) -> None:
+        """Right-angle corridor with a fixed bend order (deterministic, so mirrors match exactly)."""
+        x1, y1 = start
+        x2, y2 = end
+        if horizontal_first:
+            self._carve_h_tunnel(x1, x2, y1)
+            self._carve_v_tunnel(y1, y2, x2)
+        else:
+            self._carve_v_tunnel(y1, y2, x1)
+            self._carve_h_tunnel(x1, x2, y2)
+
+    def _carve_corridor_mirrored(
+        self, start: tuple[int, int], end: tuple[int, int], axis_x: int, horizontal_first: bool = True
+    ) -> None:
+        self._carve_corridor_straight(start, end, horizontal_first)
+        mirrored_start = (2 * axis_x - start[0], start[1])
+        mirrored_end = (2 * axis_x - end[0], end[1])
+        self._carve_corridor_straight(mirrored_start, mirrored_end, horizontal_first)
+
+    def _place_doors_mirrored(self, axis_x: int, count: int = 4) -> None:
+        """Find door candidates strictly right of the axis, then place each alongside its mirror."""
+        candidates: list[tuple[int, int]] = []
+        for y in range(1, self.state.height - 1):
+            for x in range(axis_x + 1, self.state.width - 1):
+                if self.state.tiles[y][x] != FLOOR:
+                    continue
+                horizontal_floor = self.state.tiles[y][x - 1] != WALL and self.state.tiles[y][x + 1] != WALL
+                vertical_walls = self.state.tiles[y - 1][x] == WALL and self.state.tiles[y + 1][x] == WALL
+                vertical_floor = self.state.tiles[y - 1][x] != WALL and self.state.tiles[y + 1][x] != WALL
+                horizontal_walls = self.state.tiles[y][x - 1] == WALL and self.state.tiles[y][x + 1] == WALL
+                if (horizontal_floor and vertical_walls) or (vertical_floor and horizontal_walls):
+                    candidates.append((x, y))
+        self.rng.shuffle(candidates)
+        for x, y in candidates[:count]:
+            self.state.tiles[y][x] = DOOR
+            mirrored_x = 2 * axis_x - x
+            if self.state.tiles[y][mirrored_x] == FLOOR:
+                self.state.tiles[y][mirrored_x] = DOOR
 
     def _place_doors(self) -> None:
         candidates: list[tuple[int, int]] = []
@@ -590,6 +1058,9 @@ class GameEngine:
         target_x = player.x + dx
         target_y = player.y + dy
         if not self.in_bounds(target_x, target_y):
+            if self.state.scenario == "frontier" and self._cross_zone_edge(target_x, target_y):
+                self.finish_player_turn()
+                return True
             self.state.add_message("The dungeon refuses that edge.")
             return False
         target = self.blocking_entity_at(target_x, target_y)
@@ -853,6 +1324,21 @@ class GameEngine:
         else:
             self.state.add_message(f"{attacker.name} drops {defender.name}.")
 
+    def _is_canonical(self, entity: Entity, status: str) -> bool:
+        display = entity.status_display.get(status)
+        if not display:
+            return True
+        if display == status.replace("_", " "):
+            return True
+        canon_aliases = {
+            "frozen": {"petrified", "stone", "crystallized", "iced", "glaciated", "encased"},
+            "burning": {"aflame", "alight", "on fire", "ignited", "flaming", "ablaze", "smoldering"},
+            "poisoned": {"diseased", "infected", "plagued", "venomous", "toxic", "envenomed", "tainted"},
+            "bleeding": {"lacerated", "wounded", "cut", "hemorrhaging", "bloodied"},
+            "warded": {"protected", "shielded", "guarded", "defended"},
+        }
+        return display.replace(" ", "_") in canon_aliases.get(status, set())
+
     def damage_entity(self, entity: Entity, amount: int, damage_type: str, source: Entity | None = None) -> int:
         if entity.kind == "item" or entity.hp <= 0:
             return 0
@@ -861,7 +1347,7 @@ class GameEngine:
             amount = amount + 2
         if "cursed" in entity.statuses and damage_type not in {"blood"}:
             amount = amount + 1
-        if "warded" in entity.statuses and damage_type not in {"blood"}:
+        if "warded" in entity.statuses and damage_type not in {"blood"} and self._is_canonical(entity, "warded"):
             amount = max(0, amount - 2)
         actual = self._modified_damage(entity, amount, damage_type)
         hp_before = entity.hp
@@ -901,7 +1387,7 @@ class GameEngine:
                 self._on_entity_death(entity)
                 self._fire_death_triggers(entity, source, hp_before, damage_type)
         elif damage_type == "fire":
-            if "bleeding" in entity.statuses:
+            if "bleeding" in entity.statuses and self._is_canonical(entity, "bleeding"):
                 entity.statuses.pop("bleeding")
                 entity.hp -= 1
                 wound_subj = "Your wound is" if entity.id == self.state.player_id else f"{entity.name}'s wound is"
@@ -918,8 +1404,31 @@ class GameEngine:
             if self.tile_at(entity.x, entity.y) == WATER:
                 entity.statuses["stunned"] = max(status_duration(entity.statuses.get("stunned")), 2)
                 self.state.add_message(f"Lightning courses through the water!")
-        elif damage_type == "poison" and "poisoned" in entity.statuses:
+        elif damage_type == "poison" and "poisoned" in entity.statuses and self._is_canonical(entity, "poisoned"):
             entity.statuses["poisoned"] = min(99, status_duration(entity.statuses.get("poisoned", 0)) + 2)
+        elif damage_type == "acid":
+            if "warded" in entity.statuses and self._is_canonical(entity, "warded"):
+                entity.statuses.pop("warded")
+                name_str = "your" if entity.id == self.state.player_id else f"{entity.name}'s"
+                self.state.add_message(f"Acid dissolves {name_str} ward!")
+            elif "stone" in entity.tags or "metal" in entity.tags or "construct" in entity.tags:
+                pass # Extra damage handled in _modified_damage
+            elif self.rng.random() < 0.5:
+                entity.statuses["bleeding"] = max(status_duration(entity.statuses.get("bleeding")), 3)
+        elif damage_type == "radiant":
+            entity.statuses["revealed"] = max(status_duration(entity.statuses.get("revealed")), 4)
+        elif damage_type == "shadow":
+            if "burning" in entity.statuses and self._is_canonical(entity, "burning"):
+                entity.statuses.pop("burning")
+                name_str = "your" if entity.id == self.state.player_id else f"{entity.name}'s"
+                self.state.add_message(f"Shadows snuff out {name_str} flames.")
+        elif damage_type == "force" and source and source.id != entity.id:
+            dx = sign(entity.x - source.x)
+            dy = sign(entity.y - source.y)
+            if dx or dy:
+                moved = self.push_entity(entity, dx, dy, 1)
+                if moved:
+                    self.state.add_message(f"{entity.name} is knocked back!")
         return actual
 
     def _modified_damage(self, entity: Entity, amount: int, damage_type: str) -> int:
@@ -928,6 +1437,16 @@ class GameEngine:
             return 0
         resistance = clamp_int(entity.resistances.get(damage_type), 0, 95)
         weakness = clamp_int(entity.weaknesses.get(damage_type), 0, 200)
+
+        if damage_type == "acid" and any(t in entity.tags for t in {"metal", "stone", "construct"}):
+            weakness += 50
+        elif damage_type == "radiant" and any(t in entity.tags for t in {"undead", "shadow", "spirit"}):
+            weakness += 50
+        elif damage_type == "shadow" and any(t in entity.tags for t in {"radiant", "holy", "celestial"}):
+            weakness += 50
+        elif damage_type == "fire" and any(t in entity.tags for t in {"plant", "wood", "flammable", "web"}):
+            weakness += 50
+
         multiplier = max(0.05, (100 - resistance + weakness) / 100)
         actual = int(round(base * multiplier))
         return max(1, actual)
@@ -1045,6 +1564,7 @@ class GameEngine:
             "spider": ["Silk scrapes against stone.", "You hear many legs on the ceiling.", "A faint clicking echoes past."],
             "construct": ["Metal grinds against stone.", "A low hum resonates from the walls.", "Gears turn somewhere unseen."],
             "shadow": ["The shadows pool and shift.", "Something cold watches from the dark.", "Your torch dims for a moment."],
+            "empire": ["You hear the rhythmic stamp of boots in unison.", "A horn sounds three precise notes, then falls silent.", "Iron scrapes against iron in perfect time."],
         }
         messages = ["Something moves in the dark.", "You sense you are not alone.", "The dungeon breathes."]
         for tag, tag_messages in sounds_by_tag.items():
@@ -1500,12 +2020,13 @@ class GameEngine:
             if step is not None:
                 enemy.x, enemy.y = step
                 self._apply_tile_entry(enemy)
-        else:
+        elif "disciplined" not in enemy.tags:
             dx, dy = self.rng.choice([(1, 0), (-1, 0), (0, 1), (0, -1), (0, 0)])
             if (dx or dy) and self.can_occupy(enemy.x + dx, enemy.y + dy):
                 enemy.x += dx
                 enemy.y += dy
                 self._apply_tile_entry(enemy)
+        # Disciplined troops hold their post rather than break formation to wander.
 
     def _ally_turns(self) -> None:
         allies = [
@@ -2068,7 +2589,7 @@ class GameEngine:
                 return ["The spell claws at empty air."]
             amount = clamp_int(effect.get("amount"), 1, 999) if effect.get("amount") is not None else 5
             damage_type = str(effect.get("damage_type") or "arcane")
-            actual = self.damage_entity(target, amount, damage_type)
+            actual = self.damage_entity(target, amount, damage_type, source=self.state.player)
             return [f"{target.name} takes {actual} {damage_type} damage."]
         if effect_type == "area_damage":
             x, y = self.effect_position(effect)
@@ -2085,7 +2606,7 @@ class GameEngine:
                     continue
                 if not area_damage_affects(entity, affects, self.state.player_id):
                     continue
-                actual = self.damage_entity(entity, amount, damage_type)
+                actual = self.damage_entity(entity, amount, damage_type, source=self.state.player)
                 hit.append(f"{entity.name} takes {actual} {damage_type}")
             if not hit:
                 return ["The blast spends itself on empty stone."]
@@ -2317,6 +2838,44 @@ class GameEngine:
             return self._conjure_item(effect)
         if effect_type == "conjure_creature":
             return self._conjure_creature(effect)
+        if effect_type == "transform_item":
+            target_type = normalize_id(str(effect.get("target") or "nearest_item"))
+            item = str(effect.get("item") or effect.get("item_type") or "").strip()
+            new_name = str(effect.get("new_name") or effect.get("new_item_type") or "oddment").strip()
+            new_material = str(effect.get("material") or "").strip() or None
+            new_tags = [normalize_id(str(tag)) for tag in coerce_list(effect.get("tags")) if str(tag).strip()]
+
+            if not item:
+                return []
+
+            if target_type == "inventory":
+                current = self.state.inventory.get(item, 0)
+                if current > 0:
+                    self.state.inventory[item] = current - 1
+                    if self.state.inventory[item] <= 0:
+                        del self.state.inventory[item]
+                    self.state.inventory[new_name] = self.state.inventory.get(new_name, 0) + 1
+                    return [f"The {item} in your inventory becomes {new_name}."]
+                return [f"You have no {item} to transform."]
+
+            # Find nearest item entity matching the name
+            player = self.state.player
+            candidates = [
+                e for e in self.state.entities.values()
+                if e.kind == "item" and e.alive and (item.lower() in e.name.lower() or item.lower() in (e.item_type or "").lower())
+            ]
+            if not candidates:
+                return [f"No {item} found to transform."]
+            target = min(candidates, key=lambda e: self.distance(player, e))
+            
+            target.name = new_name
+            target.item_type = new_name
+            if new_material:
+                target.material = new_material
+            if new_tags:
+                target.tags.update(new_tags)
+            return [f"The {item} on the ground transforms into {new_name}."]
+
         if effect_type == "modify_inventory":
             item = str(effect.get("item") or effect.get("item_type") or "").strip()
             if not item:
@@ -2811,6 +3370,11 @@ def infer_behavior_tags(name: str, tags: set[str]) -> set[str]:
         tag_set.add("stationary")
     if has_name_word("guardian", "sentinel", "warden", "protector") and "stationary" not in tag_set:
         tag_set.add("guardian")
+    if has_name_word(
+        "legion", "legionary", "centurion", "marshal", "exemplar", "spearman",
+        "sergeant", "chaplain", "drill", "imperial", "praetorian",
+    ) or has_tag("empire", "legion", "disciplined", "imperial"):
+        tag_set.add("disciplined")
     if has_name_word("bomb", "explosive", "volatile", "detonator") or has_tag("bomb", "explosive", "volatile"):
         tag_set.add("explode_on_death")
 
