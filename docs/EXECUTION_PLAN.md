@@ -154,24 +154,24 @@ Goal: make the game enjoyable even when the player ignores wild magic.
 - Pathfinding for enemies. [done]
 - Doors and stairs. [done]
 - Multiple dungeon floors. [done]
-- Locked doors and traps.
-- More enemy types with different behaviors:
+- Locked doors and traps. [done]
+- More enemy types with different behaviors: [done]
   - melee pursuer
   - ranged caster
   - fleeing scavenger
   - stationary hazard
   - summoner
-- Real equipment:
+- Real equipment: [done]
   - weapon slot
   - armor slot
   - charm slot
   - carried inventory
-- Consumables:
+- Consumables: [done]
   - healing potion
   - mana potion
   - smoke vial
   - blink scroll
-- Deterministic standard spells:
+- Deterministic standard spells: [done]
   - spark bolt
   - ward
   - minor heal
@@ -215,14 +215,14 @@ Goal: give wild magic many engine-native things to manipulate.
   - slippery
   - poisonous
 - Environmental reactions:
-  - fire spreads to flammable tiles
-  - water conducts lightning
-  - ice melts into water
-  - frost freezes water
-  - acid weakens walls
-  - force can push entities
-  - radiant harms undead
-  - shadow harms light sources
+  - fire spreads to flammable tiles [done]
+  - water conducts lightning [done]
+  - ice melts into water [done]
+  - frost freezes water [done]
+  - acid weakens walls [done]
+  - force can push entities [done]
+  - radiant harms undead [done]
+  - shadow harms light sources [done]
 - Temporary terrain:
   - fire patches
   - poison clouds

@@ -49,6 +49,10 @@ WILD_ENEMY_TEMPLATES: list[tuple[str, str, int, int, int, str, set[str], dict[st
     ("cave spider", "x", 6, 2, 0, "simple", {"beast", "spider"}, {}, {"fire": 25}),
     ("shadow wraith", "W", 4, 4, 0, "simple", {"undead", "shadow"}, {"physical": 25, "poison": 100}, {"radiant": 75, "fire": 25}),
     ("fungal crawler", "c", 9, 2, 0, "simple", {"beast", "fungus"}, {"acid": 50}, {"fire": 50}),
+    ("fen archer", "a", 6, 3, 0, "goblin", {"goblin", "humanoid", "flesh", "ranged"}, {}, {"fire": 25}),
+    ("husk sentinel", "n", 14, 3, 3, "simple", {"construct", "stone", "stationary"}, {"physical": 25, "poison": 100}, {"force": 50}),
+    ("carrion rat", "r", 4, 2, 0, "simple", {"beast", "vermin", "scavenger"}, {"poison": 50}, {}),
+    ("bog hexweaver", "v", 7, 2, 0, "goblin", {"goblin", "humanoid", "caster", "summoner"}, {}, {"physical": 10}),
 ]
 
 LEGION_ENEMY_TEMPLATES: list[tuple[str, str, int, int, int, str, set[str], dict[str, int], dict[str, int]]] = [
@@ -137,6 +141,55 @@ ITEM_USE_SPECS: dict[str, dict[str, Any]] = {
     },
 }
 
+TRAP_SPECS: dict[str, dict[str, Any]] = {
+    "trap_spike": {
+        "damage": 4, "damage_type": "physical", "status": "bleeding", "duration": 3,
+        "message": "Hidden spikes punch up through the floor!",
+        "message_other": "Hidden spikes punch up under {name}!",
+    },
+    "trap_gas": {
+        "damage": 2, "damage_type": "poison", "status": "poisoned", "duration": 4,
+        "message": "A hidden vent hisses open, choking you in foul gas!",
+        "message_other": "A hidden vent chokes {name} in foul gas!",
+    },
+    "trap_flame": {
+        "damage": 3, "damage_type": "fire", "status": "burning", "duration": 3,
+        "message": "A hidden nozzle roars, washing you in flame!",
+        "message_other": "A hidden nozzle washes {name} in flame!",
+    },
+    "trap_frost": {
+        "damage": 2, "damage_type": "frost", "status": "slowed", "duration": 3,
+        "message": "A hidden rune flares, and killing frost bites into you!",
+        "message_other": "A hidden rune bites {name} with killing frost!",
+    },
+}
+
+LOCKED_DOOR_KEYS = ["brass key", "bone key", "rusted key", "engraved key"]
+for _key_name in LOCKED_DOOR_KEYS:
+    ITEM_USE_SPECS[_key_name.replace(" ", "_")] = {
+        "effects": [{"kind": "inert", "required": True}],
+        "failure": "This key is meant for a particular lock. Try it on the door itself.",
+    }
+del _key_name
+
+EQUIPMENT_SPECS: dict[str, dict[str, Any]] = {
+    "rusty sword": {"slot": "weapon", "attack": 2},
+    "iron sword": {"slot": "weapon", "attack": 4},
+    "war pick": {"slot": "weapon", "attack": 5},
+    "hunting bow": {"slot": "weapon", "attack": 3},
+    "leather vest": {"slot": "armor", "defense": 2},
+    "iron breastplate": {"slot": "armor", "defense": 4},
+    "wooden buckler": {"slot": "armor", "attack": 1, "defense": 1},
+    "lucky coin charm": {"slot": "charm", "attack": 1},
+    "warding locket": {"slot": "charm", "defense": 1},
+}
+for _gear_name in EQUIPMENT_SPECS:
+    ITEM_USE_SPECS[_gear_name.replace(" ", "_")] = {
+        "effects": [{"kind": "inert", "required": True}],
+        "failure": "This isn't something to consume -- try 'equip' or 'wear' instead.",
+    }
+del _gear_name
+
 DEFAULT_ITEM_USE_SPEC: dict[str, Any] = {
     "effects": [{"kind": "restore_mana", "amount": 2}],
     "message": "You consume the {item}. It restores {amount} mana.",
@@ -186,7 +239,16 @@ class GameState:
     player_id: str = "player"
     turn: int = 0
     messages: list[str] = field(default_factory=list)
-    inventory: dict[str, int] = field(default_factory=lambda: {"chalk": 2, "grave salt": 1})
+    inventory: dict[str, int] = field(default_factory=lambda: {
+        "chalk": 2,
+        "grave salt": 2,
+        "mana crystal": 2,
+        "blood moss": 2,
+        "bone shard": 2,
+        "viscous residue": 1,
+        "metal scrap": 2,
+        "arcane residue": 1,
+    })
     curses: dict[str, Curse] = field(default_factory=dict)
     flags: dict[str, Any] = field(default_factory=dict)
     tile_tags: dict[str, list[str]] = field(default_factory=dict)
@@ -220,6 +282,7 @@ class GameEngine:
         self.rng = random.Random(seed)
         self.state = GameState(rng_seed=seed, scenario=scenario)
         self._next_entity_number = 1
+        self._conducting_lightning = False
         if scenario == "test_chamber":
             self._generate_test_chamber()
         elif scenario == "empire_compound":
@@ -319,14 +382,29 @@ class GameEngine:
                         ("mana crystal", "!", "mana crystal"),
                         ("blood moss", ",", "blood moss"),
                         ("bone charm", "?", "bone charm"),
+                        ("healing potion", "!", "healing potion"),
+                        ("mana potion", "!", "mana potion"),
+                        ("smoke vial", "~", "smoke vial"),
+                        ("blink scroll", "?", "blink scroll"),
                     ]
                 )
                 x, y = self._random_open_tile_in_room(room)
                 self.spawn_item(item[0], item[1], x, y, item[2])
+            if self.rng.random() < 0.25:
+                trap_kind = self.rng.choice(list(TRAP_SPECS))
+                x, y = self._random_open_tile_in_room(room)
+                if self.tile_at(x, y) == FLOOR and (x, y) != (px, py):
+                    self.set_tile(x, y, FLOOR, tags={trap_kind})
+            if self.rng.random() < 0.2:
+                gear_name = self.rng.choice(list(EQUIPMENT_SPECS))
+                glyph = {"weapon": "/", "armor": "[", "charm": "*"}[EQUIPMENT_SPECS[gear_name]["slot"]]
+                x, y = self._random_open_tile_in_room(room)
+                self.spawn_item(gear_name, glyph, x, y, gear_name)
 
         down_x, down_y = rooms[-1].center
         state.tiles[down_y][down_x] = STAIRS_DOWN
         self._place_doors()
+        self._place_locked_door(rooms)
 
     def _generate_test_chamber(self) -> None:
         state = self.state
@@ -453,7 +531,7 @@ class GameEngine:
             resistances={"physical": 15},
         )
 
-        state.add_message("Stone walls rise in perfect symmetry — the Grand Empire does not build by accident.")
+        state.add_message("Stone walls rise in perfect symmetry - the Grand Empire does not build by accident.")
         state.add_message("Somewhere ahead, boots strike the ground in unison.")
         self.update_fov()
 
@@ -524,13 +602,13 @@ class GameEngine:
 
         if imperial_density >= 0.7:
             zone_type = "imperial reach"
-            state.add_message("Banners of the Grand Empire snap overhead — the land itself stands at attention.")
+            state.add_message("Banners of the Grand Empire snap overhead - the land itself stands at attention.")
         elif imperial_density <= 0.3:
             zone_type = "wilds"
             state.add_message("No order rules out here. The wind moves through open country untouched by the legions.")
         else:
             zone_type = "borderlands"
-            state.add_message("The land is a patchwork — wild growth pressing against straight Imperial walls.")
+            state.add_message("The land is a patchwork - wild growth pressing against straight Imperial walls.")
         return zone_type
 
     def _scatter_terrain_features(self, zone_rng: random.Random) -> None:
@@ -717,7 +795,7 @@ class GameEngine:
         self._save_current_zone()
         state.zone_x, state.zone_y = new_zx, new_zy
         self._load_or_generate_zone(new_zx, new_zy, entry_x, entry_y)
-        state.add_message(f"You cross into new territory — the {state.zone_type} of zone ({new_zx}, {new_zy}).")
+        state.add_message(f"You cross into new territory - the {state.zone_type} of zone ({new_zx}, {new_zy}).")
         return True
 
     def _save_current_zone(self) -> None:
@@ -858,6 +936,53 @@ class GameEngine:
         self.rng.shuffle(candidates)
         for x, y in candidates[: max(2, min(8, len(candidates) // 5))]:
             self.state.tiles[y][x] = DOOR
+
+    def _floor_reachable(self, start: tuple[int, int], goal: tuple[int, int], blocked: set[tuple[int, int]]) -> bool:
+        queue: deque[tuple[int, int]] = deque([start])
+        seen = {start}
+        while queue:
+            x, y = queue.popleft()
+            if (x, y) == goal:
+                return True
+            for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
+                if (nx, ny) in seen or (nx, ny) in blocked or not self.in_bounds(nx, ny):
+                    continue
+                tile = self.state.tiles[ny][nx]
+                # Doors are always freely passable here -- the `blocked` set is how callers
+                # model "what if this particular (locked) door were shut".
+                if tile in BLOCKING_TILES and tile != DOOR:
+                    continue
+                seen.add((nx, ny))
+                queue.append((nx, ny))
+        return False
+
+    def _place_locked_door(self, rooms: list[Room]) -> None:
+        """Lock one door that gates progress toward the stairs, and stash its key upstream of it."""
+        if len(rooms) < 3 or self.rng.random() > 0.5:
+            return
+        start = rooms[0].center
+        goal = rooms[-1].center
+        door_positions = [
+            (x, y)
+            for y, row in enumerate(self.state.tiles)
+            for x, tile in enumerate(row)
+            if tile == DOOR
+        ]
+        self.rng.shuffle(door_positions)
+        for door_xy in door_positions:
+            if self._floor_reachable(start, goal, blocked={door_xy}):
+                continue
+            key_name = self.rng.choice(LOCKED_DOOR_KEYS)
+            key_id = f"key_{normalize_id(key_name)}"
+            self.set_tile(door_xy[0], door_xy[1], DOOR, tags={"locked", key_id})
+            reachable_rooms = [
+                room for room in rooms[:-1]
+                if self._floor_reachable(start, room.center, blocked={door_xy})
+            ]
+            key_room = self.rng.choice(reachable_rooms) if reachable_rooms else rooms[0]
+            kx, ky = self._random_open_tile_in_room(key_room)
+            self.spawn_item(key_name, "k", kx, ky, key_name)
+            return
 
     def _random_open_tile_in_room(self, room: Room) -> tuple[int, int]:
         for _ in range(50):
@@ -1053,8 +1178,9 @@ class GameEngine:
             return False
         player = self.state.player
         if any(s in player.statuses for s in ["rooted", "webbed", "frozen", "stunned"]):
-            self.state.add_message("You cannot move — you are held in place.")
-            return False
+            self.state.add_message("You strain against it, but you cannot move - you are held in place.")
+            self.finish_player_turn()
+            return True
         target_x = player.x + dx
         target_y = player.y + dy
         if not self.in_bounds(target_x, target_y):
@@ -1064,11 +1190,24 @@ class GameEngine:
             self.state.add_message("The dungeon refuses that edge.")
             return False
         target = self.blocking_entity_at(target_x, target_y)
+        if target and target.faction == "ally":
+            self.state.add_message(f"{target.name} is in your way.")
+            return False
         if target and target.faction != "player":
             self.attack(player, target)
             self.finish_player_turn()
             return True
         if self.tile_at(target_x, target_y) == DOOR:
+            tags = self.tile_tags_at(target_x, target_y)
+            if "locked" in tags:
+                key_tag = next((tag for tag in tags if tag.startswith("key_")), None)
+                owned = self.find_inventory_item(key_tag[4:]) if key_tag else None
+                if not owned:
+                    self.state.add_message("The door is locked tight. You'll need the right key.")
+                    return False
+                self.consume_inventory_item(owned, 1)
+                self.state.tile_tags.pop(self.tile_key(target_x, target_y), None)
+                self.state.add_message(f"You turn the {owned} in the lock and the door swings open.")
             self.open_door(target_x, target_y)
             self.finish_player_turn()
             return True
@@ -1172,6 +1311,77 @@ class GameEngine:
         self.finish_player_turn()
         return True
 
+    def cast_standard_frost(self) -> bool:
+        if self.state.game_over:
+            return False
+        player = self.state.player
+        if player.mana < 2:
+            self.state.add_message("The safe spell fizzles. You need 2 mana.")
+            return False
+        target = self.nearest_enemy(max_distance=6)
+        if target is None:
+            self.state.add_message("No enemy is close enough for a frost shard.")
+            return False
+        player.mana -= 2
+        self.damage_entity(target, 4, "frost")
+        if target.hp > 0:
+            target.statuses["slowed"] = max(status_duration(target.statuses.get("slowed")), 2)
+            self.state.add_message(f"A frost shard bites into {target.name}, slowing it.")
+        else:
+            self.state.add_message(f"A frost shard bites into {target.name}.")
+        self.finish_player_turn()
+        return True
+
+    def cast_standard_heal(self) -> bool:
+        if self.state.game_over:
+            return False
+        player = self.state.player
+        if player.mana < 3:
+            self.state.add_message("The safe spell fizzles. You need 3 mana.")
+            return False
+        player.mana -= 3
+        actual = self.heal_entity(player, 4)
+        if actual == 0:
+            self.state.add_message("Your wounds are already mended.")
+        else:
+            self.state.add_message(f"A minor heal mends {actual} HP.")
+        self.finish_player_turn()
+        return True
+
+    def cast_standard_ward(self) -> bool:
+        if self.state.game_over:
+            return False
+        player = self.state.player
+        if player.mana < 3:
+            self.state.add_message("The safe spell fizzles. You need 3 mana.")
+            return False
+        player.mana -= 3
+        player.statuses["warded"] = max(status_duration(player.statuses.get("warded")), 6)
+        self.state.add_message("A steady ward settles over you, dulling the next blows.")
+        self.finish_player_turn()
+        return True
+
+    def cast_standard_reveal(self) -> bool:
+        if self.state.game_over:
+            return False
+        player = self.state.player
+        if player.mana < 2:
+            self.state.add_message("The safe spell fizzles. You need 2 mana.")
+            return False
+        player.mana -= 2
+        found = 0
+        for entity in self.entities_in_radius(player.x, player.y, 8):
+            if entity.id == self.state.player_id or entity.kind != "actor" or entity.hp <= 0:
+                continue
+            entity.statuses["revealed"] = max(status_duration(entity.statuses.get("revealed")), 6)
+            found += 1
+        if found:
+            self.state.add_message(f"Your senses sharpen. {found} hidden presence(s) stand revealed nearby.")
+        else:
+            self.state.add_message("Your senses sharpen, but nothing nearby is hiding from you.")
+        self.finish_player_turn()
+        return True
+
     def use_item(self, item_name: str) -> bool:
         if self.state.game_over:
             return False
@@ -1196,7 +1406,7 @@ class GameEngine:
             return False
         self.consume_inventory_item(matched, 1)
         player = self.state.player
-        self.spawn_item(matched, "?", player.x, player.y, item_type=normalize_id(matched))
+        self.spawn_item(matched, "?", player.x, player.y, item_type=matched)
         self.state.add_message(f"You drop {matched}.")
         self.finish_player_turn()
         return True
@@ -1243,6 +1453,8 @@ class GameEngine:
         player = self.state.player
         kind = normalize_id(str(effect.get("kind") or ""))
         amount = self._roll_item_amount(effect)
+        if kind == "inert":
+            return False, {}
         if kind == "restore_mana":
             gained = min(amount, player.max_mana - player.mana)
             player.mana += gained
@@ -1304,25 +1516,90 @@ class GameEngine:
             return None
         return min(enemies, key=lambda enemy: self.distance(player, enemy))
 
+    def equipment_bonus(self, entity: Entity, stat: str) -> int:
+        total = 0
+        for item_name in entity.equipment.values():
+            if not item_name:
+                continue
+            spec = EQUIPMENT_SPECS.get(item_name.strip().lower())
+            if spec:
+                total += int(spec.get(stat, 0))
+        return total
+
+    def effective_attack(self, entity: Entity) -> int:
+        return entity.attack + self.equipment_bonus(entity, "attack")
+
+    def effective_defense(self, entity: Entity) -> int:
+        return entity.defense + self.equipment_bonus(entity, "defense")
+
+    def equip_item(self, item_name: str) -> bool:
+        if self.state.game_over:
+            return False
+        matched = self.find_inventory_item(item_name)
+        if matched is None or self.state.inventory.get(matched, 0) < 1:
+            self.state.add_message(f"You don't have any {item_name.strip().lower()}.")
+            return False
+        spec = EQUIPMENT_SPECS.get(matched.strip().lower())
+        if not spec:
+            self.state.add_message(f"The {matched} isn't something you can wear or wield.")
+            return False
+        slot = str(spec["slot"])
+        player = self.state.player
+        previous = player.equipment.get(slot)
+        self.consume_inventory_item(matched, 1)
+        player.equipment[slot] = matched
+        if previous:
+            self.state.inventory[previous] = self.state.inventory.get(previous, 0) + 1
+            self.state.add_message(f"You stow the {previous} and equip the {matched}.")
+        else:
+            self.state.add_message(f"You equip the {matched}.")
+        self.finish_player_turn()
+        return True
+
+    _EQUIPMENT_SLOT_ALIASES = {
+        "weapon": "weapon", "wielded": "weapon", "hand": "weapon", "sword": "weapon", "blade": "weapon",
+        "armor": "armor", "armour": "armor", "body": "armor", "vest": "armor", "shield": "armor",
+        "charm": "charm", "trinket": "charm", "amulet": "charm", "ring": "charm",
+    }
+
+    def unequip_item(self, slot_name: str) -> bool:
+        if self.state.game_over:
+            return False
+        player = self.state.player
+        slot = self._EQUIPMENT_SLOT_ALIASES.get(normalize_id(slot_name))
+        if slot is None:
+            matched = self.find_inventory_item(slot_name) or slot_name
+            slot = next((s for s, item in player.equipment.items() if item and normalize_id(item) == normalize_id(matched)), None)
+        if slot is None or slot not in player.equipment:
+            self.state.add_message("That isn't something you have equipped.")
+            return False
+        current = player.equipment.get(slot)
+        if not current:
+            self.state.add_message(f"You have nothing equipped in your {slot} slot.")
+            return False
+        player.equipment[slot] = None
+        self.state.inventory[current] = self.state.inventory.get(current, 0) + 1
+        self.state.add_message(f"You unequip the {current}.")
+        self.finish_player_turn()
+        return True
+
     def attack(self, attacker: Entity, defender: Entity) -> None:
-        base = max(1, attacker.attack - defender.defense + self.rng.randint(0, 2))
+        base = max(1, self.effective_attack(attacker) - self.effective_defense(defender) + self.rng.randint(0, 2))
         bonus = 2 if ("berserk" in attacker.statuses or "empowered" in attacker.statuses) else 0
         amount = base + bonus
         actual = self.damage_entity(defender, amount, "physical", source=attacker)
         if "berserk" in attacker.statuses:
             self.damage_entity(attacker, 1, "blood", source=attacker)
         if defender.hp > 0:
-            self.state.add_message(f"{attacker.name} hits {defender.name} for {actual}.")
+            self.state.add_message(f"{attacker.name} {self._verb(attacker, 'hit', 'hits')} {defender.name} for {actual}.")
             # Spider webs on hit
             if "spider" in attacker.tags and "webbed" not in defender.statuses and self.rng.random() < 0.5:
                 defender.statuses["webbed"] = 2
-                self.state.add_message(f"{defender.name} is webbed!")
+                self.state.add_message(f"{defender.name} {self._verb(defender, 'are', 'is')} webbed!")
             # Fungus spreads spores on hit (poisoned)
             if "fungus" in attacker.tags and "poisoned" not in defender.statuses and self.rng.random() < 0.4:
                 defender.statuses["poisoned"] = 3
                 self.state.add_message(f"Fungal spores infect {defender.name}!")
-        else:
-            self.state.add_message(f"{attacker.name} drops {defender.name}.")
 
     def _is_canonical(self, entity: Entity, status: str) -> bool:
         display = entity.status_display.get(status)
@@ -1364,7 +1641,7 @@ class GameEngine:
                     and "slain" not in entity.tags and self.rng.random() < 0.3):
                 entity.hp = 1
                 entity.tags.add("slain")
-                self.state.add_message(f"{entity.name} collapses… but begins to stir again!")
+                self.state.add_message(f"{entity.name} collapses... but begins to stir again!")
                 return 0
             entity.hp = 0
             entity.blocks = False
@@ -1391,19 +1668,29 @@ class GameEngine:
                 entity.statuses.pop("bleeding")
                 entity.hp -= 1
                 wound_subj = "Your wound is" if entity.id == self.state.player_id else f"{entity.name}'s wound is"
-                self.state.add_message(f"{wound_subj} cauterized — brutal but effective.")
+                self.state.add_message(f"{wound_subj} cauterized - brutal but effective.")
             else:
                 entity.statuses["burning"] = max(status_duration(entity.statuses.get("burning")), 3)
+            if self.tile_at(entity.x, entity.y) == SLICK_ICE:
+                self.set_tile(entity.x, entity.y, WATER, duration=4)
+                self.state.add_message("The ice melts to water beneath you." if entity.id == self.state.player_id else f"The ice melts away beneath {entity.name}.")
         elif damage_type == "frost":
             if self.tile_at(entity.x, entity.y) == WATER:
                 entity.statuses["frozen"] = max(status_duration(entity.statuses.get("frozen")), 2)
                 self.state.add_message(f"{'You are' if entity.id == self.state.player_id else entity.name + ' is'} frozen solid in the water!")
+                self.set_tile(entity.x, entity.y, SLICK_ICE, duration=5)
             else:
                 entity.statuses["slowed"] = max(status_duration(entity.statuses.get("slowed")), 2)
         elif damage_type == "lightning":
             if self.tile_at(entity.x, entity.y) == WATER:
                 entity.statuses["stunned"] = max(status_duration(entity.statuses.get("stunned")), 2)
                 self.state.add_message(f"Lightning courses through the water!")
+                if not self._conducting_lightning:
+                    self._conducting_lightning = True
+                    try:
+                        self._conduct_lightning_through_water(entity)
+                    finally:
+                        self._conducting_lightning = False
         elif damage_type == "poison" and "poisoned" in entity.statuses and self._is_canonical(entity, "poisoned"):
             entity.statuses["poisoned"] = min(99, status_duration(entity.statuses.get("poisoned", 0)) + 2)
         elif damage_type == "acid":
@@ -1415,6 +1702,12 @@ class GameEngine:
                 pass # Extra damage handled in _modified_damage
             elif self.rng.random() < 0.5:
                 entity.statuses["bleeding"] = max(status_duration(entity.statuses.get("bleeding")), 3)
+            for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
+                nx, ny = entity.x + dx, entity.y + dy
+                if self.in_bounds(nx, ny) and self.tile_at(nx, ny) == WALL and self.rng.random() < 0.15:
+                    self.set_tile(nx, ny, RUBBLE)
+                    self.state.add_message("Acid hisses against the stone, eating through the wall.")
+                    break
         elif damage_type == "radiant":
             entity.statuses["revealed"] = max(status_duration(entity.statuses.get("revealed")), 4)
         elif damage_type == "shadow":
@@ -1422,14 +1715,39 @@ class GameEngine:
                 entity.statuses.pop("burning")
                 name_str = "your" if entity.id == self.state.player_id else f"{entity.name}'s"
                 self.state.add_message(f"Shadows snuff out {name_str} flames.")
+            if self.tile_at(entity.x, entity.y) == FIRE:
+                self.set_tile(entity.x, entity.y, FLOOR)
+                self.state.add_message("The shadows smother the flames around you." if entity.id == self.state.player_id else f"The shadows smother the flames around {entity.name}.")
         elif damage_type == "force" and source and source.id != entity.id:
             dx = sign(entity.x - source.x)
             dy = sign(entity.y - source.y)
             if dx or dy:
                 moved = self.push_entity(entity, dx, dy, 1)
                 if moved:
-                    self.state.add_message(f"{entity.name} is knocked back!")
+                    self.state.add_message(f"{entity.name} {self._verb(entity, 'are', 'is')} knocked back!")
         return actual
+
+    def _conduct_lightning_through_water(self, origin: Entity) -> None:
+        start = (origin.x, origin.y)
+        visited = {start}
+        queue: deque[tuple[int, int]] = deque([start])
+        water_tiles: set[tuple[int, int]] = set()
+        while queue and len(water_tiles) < 60:
+            cx, cy = queue.popleft()
+            water_tiles.add((cx, cy))
+            for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
+                nx, ny = cx + dx, cy + dy
+                if (nx, ny) in visited or not self.in_bounds(nx, ny):
+                    continue
+                visited.add((nx, ny))
+                if self.tile_at(nx, ny) == WATER:
+                    queue.append((nx, ny))
+        for other in list(self.state.entities.values()):
+            if other.id == origin.id or other.kind != "actor" or other.hp <= 0:
+                continue
+            if (other.x, other.y) in water_tiles:
+                self.state.add_message(f"The current carries the shock to {other.name}!")
+                self.damage_entity(other, 2, "lightning", source=origin)
 
     def _modified_damage(self, entity: Entity, amount: int, damage_type: str) -> int:
         base = max(0, int(amount))
@@ -1506,18 +1824,18 @@ class GameEngine:
         if "conjured" in tags or self.rng.random() > 0.4:
             return
         loot_by_tag = {
-            "undead": ("bone shard", "bone_shard", "?", "bone"),
-            "beast": ("beast claw", "claw", "?", "bone"),
-            "humanoid": ("stolen coin", "coin", "$", "metal"),
-            "slime": ("viscous residue", "residue", "~", "slime"),
-            "construct": ("metal scrap", "scrap", "/", "metal"),
+            "undead": ("bone shard", "?", "bone"),
+            "beast": ("beast claw", "?", "bone"),
+            "humanoid": ("stolen coin", "$", "metal"),
+            "slime": ("viscous residue", "~", "slime"),
+            "construct": ("metal scrap", "/", "metal"),
         }
-        drop_name, drop_type, drop_char, drop_mat = ("arcane residue", "arcane_residue", "*", "essence")
+        drop_name, drop_char, drop_mat = ("arcane residue", "*", "essence")
         for tag, drop_data in loot_by_tag.items():
             if tag in tags:
-                drop_name, drop_type, drop_char, drop_mat = drop_data
+                drop_name, drop_char, drop_mat = drop_data
                 break
-        self.spawn_item(drop_name, drop_char, entity.x, entity.y, item_type=drop_type, material=drop_mat)
+        self.spawn_item(drop_name, drop_char, entity.x, entity.y, item_type=drop_name, material=drop_mat)
         self.state.add_message(f"{entity.name} drops {drop_name}.")
 
     def pick_up_items_at_player(self) -> None:
@@ -1673,6 +1991,16 @@ class GameEngine:
     def _apply_tile_entry(self, entity: Entity) -> None:
         tile = self.tile_at(entity.x, entity.y)
         is_player = entity.id == self.state.player_id
+        trap_tag = next((tag for tag in self.tile_tags_at(entity.x, entity.y) if tag in TRAP_SPECS), None)
+        if trap_tag is not None:
+            spec = TRAP_SPECS[trap_tag]
+            self.damage_entity(entity, spec["damage"], spec["damage_type"])
+            if entity.alive:
+                entity.statuses[spec["status"]] = max(status_duration(entity.statuses.get(spec["status"])), spec["duration"])
+            self.state.add_message(spec["message"] if is_player else spec["message_other"].format(name=entity.name))
+            self.set_tile(entity.x, entity.y, RUBBLE)
+            self.state.tile_tags.pop(self.tile_key(entity.x, entity.y), None)
+            tile = RUBBLE
         # Non-player entities auto-open closed doors they walk into.
         if tile == DOOR and not is_player:
             self.state.tiles[entity.y][entity.x] = OPEN_DOOR
@@ -1997,6 +2325,14 @@ class GameEngine:
     def _enemy_single_action(self, enemy: Entity, player: Entity) -> None:
         if "pacifist" in enemy.tags or "noncombatant" in enemy.tags:
             return
+        # Scavengers are cowardly by nature: they keep their distance and only
+        # turn to fight when flight is impossible (cornered).
+        if "scavenger" in enemy.tags and 1.5 < self.distance(enemy, player) <= 6:
+            step = self._flee_step(enemy, player.x, player.y)
+            if step is not None:
+                enemy.x, enemy.y = step
+                self._apply_tile_entry(enemy)
+                return
         if "frightened" in enemy.statuses and self.distance(enemy, player) <= 8:
             step = self._flee_step(enemy, player.x, player.y)
             if step is not None:
@@ -2015,7 +2351,21 @@ class GameEngine:
                 enemy.y += dy
                 self._apply_tile_entry(enemy)
             return
+        # Stationary hazards never give chase; they only ever strike what comes within reach.
+        if "stationary" in enemy.tags:
+            return
         if self.enemy_can_sense_player(enemy):
+            # Ranged casters keep their distance and snipe rather than closing in.
+            if (
+                "ranged" in enemy.tags
+                and self.distance(enemy, player) <= 7
+                and self.has_line_of_sight(enemy.x, enemy.y, player.x, player.y)
+            ):
+                self.attack(enemy, player)
+                return
+            # Summoners spend a turn calling reinforcements instead of approaching.
+            if "summoner" in enemy.tags and self._try_enemy_summon(enemy):
+                return
             step = self.next_path_step(enemy, player.x, player.y)
             if step is not None:
                 enemy.x, enemy.y = step
@@ -2027,6 +2377,27 @@ class GameEngine:
                 enemy.y += dy
                 self._apply_tile_entry(enemy)
         # Disciplined troops hold their post rather than break formation to wander.
+
+    _SUMMONER_MINIONS = ["bog whelp", "carrion sprite", "husk crawler"]
+
+    def _try_enemy_summon(self, summoner: Entity) -> bool:
+        """A summoner calls a minion of its own kind instead of moving. Returns True if it acted."""
+        nearby_minions = [
+            e for e in self.living_enemies()
+            if e.id != summoner.id and "summoned" in e.tags and self.distance(summoner, e) <= 12
+        ]
+        if len(nearby_minions) >= 2 or self.rng.random() > 0.3:
+            return False
+        x, y = self.find_open_tile_near(summoner.x, summoner.y)
+        if not self.can_occupy(x, y):
+            return False
+        name = self.rng.choice(self._SUMMONER_MINIONS)
+        self.spawn_actor(
+            name, "w", x, y, hp=4, attack=2, defense=0,
+            faction="enemy", ai="simple", tags={"summoned", "conjured", "beast"},
+        )
+        self.state.add_message(f"{summoner.name} calls forth {name}.")
+        return True
 
     def _ally_turns(self) -> None:
         allies = [
@@ -2198,7 +2569,7 @@ class GameEngine:
                         defense=0, faction=entity.faction, ai=entity.ai or "simple",
                         tags={"summoned"},
                     )
-            self.state.add_message(f"{entity.name} bursts open — something crawls out!")
+            self.state.add_message(f"{entity.name} bursts open - something crawls out!")
 
     def enemy_can_sense_player(self, enemy: Entity) -> bool:
         player = self.state.player
@@ -2264,8 +2635,10 @@ class GameEngine:
             if not self.in_bounds(tx, ty):
                 continue
             tile = self.tile_at(tx, ty)
-            # Doors are openable — treat as passable for pathfinding.
+            # Doors are openable — treat as passable for pathfinding (locked ones stay shut).
             if tile in BLOCKING_TILES and tile != DOOR:
+                continue
+            if tile == DOOR and "locked" in self.tile_tags_at(tx, ty):
                 continue
             # Always allow the goal tile so entities can reach their target.
             if (tx, ty) == goal:
@@ -2315,6 +2688,16 @@ class GameEngine:
             and entity.id != self.state.player_id
             and (singular in entity.tags or singular in normalize_id(entity.name).split("_"))
         ]
+
+    def _verb(self, entity: Entity, second_person: str, third_person: str) -> str:
+        """Pick the grammatically correct verb for f"{entity.name} {verb} ...".
+
+        The player's display name is the second-person pronoun "You", so a
+        message built that way needs "take"/"are" for the player but
+        "takes"/"is" for anyone else (e.g. "You take 3 damage." vs.
+        "cave spider takes 3 damage.").
+        """
+        return second_person if entity.id == self.state.player_id else third_person
 
     def context_for_llm(self, spell: str) -> dict[str, Any]:
         player = self.state.player
@@ -2590,7 +2973,7 @@ class GameEngine:
             amount = clamp_int(effect.get("amount"), 1, 999) if effect.get("amount") is not None else 5
             damage_type = str(effect.get("damage_type") or "arcane")
             actual = self.damage_entity(target, amount, damage_type, source=self.state.player)
-            return [f"{target.name} takes {actual} {damage_type} damage."]
+            return [f"{target.name} {self._verb(target, 'take', 'takes')} {actual} {damage_type} damage."]
         if effect_type == "area_damage":
             x, y = self.effect_position(effect)
             radius = clamp_int(effect.get("radius"), 0, 99) if effect.get("radius") is not None else 3
@@ -2607,7 +2990,7 @@ class GameEngine:
                 if not area_damage_affects(entity, affects, self.state.player_id):
                     continue
                 actual = self.damage_entity(entity, amount, damage_type, source=self.state.player)
-                hit.append(f"{entity.name} takes {actual} {damage_type}")
+                hit.append(f"{entity.name} {self._verb(entity, 'take', 'takes')} {actual} {damage_type}")
             if not hit:
                 return ["The blast spends itself on empty stone."]
             return [f"Area spell hits {len(hit)} target(s): {', '.join(hit)}."]
@@ -2621,7 +3004,11 @@ class GameEngine:
             affects = normalize_id(str(effect.get("affects") or "enemies"))
             include_player = bool(effect.get("include_player", False))
             if status not in MECHANICAL_STATUSES:
-                return [f"Unknown status: {status}."]
+                from .wild_magic import _STATUS_FLAVOR_ALIASES
+                canonical = _STATUS_FLAVOR_ALIASES.get(status)
+                if not canonical:
+                    return []
+                status = canonical
             affected: list[str] = []
             dur_val2: int | str = "permanent" if duration == "permanent" else clamp_int(duration, 1, 99)
             for entity in self.entities_in_radius(x, y, radius):
@@ -2646,13 +3033,11 @@ class GameEngine:
                 return []
             amount = clamp_int(effect.get("amount"), 1, 999) if effect.get("amount") is not None else 5
             actual = self.heal_entity(target, amount)
-            if target.id == self.state.player_id:
-                if actual == 0:
-                    return ["Your wounds are already mended."]
-                return [f"You heal {actual} HP."]
             if actual == 0:
-                return [f"{target.name} is already whole."]
-            return [f"{target.name} heals {actual} HP."]
+                if target.id == self.state.player_id:
+                    return ["Your wounds are already mended."]
+                return [f"{target.name} {self._verb(target, 'are', 'is')} already whole."]
+            return [f"{target.name} {self._verb(target, 'heal', 'heals')} {actual} HP."]
         if effect_type == "restore_mana":
             target = self.resolve_target(str(effect.get("target") or "player"))
             if not target:
@@ -2661,9 +3046,7 @@ class GameEngine:
             before = target.mana
             target.mana = min(target.max_mana, target.mana + amount)
             gained = target.mana - before
-            if target.id == self.state.player_id:
-                return [f"You recover {gained} mana."]
-            return [f"{target.name} recovers {gained} mana."]
+            return [f"{target.name} {self._verb(target, 'recover', 'recovers')} {gained} mana."]
         if effect_type == "teleport":
             target = self.resolve_target(str(effect.get("target") or "player"))
             if not target:
@@ -2671,7 +3054,7 @@ class GameEngine:
             x = clamp_int(effect.get("x"), 0, self.state.width - 1)
             y = clamp_int(effect.get("y"), 0, self.state.height - 1)
             if self.teleport_entity(target, x, y):
-                return [f"{target.name} snaps to another tile."]
+                return [f"{target.name} {self._verb(target, 'snap', 'snaps')} to another tile."]
             return ["The teleport folds into a wall and fails."]
         if effect_type in {"push", "pull"}:
             target_str = str(effect.get("target") or "nearest_enemy")
@@ -2751,10 +3134,14 @@ class GameEngine:
             expiry_text = str(effect.get("expiry_text") or effect.get("wears_off") or "").strip()
             duration = effect.get("duration", 3)
             dur_val: int | str = "permanent" if duration == "permanent" else clamp_int(duration, 1, 99)
+            if status not in MECHANICAL_STATUSES:
+                from .wild_magic import _STATUS_FLAVOR_ALIASES
+                canonical = _STATUS_FLAVOR_ALIASES.get(status)
+                if not canonical:
+                    return []
+                status = canonical
             group_targets = self.resolve_target_group(target_str)
             if group_targets:
-                if status not in MECHANICAL_STATUSES:
-                    return [f"Unknown status: {status}."]
                 for ent in group_targets:
                     ent.statuses[status] = dur_val
                     if display_name != status.replace("_", " "):
@@ -2765,16 +3152,12 @@ class GameEngine:
             target = self.resolve_target(target_str)
             if not target or target.kind == "item":
                 return []
-            if status not in MECHANICAL_STATUSES:
-                return [f"Unknown status: {status}."]
             target.statuses[status] = dur_val
             if display_name != status.replace("_", " "):
                 target.status_display[status] = display_name
             if expiry_text:
                 target.status_expiry_text[status] = expiry_text
-            if target.id == self.state.player_id:
-                return [f"You are now {display_name}."]
-            return [f"{target.name} is now {display_name}."]
+            return [f"{target.name} {self._verb(target, 'are', 'is')} now {display_name}."]
         if effect_type == "remove_status":
             target = self.resolve_target(str(effect.get("target") or "player"))
             if not target:
@@ -2782,9 +3165,7 @@ class GameEngine:
             status = normalize_id(str(effect.get("status") or ""))
             if status:
                 target.statuses.pop(status, None)
-                if target.id == self.state.player_id:
-                    return [f"You are no longer {status.replace('_', ' ')}."]
-                return [f"{target.name} is no longer {status.replace('_', ' ')}."]
+                return [f"{target.name} {self._verb(target, 'are', 'is')} no longer {status.replace('_', ' ')}."]
             target.statuses.clear()
             if target.id == self.state.player_id:
                 return ["All statuses leave you."]
@@ -2815,7 +3196,7 @@ class GameEngine:
                 spawned += 1
             if spawned == 0:
                 return [f"{name} tries to arrive, but finds no room."]
-            return [f"{spawned} {name}{'' if spawned == 1 else 's'} arrive."]
+            return [f"{spawned} {name}{'' if spawned == 1 else 's'} {'arrives' if spawned == 1 else 'arrive'}."]
         if effect_type == "spawn_item":
             name = str(effect.get("name") or effect.get("item") or "oddment")
             item_type = str(effect.get("item_type") or effect.get("item") or name)
@@ -2913,7 +3294,7 @@ class GameEngine:
             target.tags.update(normalize_id(str(tag)) for tag in coerce_list(effect.get("tags")) if str(tag).strip())
             if target.id == self.state.player_id:
                 return ["You are transformed."]
-            return [f"{target.name} is transformed."]
+            return [f"{target.name} {self._verb(target, 'are', 'is')} transformed."]
         if effect_type == "change_faction":
             target = self.resolve_target(str(effect.get("target") or "nearest_enemy"))
             if not target or target.kind == "item":
@@ -2929,13 +3310,9 @@ class GameEngine:
                 return []
             if effect_type == "add_tag":
                 target.tags.add(tag)
-                if target.id == self.state.player_id:
-                    return [f"You gain the {tag} tag."]
-                return [f"{target.name} gains the {tag} tag."]
+                return [f"{target.name} {self._verb(target, 'gain', 'gains')} the {tag} tag."]
             target.tags.discard(tag)
-            if target.id == self.state.player_id:
-                return [f"You lose the {tag} tag."]
-            return [f"{target.name} loses the {tag} tag."]
+            return [f"{target.name} {self._verb(target, 'lose', 'loses')} the {tag} tag."]
         if effect_type in {"add_resistance", "add_weakness"}:
             target = self.resolve_target(str(effect.get("target") or "player"))
             if not target:
@@ -2944,11 +3321,9 @@ class GameEngine:
             amount = clamp_int(effect.get("amount"), 1, 95 if effect_type == "add_resistance" else 200)
             table = target.resistances if effect_type == "add_resistance" else target.weaknesses
             table[damage_type] = clamp_int(table.get(damage_type, 0) + amount, 0, 95 if effect_type == "add_resistance" else 200)
-            word = "resists" if effect_type == "add_resistance" else "is vulnerable to"
-            if target.id == self.state.player_id:
-                player_word = "resist" if effect_type == "add_resistance" else "are vulnerable to"
-                return [f"You {player_word} {damage_type}."]
-            return [f"{target.name} {word} {damage_type}."]
+            if effect_type == "add_resistance":
+                return [f"{target.name} {self._verb(target, 'resist', 'resists')} {damage_type}."]
+            return [f"{target.name} {self._verb(target, 'are', 'is')} vulnerable to {damage_type}."]
         if effect_type == "set_flag":
             flag = normalize_id(str(effect.get("flag") or effect.get("id") or "unnamed_flag"))
             self.state.flags[flag] = effect.get("value", True)
@@ -3149,7 +3524,7 @@ class GameEngine:
             spawned += 1
         if spawned == 0:
             return [f"{name} tries to arrive, but finds no room."]
-        return [f"{spawned} {name}{'' if spawned == 1 else 's'} arrive."]
+        return [f"{spawned} {name}{'' if spawned == 1 else 's'} {'arrives' if spawned == 1 else 'arrive'}."]
 
     def resolve_placement(self, effect: dict[str, Any], prefer_unblocked: bool, attempt: int = 0) -> tuple[int, int]:
         placement = normalize_id(str(effect.get("placement") or "near_target"))

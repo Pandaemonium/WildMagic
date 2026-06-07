@@ -759,7 +759,9 @@ _STATUS_FLAVOR_ALIASES: dict[str, str] = {
     # poisoned synonyms
     "diseased": "poisoned", "infected": "poisoned", "plagued": "poisoned",
     "venomous": "poisoned", "toxic": "poisoned", "envenomed": "poisoned",
-    "tainted": "poisoned", "corrupted": "poisoned",
+    "tainted": "poisoned", "corrupted": "poisoned", "corroded": "poisoned",
+    "rusted": "poisoned", "rusting": "poisoned", "decaying": "poisoned",
+    "rotting": "poisoned", "withering": "poisoned",
     # bleeding synonyms
     "lacerated": "bleeding", "wounded": "bleeding", "cut": "bleeding",
     "hemorrhaging": "bleeding", "bloodied": "bleeding",
@@ -1357,6 +1359,28 @@ def _normalize_resolution(data: dict[str, Any]) -> dict[str, Any]:
     if isinstance(costs, list):
         data = dict(data)
         data["costs"] = [_flatten_nested_effect(c) if isinstance(c, dict) else c for c in costs]
+
+    # Rescue cost entries whose type is actually a known effect type. The LLM sometimes
+    # expresses a spell's mechanical consequence (e.g. "the wraith becomes weak to
+    # radiant damage") as a cost entry like {"type": "add_weakness", ...} instead of
+    # putting it in the effects list, which would otherwise fail validation outright.
+    costs = data.get("costs")
+    if isinstance(costs, list):
+        rescued_effects: list[dict[str, Any]] = []
+        remaining_costs: list[Any] = []
+        for c in costs:
+            c_type = str(c.get("type") or "").lower().strip() if isinstance(c, dict) else ""
+            if c_type in SUPPORTED_EFFECTS and c_type not in SUPPORTED_COSTS:
+                rescued = dict(c)
+                if "target" in rescued:
+                    rescued["target"] = _normalize_target_text(rescued["target"])
+                rescued_effects.append(rescued)
+            else:
+                remaining_costs.append(c)
+        if rescued_effects:
+            data = dict(data)
+            data["costs"] = remaining_costs
+            data["effects"] = list(data.get("effects") or []) + rescued_effects
 
     return data
 

@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 import shlex
 from typing import Any
 
-from .engine import GameEngine
+from .engine import GameEngine, normalize_id
 from .wild_magic import MagicResolution, WildMagicProvider, make_provider, resolve_spell
 
 
@@ -29,6 +29,23 @@ DIRECTIONS = {
     "se": (1, 1),
     "southwest": (-1, 1),
     "sw": (-1, 1),
+}
+
+# Aliases for the deterministic standard spells, mapped to the GameEngine method
+# that resolves them. These spells require no LLM call and always behave the
+# same way -- the reliable backbone a player can lean on between wild casts.
+STANDARD_SPELLS = {
+    "spark": "cast_standard_bolt",
+    "spark_bolt": "cast_standard_bolt",
+    "bolt": "cast_standard_bolt",
+    "frost": "cast_standard_frost",
+    "frost_shard": "cast_standard_frost",
+    "shard": "cast_standard_frost",
+    "heal": "cast_standard_heal",
+    "minor_heal": "cast_standard_heal",
+    "ward": "cast_standard_ward",
+    "reveal": "cast_standard_reveal",
+    "detect": "cast_standard_reveal",
 }
 
 
@@ -106,7 +123,7 @@ class GameSession:
                 action = "help"
                 success = True
                 explicit_messages = command_help()
-            elif verb in {"inspect", "look", "status"}:
+            elif verb in {"inspect", "look", "status", "inventory", "inv", "i"}:
                 action = "inspect"
                 success = True
                 explicit_messages = describe_state(self.engine)
@@ -122,14 +139,16 @@ class GameSession:
             elif verb in {"ascend", "upstairs", "<"}:
                 action = "ascend"
                 success = self.engine.ascend_stairs()
-            elif verb in {"spark", "spark_bolt", "bolt", "f"}:
+            elif verb in STANDARD_SPELLS or verb == "f":
                 action = "standard_spell"
-                success = self.engine.cast_standard_bolt()
+                method_name = STANDARD_SPELLS.get(verb, "cast_standard_bolt")
+                success = getattr(self.engine, method_name)()
             elif verb in {"standard_spell", "spell"}:
                 action = "standard_spell"
-                spell_name = tokens[1].lower() if len(tokens) > 1 else ""
-                if spell_name in {"spark", "spark_bolt", "bolt"}:
-                    success = self.engine.cast_standard_bolt()
+                spell_name = normalize_id(tokens[1]) if len(tokens) > 1 else ""
+                method_name = STANDARD_SPELLS.get(spell_name)
+                if method_name:
+                    success = getattr(self.engine, method_name)()
                 else:
                     explicit_messages = [f"Unknown standard spell: {spell_name or '(missing)'}"]
             elif verb in {"move", "go"}:
@@ -158,11 +177,23 @@ class GameSession:
                 success = self.engine.use_item(item_name) if item_name else False
                 if not item_name:
                     explicit_messages = ["Use what? Specify an item name."]
+            elif verb in {"equip", "wear", "wield"}:
+                action = "equip"
+                item_name = command_argument(original_command, tokens)
+                success = self.engine.equip_item(item_name) if item_name else False
+                if not item_name:
+                    explicit_messages = ["Equip what? Specify an item name."]
+            elif verb in {"unequip", "unwield", "remove"}:
+                action = "unequip"
+                slot_name = command_argument(original_command, tokens)
+                success = self.engine.unequip_item(slot_name) if slot_name else False
+                if not slot_name:
+                    explicit_messages = ["Unequip what? Specify a slot (weapon, armor, charm) or item name."]
             elif verb in {"cast", "wild"}:
                 action = "cast"
                 spell = command_argument(original_command, tokens)
                 if "silenced" in self.engine.state.player.statuses:
-                    explicit_messages = ["You are silenced — the spell is swallowed before it can speak."]
+                    explicit_messages = ["You are silenced - the spell is swallowed before it can speak."]
                 else:
                     success, technical_failure, wild_magic_record, llm_context = self._cast_wild(spell, replay_wild_magic)
             else:
@@ -274,8 +305,10 @@ def command_argument(command: str, tokens: list[str]) -> str:
 
 def command_help() -> list[str]:
     return [
-        "Commands: move north/south/east/west, open, descend, ascend, wait, spark, cast <spell>, use <item>, drop <item>, pickup, inspect, quit.",
-        "Short movement aliases also work: n, s, e, w.",
+        "Commands: move north/south/east/west, open, descend, ascend, wait, cast <spell>, use <item>, equip <item>, unequip <slot>, drop <item>, pickup, inspect (or inventory), quit.",
+        "Equipment: weapons, armor, and charms go in their own slots and add to your attack/defense while worn. Equip with 'equip <item>' (or 'wear'/'wield'); take gear off with 'unequip weapon/armor/charm' (or 'remove <item>').",
+        "Standard spells (deterministic, no wild magic risk): spark, frost, heal, ward, reveal. Type the name directly, e.g. 'frost' -- 'cast frost' instead asks wild magic to improvise one.",
+        "Short movement aliases also work: n, s, e, w. Walk into an enemy to attack it.",
     ]
 
 
@@ -307,6 +340,7 @@ def describe_state(engine: GameEngine) -> list[str]:
             a_status_str = f" [{a_parts}]"
         tag_str = f" tags:{','.join(sorted(ally.tags))}" if ally.tags else ""
         allies.append(f"{ally.name}({ally.hp}/{ally.max_hp}) at {ally.x},{ally.y}{tag_str}{a_status_str}")
+    equipment = ", ".join(f"{slot}: {item}" for slot, item in sorted(player.equipment.items()) if item) or "none"
     resistances = ", ".join(f"{k}:{v}%" for k, v in sorted(player.resistances.items()) if v) or "none"
     weaknesses = ", ".join(f"{k}:{v}%" for k, v in sorted(player.weaknesses.items()) if v) or "none"
     lines = [
@@ -314,6 +348,7 @@ def describe_state(engine: GameEngine) -> list[str]:
         f"Depth {state.depth}/{state.max_depth} | Position {player.x},{player.y} | Scenario {state.scenario}",
         f"Visible tiles: {len(state.visible)} | Explored tiles: {len(state.explored)}",
         f"Statuses: {statuses}",
+        f"Equipment: {equipment}",
         f"Inventory: {inventory}",
         f"Curses: {curses}",
         f"Flags: {flags}",

@@ -195,6 +195,7 @@ class Entity:
     tags: set[str] = field(default_factory=set)
     resistances: dict[str, int] = field(default_factory=dict)
     weaknesses: dict[str, int] = field(default_factory=dict)
+    equipment: dict[str, str | None] = field(default_factory=lambda: {"weapon": None, "armor": None, "charm": None})
 
     @property
     def alive(self) -> bool:
@@ -225,6 +226,7 @@ class Entity:
                     "max_mana": self.max_mana,
                     "attack": self.attack,
                     "defense": self.defense,
+                    "equipment": self.equipment,
                 }
             )
         else:
