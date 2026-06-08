@@ -37,6 +37,7 @@ Examples to avoid:
 
 - `main.py`: graphical entry point.
 - `wildmagic/engine.py`: authoritative game rules and state mutation.
+- `wildmagic/models.py`: shared data classes (`Entity`, `NPCProfile`, etc.) used by engine and state.
 - `wildmagic/actions.py`: shared action/session layer used by UI, CLI, tests, and replays.
 - `wildmagic/wild_magic.py`: LLM prompt, provider calls, JSON parsing, normalization, validation, audit logging.
 - `wildmagic/fallbacks.py`: quarantined replacement-resolution fallbacks. Keep this isolated and optional.

@@ -5,7 +5,20 @@ import shlex
 from typing import Any
 
 from .engine import GameEngine, normalize_id
-from .wild_magic import MagicResolution, WildMagicProvider, make_provider, resolve_spell
+from .wild_magic import (
+    DialogueProvider,
+    DialogueResolution,
+    MagicResolution,
+    TradeProvider,
+    TradeResolution,
+    WildMagicProvider,
+    make_dialogue_provider,
+    make_provider,
+    make_trade_provider,
+    resolve_dialogue,
+    resolve_spell,
+    resolve_trade_proposal,
+)
 
 
 DIRECTIONS = {
@@ -60,6 +73,7 @@ class ActionResult:
     messages: list[str] = field(default_factory=list)
     technical_failure: bool = False
     wild_magic: dict[str, Any] | None = None
+    dialogue: dict[str, Any] | None = None
     llm_context: dict[str, Any] | None = None
     should_quit: bool = False
 
@@ -73,6 +87,7 @@ class ActionResult:
             "turn_before": self.turn_before,
             "turn_after": self.turn_after,
             "wild_magic": self.wild_magic,
+            "dialogue": self.dialogue,
         }
 
 
@@ -83,12 +98,20 @@ class GameSession:
         scenario: str = "dungeon",
         provider: WildMagicProvider | None = None,
         provider_name: str | None = None,
+        dialogue_provider: DialogueProvider | None = None,
+        dialogue_provider_name: str | None = None,
+        trade_provider: TradeProvider | None = None,
+        trade_provider_name: str | None = None,
     ) -> None:
         self.seed = seed
         self.scenario = scenario
         self.engine = GameEngine(seed=seed, scenario=scenario)
         self.provider = provider or make_provider(provider_name)
         self.provider_label = getattr(self.provider, "name", "unknown")
+        self.dialogue_provider = dialogue_provider or make_dialogue_provider(dialogue_provider_name)
+        self.dialogue_provider_label = getattr(self.dialogue_provider, "name", "unknown")
+        self.trade_provider = trade_provider or make_trade_provider(trade_provider_name)
+        self.trade_provider_label = getattr(self.trade_provider, "name", "unknown")
         self.records: list[dict[str, Any]] = []
 
     def execute_command(
@@ -104,6 +127,7 @@ class GameSession:
         success = False
         technical_failure = False
         wild_magic_record: dict[str, Any] | None = None
+        dialogue_record: dict[str, Any] | None = None
         llm_context: dict[str, Any] | None = None
         should_quit = False
         explicit_messages: list[str] | None = None
@@ -127,6 +151,18 @@ class GameSession:
                 action = "inspect"
                 success = True
                 explicit_messages = describe_state(self.engine)
+            elif verb in {"wares", "browse", "shop"} and self.engine.state.pending_trade is None:
+                action = "wares"
+                success = True
+                explicit_messages = self._browse_wares()
+            elif self.engine.state.pending_trade is not None and verb in {"accept", "yes", "y"}:
+                action = "trade_accept"
+                success = True
+                self.engine.resolve_pending_trade(True)
+            elif self.engine.state.pending_trade is not None and verb in {"reject", "decline", "no", "n"}:
+                action = "trade_reject"
+                success = True
+                self.engine.resolve_pending_trade(False)
             elif verb in {"wait", "."}:
                 action = "wait"
                 success = self.engine.wait_turn()
@@ -196,6 +232,15 @@ class GameSession:
                     explicit_messages = ["You are silenced - the spell is swallowed before it can speak."]
                 else:
                     success, technical_failure, wild_magic_record, llm_context = self._cast_wild(spell, replay_wild_magic)
+            elif verb in {"talk", "speak", "say"}:
+                action = "talk"
+                message = command_argument(original_command, tokens)
+                if "silenced" in self.engine.state.player.statuses:
+                    explicit_messages = ["You are silenced - no words come out."]
+                elif not message:
+                    explicit_messages = ["Say what? Specify what you want to say, e.g. 'talk hello there'."]
+                else:
+                    success, technical_failure, dialogue_record = self._talk(message)
             else:
                 explicit_messages = [f"Unknown command: {verb}"]
 
@@ -212,6 +257,7 @@ class GameSession:
             messages=messages,
             technical_failure=technical_failure,
             wild_magic=wild_magic_record,
+            dialogue=dialogue_record,
             llm_context=llm_context,
             should_quit=should_quit,
         )
@@ -276,12 +322,68 @@ class GameSession:
         outcome = self.engine.apply_wild_magic_resolution(resolution.data)
         return outcome.consumed_turn, False, wild_magic_record, context
 
+    def _talk(self, message: str) -> tuple[bool, bool, dict[str, Any] | None]:
+        message = message.strip()
+        npc = self.engine.find_talk_target()
+        if npc is None:
+            self.engine.state.add_message("There's no one nearby to talk to.")
+            return False, False, None
+
+        context = self.engine.dialogue_context_for_llm(npc, message)
+        resolution = resolve_dialogue(self.dialogue_provider, npc.name, message, context)
+        self.dialogue_provider_label = resolution.provider_name
+        dialogue_record = {
+            "npc": npc.name,
+            "message": message,
+            "provider": resolution.provider_name,
+            "technical_failure": resolution.technical_failure,
+            "error": resolution.error,
+            "reply": resolution.reply,
+            "raw_response": resolution.raw_response,
+            "audit_path": resolution.audit_path,
+        }
+        if resolution.technical_failure or resolution.reply is None:
+            self.engine.state.add_message(f"{npc.name} doesn't seem to hear you. ({resolution.error})")
+            return False, True, dialogue_record
+
+        reply = resolution.reply
+        trade_data: dict[str, Any] | None = None
+        if self.engine.should_consider_trade(npc, message, reply):
+            trade_context = self.engine.trade_context_for_llm(npc, message, reply)
+            trade_resolution = resolve_trade_proposal(self.trade_provider, npc.name, trade_context)
+            self.trade_provider_label = trade_resolution.provider_name
+            dialogue_record["trade"] = {
+                "provider": trade_resolution.provider_name,
+                "technical_failure": trade_resolution.technical_failure,
+                "error": trade_resolution.error,
+                "data": trade_resolution.data,
+                "raw_response": trade_resolution.raw_response,
+                "audit_path": trade_resolution.audit_path,
+            }
+            if not trade_resolution.technical_failure:
+                trade_data = trade_resolution.data
+
+        self.engine.apply_dialogue_exchange(npc, message, reply, trade_data)
+        return True, False, dialogue_record
+
+    def _browse_wares(self) -> list[str]:
+        npc = self.engine.find_talk_target()
+        if npc is None:
+            return ["There's no one nearby to trade with."]
+        profile = self.engine.state.npc_profiles.get(npc.id)
+        if profile is None or not profile.wares:
+            return [f"{npc.name} has nothing to trade."]
+        wares_text = ", ".join(f"{name} x{amount}" for name, amount in sorted(profile.wares.items()))
+        return [f"{npc.name} has for trade: {wares_text}"]
+
     def to_replay(self) -> dict[str, Any]:
         return {
             "version": 1,
             "seed": self.seed,
             "scenario": self.scenario,
             "provider": self.provider_label,
+            "dialogue_provider": self.dialogue_provider_label,
+            "trade_provider": self.trade_provider_label,
             "actions": self.records,
             "final_summary": summarize_state(self.engine),
         }
@@ -305,7 +407,9 @@ def command_argument(command: str, tokens: list[str]) -> str:
 
 def command_help() -> list[str]:
     return [
-        "Commands: move north/south/east/west, open, descend, ascend, wait, cast <spell>, use <item>, equip <item>, unequip <slot>, drop <item>, pickup, inspect (or inventory), quit.",
+        "Commands: move north/south/east/west, open, descend, ascend, wait, cast <spell>, talk <message>, use <item>, equip <item>, unequip <slot>, drop <item>, pickup, inspect (or inventory), wares (or browse), quit.",
+        "Talking: stand next to an NPC and 'talk <what you want to say>' (or 'speak'/'say') to start a conversation - it costs a turn, just like any other action.",
+        "Trading: some NPCs deal in goods and gold - 'wares' (or 'browse') lists what they have for trade, a free look. Haggle naturally through 'talk' - if a real offer comes together, you'll get a confirmation prompt to 'accept' (or 'yes') or 'reject' (or 'no') before anything changes hands.",
         "Equipment: weapons, armor, and charms go in their own slots and add to your attack/defense while worn. Equip with 'equip <item>' (or 'wear'/'wield'); take gear off with 'unequip weapon/armor/charm' (or 'remove <item>').",
         "Standard spells (deterministic, no wild magic risk): spark, frost, heal, ward, reveal. Type the name directly, e.g. 'frost' -- 'cast frost' instead asks wild magic to improvise one.",
         "Short movement aliases also work: n, s, e, w. Walk into an enemy to attack it.",
@@ -340,6 +444,14 @@ def describe_state(engine: GameEngine) -> list[str]:
             a_status_str = f" [{a_parts}]"
         tag_str = f" tags:{','.join(sorted(ally.tags))}" if ally.tags else ""
         allies.append(f"{ally.name}({ally.hp}/{ally.max_hp}) at {ally.x},{ally.y}{tag_str}{a_status_str}")
+    npcs = []
+    for npc in sorted(
+        (e for e in engine.state.entities.values() if e.kind == "npc" and engine.is_visible(e.x, e.y)),
+        key=lambda entity: entity.id,
+    ):
+        profile = engine.state.npc_profiles.get(npc.id)
+        role = f" the {profile.role}" if profile and profile.role else ""
+        npcs.append(f"{npc.name}{role} at {npc.x},{npc.y}")
     equipment = ", ".join(f"{slot}: {item}" for slot, item in sorted(player.equipment.items()) if item) or "none"
     resistances = ", ".join(f"{k}:{v}%" for k, v in sorted(player.resistances.items()) if v) or "none"
     weaknesses = ", ".join(f"{k}:{v}%" for k, v in sorted(player.weaknesses.items()) if v) or "none"
@@ -356,6 +468,7 @@ def describe_state(engine: GameEngine) -> list[str]:
         f"Triggers: {len(state.triggers)}",
         "Enemies: " + ("; ".join(enemies) if enemies else "none"),
         "Allies: " + ("; ".join(allies) if allies else "none"),
+        "NPCs: " + ("; ".join(npcs) if npcs else "none"),
     ]
     if player.resistances:
         lines.append(f"Resistances: {resistances}")

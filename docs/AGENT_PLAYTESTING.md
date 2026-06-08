@@ -84,6 +84,7 @@ Useful CLI commands:
 - `ascend`
 - `spark`
 - `cast <wild spell text>`
+- `talk <message>` (or `speak`/`say`) — talk to an adjacent NPC; costs a turn
 - `quit`
 
 Use `inspect` often. It prints turn, HP, MP, inventory, curses, flags, scheduled events, and enemy summaries.
@@ -119,6 +120,8 @@ Each record includes:
 - technical failure or validation error
 
 When reporting an LLM issue, include the spell text, the visible in-game result, and the relevant audit record or a summary of its `raw_response`, `parsed_resolution`, and `error`.
+
+NPC dialogue (the `talk` command) has its own parallel log at `logs/dialogue_audit.jsonl`, with the NPC name, message, prompt/context, `raw_response`, cleaned `reply`, and any technical error. It's controlled by the same `WILDMAGIC_AUDIT_DIR`/`WILDMAGIC_AUDIT_LOG` settings, and the provider/model can be set independently with `WILDMAGIC_DIALOGUE_PROVIDER`/`WILDMAGIC_DIALOGUE_MODEL` (falling back to `WILDMAGIC_PROVIDER`/`WILDMAGIC_MODEL` if unset).
 
 ## Replays
 

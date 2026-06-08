@@ -33,6 +33,7 @@ def run_replay(path: Path) -> ReplayResult:
         seed=data.get("seed"),
         scenario=data.get("scenario", "dungeon"),
         provider_name="mock",
+        dialogue_provider_name="mock",
     )
     actions = data.get("actions", [])
     for action in actions:

@@ -28,6 +28,7 @@ from .models import (
     Curse,
     Entity,
     GameStats,
+    NPCProfile,
     TILE_NAMES,
     TILE_ALIASES,
     TILE_TAGS,
@@ -38,6 +39,11 @@ from .templates import creature_template, creature_template_ids, item_template, 
 
 MAP_WIDTH = 42
 MAP_HEIGHT = 28
+
+# How far an NPC can notice events near the player. NPCs have no FOV of their own,
+# so "is this visible to the player and within range" stands in for "would this NPC
+# plausibly have seen or heard it" -- close enough for flavor-level awareness.
+NPC_PERCEPTION_RADIUS = 6
 
 
 # (name, char, hp, attack, defense, ai, tags, resistances, weaknesses)
@@ -239,6 +245,7 @@ class GameState:
     player_id: str = "player"
     turn: int = 0
     messages: list[str] = field(default_factory=list)
+    message_count: int = 0
     inventory: dict[str, int] = field(default_factory=lambda: {
         "chalk": 2,
         "grave salt": 2,
@@ -248,8 +255,11 @@ class GameState:
         "viscous residue": 1,
         "metal scrap": 2,
         "arcane residue": 1,
+        "gold": 30,
     })
     curses: dict[str, Curse] = field(default_factory=dict)
+    npc_profiles: dict[str, NPCProfile] = field(default_factory=dict)
+    pending_trade: dict[str, Any] | None = None
     flags: dict[str, Any] = field(default_factory=dict)
     tile_tags: dict[str, list[str]] = field(default_factory=dict)
     tile_durations: dict[str, int] = field(default_factory=dict)
@@ -275,6 +285,38 @@ class GameState:
     def add_message(self, message: str) -> None:
         self.messages.append(message)
         self.messages = self.messages[-80:]
+        # Monotonic; unlike len(messages), it survives the cap above, so callers
+        # (e.g. NPC perception) can tell exactly how many messages are new.
+        self.message_count += 1
+
+
+TRADE_KEYWORDS = frozenset({
+    "trade", "trades", "traded", "trading",
+    "sell", "sells", "sold", "selling",
+    "buy", "buys", "bought", "buying",
+    "barter", "bartering",
+    "deal", "deals",
+    "offer", "offers", "offered", "offering",
+    "exchange", "exchanges", "exchanging",
+    "swap", "swaps", "swapping",
+    "purchase", "purchases", "purchasing",
+    "haggle", "haggling",
+    "wares", "goods", "merchandise",
+    "gold", "coin", "coins",
+    "price", "prices", "priced",
+})
+
+
+def scan_for_trade_intent(message: str, reply: str) -> bool:
+    """Cheap, in-process first pass: does either side of this exchange even sound
+    trade-flavored? Scanning BOTH the player's message and the NPC's reply matters
+    -- "I'll trade you my dagger for that lockpick" might draw a reply that never
+    repeats a trade-ish word at all. This is intentionally crude (a keyword scan,
+    not LLM judgment) -- it exists purely to keep the expensive structuring call
+    (resolve_trade_proposal) rare, since false positives just cost one quick no-op
+    LLM round trip while false negatives would silently swallow real offers."""
+    text = f"{message} {reply}".lower()
+    return any(keyword in text for keyword in TRADE_KEYWORDS)
 
 
 class GameEngine:
@@ -283,12 +325,15 @@ class GameEngine:
         self.state = GameState(rng_seed=seed, scenario=scenario)
         self._next_entity_number = 1
         self._conducting_lightning = False
+        self._npc_perception_message_count = 0
         if scenario == "test_chamber":
             self._generate_test_chamber()
         elif scenario == "empire_compound":
             self._generate_empire_compound()
         elif scenario == "frontier":
             self._generate_frontier_start()
+        elif scenario == "town":
+            self._generate_town_start()
         else:
             self._generate_new_run()
 
@@ -533,6 +578,135 @@ class GameEngine:
 
         state.add_message("Stone walls rise in perfect symmetry - the Grand Empire does not build by accident.")
         state.add_message("Somewhere ahead, boots strike the ground in unison.")
+        self.update_fov()
+
+    def _generate_town_start(self) -> None:
+        """Hollowmere: a small frontier town built around the mouth of an old dungeon
+        stair. The starting area - talkable townsfolk (each with their own memory and
+        backstory) live alongside wandering threats, so the player can test dialogue
+        and combat side by side from the very first turn."""
+        state = self.state
+        state.tiles = [[WALL for _ in range(state.width)] for _ in range(state.height)]
+        state.visible.clear()
+        state.explored.clear()
+        state.tile_tags.clear()
+        state.tile_durations.clear()
+        state.entities = {}
+        state.npc_profiles = {}
+
+        square = Room(16, 12, 9, 5)
+        inn = Room(3, 10, 8, 6)
+        market = Room(30, 10, 8, 6)
+        temple = Room(16, 3, 9, 6)
+        gatehouse = Room(16, 20, 9, 6)
+        back_alley = Room(3, 18, 6, 5)
+
+        for room in (square, inn, market, temple, gatehouse, back_alley):
+            self._carve_room(room)
+        self._carve_corridor(square.center, inn.center)
+        self._carve_corridor(square.center, market.center)
+        self._carve_corridor(square.center, temple.center)
+        self._carve_corridor(square.center, gatehouse.center)
+        self._carve_corridor(inn.center, back_alley.center)
+        self._place_doors()
+
+        sx, sy = square.center
+        player = Entity(
+            id="player",
+            name="You",
+            kind="player",
+            x=sx,
+            y=sy,
+            char="@",
+            hp=24,
+            max_hp=24,
+            mana=14,
+            max_mana=14,
+            attack=4,
+            defense=1,
+            blocks=True,
+            faction="player",
+        )
+        state.entities[player.id] = player
+
+        gx, gy = gatehouse.center
+        state.tiles[gy][gx] = STAIRS_DOWN
+
+        maren = self.spawn_npc(
+            "Old Maren", "M", *self._random_open_tile_in_room(inn),
+            role="innkeeper",
+            backstory=(
+                "Has run the Lantern and Bone inn for thirty years, since long before the "
+                "Grand Empire's roads reached this far north. Buries her opinions about the "
+                "legion under a tray of drinks and a closed mouth."
+            ),
+            traits=["gruff", "observant", "secretly soft-hearted"],
+            tags={"human", "townsfolk"},
+        )
+        self.state.npc_profiles[maren.id].remember(
+            "Three Imperial scouts passed through at dawn, asking after a wild mage."
+        )
+
+        quill = self.spawn_npc(
+            "Quill Hatchet", "Q", *self._random_open_tile_in_room(market),
+            role="peddler",
+            backstory=(
+                "Travels the frontier roads buying odd curios and reselling them at triple "
+                "the price. Knows which rumors are worth repeating and which ones get a "
+                "person's throat cut."
+            ),
+            traits=["chatty", "shrewd", "easily distracted by anything shiny"],
+            tags={"human", "townsfolk"},
+            wares={"trinket": 3, "lockpick": 1, "smoke vial": 2, "gold": 25},
+        )
+        self.state.npc_profiles[quill.id].remember(
+            "Lost a good knife to a cutpurse working the market stalls just yesterday."
+        )
+
+        wren = self.spawn_npc(
+            "Sister Wren", "S", *self._random_open_tile_in_room(temple),
+            role="temple acolyte",
+            backstory=(
+                "Tends the small shrine to the old earth-saints, half-forgotten since the "
+                "Empire brought its own gods north. Worries more about the dungeon's "
+                "restless dead than any war of banners."
+            ),
+            traits=["serene", "watchful", "quietly stubborn"],
+            tags={"human", "townsfolk"},
+        )
+        self.state.npc_profiles[wren.id].remember(
+            "The candles in the undercroft keep guttering, as if something below is breathing."
+        )
+
+        ressa = self.spawn_npc(
+            "Captain Ressa Vane", "C", *self._random_open_tile_in_room(gatehouse),
+            role="town guard captain",
+            backstory=(
+                "Commands the dozen guards who keep the peace and watch the old dungeon "
+                "stair. Trusts wild magic about as much as she trusts the Empire - which is "
+                "to say, not at all, and she'll tell you so."
+            ),
+            traits=["wary", "blunt", "fiercely protective of the town"],
+            tags={"human", "townsfolk", "soldier"},
+        )
+        self.state.npc_profiles[ressa.id].remember(
+            "Something dragged a sheep carcass up from the dungeon stair last night and left it in the square."
+        )
+
+        cx, cy = self._random_open_tile_in_room(market)
+        self.spawn_actor(
+            "goblin cutpurse", "g", cx, cy, 8, 3, 0, "enemy", "goblin",
+            tags={"goblin", "humanoid", "flesh"},
+        )
+        for _ in range(2):
+            rx, ry = self._random_open_tile_in_room(back_alley)
+            self.spawn_actor(
+                "carrion rat", "r", rx, ry, 4, 2, 0, "enemy", "simple",
+                tags={"beast", "vermin", "scavenger"}, resistances={"poison": 50},
+            )
+
+        state.add_message("Hollowmere clings to the lip of the old dungeon stair, half town and half watchtower.")
+        state.add_message("Its people are glad of company - and wary of what else might come up out of the dark.")
         self.update_fov()
 
     # ------------------------------------------------------------------
@@ -1040,6 +1214,49 @@ class GameEngine:
         self.state.entities[entity.id] = entity
         return entity
 
+    def spawn_npc(
+        self,
+        name: str,
+        char: str,
+        x: int,
+        y: int,
+        role: str,
+        backstory: str,
+        traits: list[str] | None = None,
+        tags: set[str] | None = None,
+        wares: dict[str, int] | None = None,
+    ) -> Entity:
+        """Spawn a talkable NPC: a physical Entity plus a parallel NPCProfile carrying
+        persona/memory data (kept separate the same way Curse data lives off-Entity)."""
+        npc_tags = {normalize_id(str(tag)) for tag in (tags or set()) if str(tag).strip()}
+        npc_tags.add("npc")
+        entity = Entity(
+            id=self.next_entity_id("npc"),
+            name=name,
+            kind="npc",
+            x=x,
+            y=y,
+            char=char,
+            hp=10,
+            max_hp=10,
+            attack=2,
+            defense=0,
+            blocks=True,
+            faction="neutral",
+            ai="npc",
+            tags=npc_tags,
+        )
+        self.state.entities[entity.id] = entity
+        self.state.npc_profiles[entity.id] = NPCProfile(
+            entity_id=entity.id,
+            name=name,
+            role=role,
+            backstory=backstory,
+            traits=list(traits or []),
+            wares=dict(wares or {}),
+        )
+        return entity
+
     def spawn_item(
         self,
         name: str,
@@ -1190,7 +1407,7 @@ class GameEngine:
             self.state.add_message("The dungeon refuses that edge.")
             return False
         target = self.blocking_entity_at(target_x, target_y)
-        if target and target.faction == "ally":
+        if target and target.faction in {"ally", "neutral"}:
             self.state.add_message(f"{target.name} is in your way.")
             return False
         if target and target.faction != "player":
@@ -1241,6 +1458,182 @@ class GameEngine:
         self.state.add_message("You hold still and listen.")
         self.finish_player_turn()
         return True
+
+    def find_talk_target(self) -> Entity | None:
+        """The NPC the player is positioned to talk to: any talkable NPC in an
+        adjacent (8-directional) tile, picked deterministically if more than one."""
+        player = self.state.player
+        candidates = []
+        for dx in (-1, 0, 1):
+            for dy in (-1, 0, 1):
+                if dx == 0 and dy == 0:
+                    continue
+                entity = self.blocking_entity_at(player.x + dx, player.y + dy)
+                if entity is not None and entity.kind == "npc" and entity.alive:
+                    candidates.append(entity)
+        if not candidates:
+            return None
+        return min(candidates, key=lambda entity: entity.id)
+
+    def dialogue_context_for_llm(self, npc: Entity, message: str) -> dict[str, Any]:
+        profile = self.state.npc_profiles[npc.id]
+        player = self.state.player
+        return {
+            "npc": profile.to_dialogue_context(),
+            "player": {
+                "name": player.name,
+                "hp": player.hp,
+                "max_hp": player.max_hp,
+                "statuses": sorted(player.statuses),
+                "equipment": {slot: item for slot, item in player.equipment.items() if item},
+            },
+            "scene": {"turn": self.state.turn, "depth": self.state.depth, "scenario": self.state.scenario},
+            "message": message,
+        }
+
+    def should_consider_trade(self, npc: Entity, message: str, reply: str) -> bool:
+        """Stages 1+2 of the trigger funnel that gates the expensive structuring
+        call (resolve_trade_proposal): an NPC with nothing to trade can never
+        produce a real proposal (free check, eliminates almost everyone), and an
+        exchange that doesn't even brush against trade-ish language essentially
+        never turns into one either (cheap in-process keyword scan). Only when
+        both hold is it worth spending a ~6-12s LLM round trip to find out for sure."""
+        profile = self.state.npc_profiles.get(npc.id)
+        if profile is None or not profile.wares:
+            return False
+        return scan_for_trade_intent(message, reply)
+
+    def trade_context_for_llm(self, npc: Entity, message: str, reply: str) -> dict[str, Any]:
+        profile = self.state.npc_profiles[npc.id]
+        player = self.state.player
+        return {
+            "npc": profile.to_dialogue_context(),
+            "player": {
+                "name": player.name,
+                "inventory": dict(sorted(self.state.inventory.items())),
+            },
+            "scene": {"turn": self.state.turn, "depth": self.state.depth, "scenario": self.state.scenario},
+            "exchange": {"player_said": message, "npc_replied": reply},
+        }
+
+    def apply_dialogue_exchange(
+        self, npc: Entity, message: str, reply: str, trade_data: dict[str, Any] | None = None
+    ) -> None:
+        """Record + display the exchange, then either settle the turn immediately
+        (the normal case) or -- when the structuring call came back with a real
+        proposal -- stash it as `pending_trade` and stop short of finishing the
+        turn. The confirmation modal takes over from there; accepting or rejecting
+        (resolve_pending_trade) is what reaches finish_player_turn for this beat,
+        exactly as the two branches of apply_wild_magic_resolution each
+        independently reach it exactly once."""
+        profile = self.state.npc_profiles[npc.id]
+        profile.record_exchange("player", message)
+        profile.record_exchange("npc", reply)
+        self.state.add_message(f'You say to {npc.name}: "{message}"')
+        self.state.add_message(f'{npc.name} says: "{reply}"')
+
+        if trade_data is not None and trade_data.get("trade_proposed"):
+            proposal_text = str(trade_data.get("proposal_text") or "").strip()
+            self.state.pending_trade = {
+                "npc_id": npc.id,
+                "npc_name": npc.name,
+                "initiator": trade_data.get("initiator"),
+                "npc_gives": [dict(entry) for entry in coerce_list(trade_data.get("npc_gives"))],
+                "npc_wants": [dict(entry) for entry in coerce_list(trade_data.get("npc_wants"))],
+                "proposal_text": proposal_text,
+            }
+            if proposal_text:
+                self.state.add_message(f'{npc.name} proposes a trade: "{proposal_text}"')
+            return
+
+        self.finish_player_turn()
+
+    def resolve_pending_trade(self, accept: bool) -> None:
+        """Settle the trade apply_dialogue_exchange paused on -- the second half
+        of an interrupted player-turn beat. Both branches independently reach
+        finish_player_turn exactly once, mirroring how apply_wild_magic_resolution's
+        accept/reject branches each do. Two transfers plus two messages is the
+        whole operation; deliberately not wrapped in a transaction abstraction."""
+        trade = self.state.pending_trade
+        if trade is None:
+            return
+        self.state.pending_trade = None
+        npc = self.state.entities.get(trade["npc_id"])
+        profile = self.state.npc_profiles.get(trade["npc_id"])
+        npc_name = trade.get("npc_name", "the trader")
+
+        if not accept or npc is None or profile is None:
+            self.state.add_message(f"You step back from the deal with {npc_name}.")
+            self.finish_player_turn()
+            return
+
+        received: list[str] = []
+        for entry in trade.get("npc_gives", []):
+            name = str(entry.get("item", "")).strip()
+            quantity = max(0, int(entry.get("quantity", 0) or 0))
+            if not name or quantity <= 0:
+                continue
+            key = self.find_item_in(profile.wares, name) or name
+            taken = self.consume_inventory_item(key, quantity, container=profile.wares)
+            if taken:
+                self.add_inventory_item(self.state.inventory, key, taken)
+                received.append(f"{taken} {key}")
+
+        given: list[str] = []
+        for entry in trade.get("npc_wants", []):
+            name = str(entry.get("item", "")).strip()
+            quantity = max(0, int(entry.get("quantity", 0) or 0))
+            if not name or quantity <= 0:
+                continue
+            key = self.find_inventory_item(name) or name
+            taken = self.consume_inventory_item(key, quantity)
+            if taken:
+                self.add_inventory_item(profile.wares, key, taken)
+                given.append(f"{taken} {key}")
+
+        receive_text = ", ".join(received) or "nothing"
+        give_text = ", ".join(given) or "nothing"
+        self.state.add_message(f"Deal struck with {npc_name} -- you receive {receive_text}, and hand over {give_text}.")
+        self.finish_player_turn()
+
+    def _update_npc_perceptions(self) -> None:
+        """Let nearby NPCs notice what just happened, the same way the player does
+        via state.messages -- so "aware of what they have seen" stays grounded in
+        actual events instead of a separate, hand-authored perception feed.
+
+        Uses message_count rather than len(messages)/slicing: messages is capped at
+        80 entries, so a plain negative-index slice can resurface stale lines from
+        before the cap kicked in or from turns where the NPC wasn't even nearby.
+        message_count is monotonic and tells us exactly how many lines are new.
+        """
+        state = self.state
+        if not state.npc_profiles:
+            return
+        new_count = state.message_count - self._npc_perception_message_count
+        self._npc_perception_message_count = state.message_count
+        if new_count <= 0:
+            return
+        new_messages = state.messages[-new_count:] if new_count <= len(state.messages) else list(state.messages)
+        witnessed = [m for m in new_messages if not m.startswith(("> ", "*> "))]
+        if not witnessed:
+            return
+        player = self.state.player
+        for entity in self.state.entities.values():
+            if entity.kind != "npc" or entity.hp <= 0:
+                continue
+            profile = self.state.npc_profiles.get(entity.id)
+            if profile is None or not self.is_visible(entity.x, entity.y):
+                continue
+            if max(abs(entity.x - player.x), abs(entity.y - player.y)) > NPC_PERCEPTION_RADIUS:
+                continue
+            own_dialogue_prefixes = (f"You say to {entity.name}:", f"{entity.name} says:")
+            for text in witnessed:
+                # An NPC's own exchange with the player already lives in profile.conversation
+                # (and is surfaced as recent_conversation) -- recording it again here would
+                # just have them "notice" their own words as if overhearing a stranger.
+                if text.startswith(own_dialogue_prefixes):
+                    continue
+                profile.remember(text)
 
     def open_door(self, x: int, y: int) -> bool:
         if self.tile_at(x, y) != DOOR:
@@ -1412,21 +1805,41 @@ class GameEngine:
         return True
 
     def find_inventory_item(self, item_name: str) -> str | None:
+        return self.find_item_in(self.state.inventory, item_name)
+
+    def find_item_in(self, container: dict[str, int], item_name: str) -> str | None:
+        """Fuzzy name lookup against any item-quantity dict (player inventory, NPC
+        wares, ...) -- the same dict shape, so the same matching rules apply."""
         wanted = normalize_id(item_name)
-        for key in self.state.inventory:
+        for key in container:
             if key.lower() == item_name.strip().lower() or normalize_id(key) == wanted:
                 return key
         return None
 
-    def consume_inventory_item(self, item_name: str, amount: int) -> int:
-        current = self.state.inventory.get(item_name, 0)
+    def consume_inventory_item(self, item_name: str, amount: int, container: dict[str, int] | None = None) -> int:
+        """Remove up to `amount` of `item_name` from `container` (defaults to the
+        player's inventory), auto-deleting the entry once it reaches zero. Works
+        identically on `state.inventory` and any `NPCProfile.wares` dict -- both are
+        plain item-name -> quantity maps, so trades reuse this without special-casing."""
+        target = self.state.inventory if container is None else container
+        current = target.get(item_name, 0)
         spent = min(current, max(0, amount))
         remaining = current - spent
         if remaining:
-            self.state.inventory[item_name] = remaining
+            target[item_name] = remaining
         else:
-            self.state.inventory.pop(item_name, None)
+            target.pop(item_name, None)
         return spent
+
+    def add_inventory_item(self, container: dict[str, int], item_name: str, amount: int) -> None:
+        """The symmetric counterpart to `consume_inventory_item` -- stacks `amount`
+        of `item_name` onto an existing entry (matched fuzzily, so "Gold" and "gold"
+        accumulate together) or creates a new one."""
+        if amount <= 0:
+            return
+        existing = self.find_item_in(container, item_name)
+        key = existing if existing is not None else item_name
+        container[key] = container.get(key, 0) + amount
 
     def _apply_item_use_spec(self, item_name: str, spec: dict[str, Any]) -> bool:
         if "choices" in spec:
@@ -1863,6 +2276,7 @@ class GameEngine:
         self._process_entity_behaviors()
         self._regenerate_player()
         self._ambient_sounds()
+        self._update_npc_perceptions()
 
     def _ambient_sounds(self) -> None:
         if self.rng.random() > 0.12:

@@ -223,20 +223,26 @@ class OllamaWildMagicProvider:
         return content
 
     def _post_chat(self, payload: dict[str, Any]) -> dict[str, Any]:
-        request = urllib.request.Request(
-            f"{self.base_url}/api/chat",
-            data=json.dumps(payload).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout_seconds) as response:
-                data = json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as exc:
-            body = exc.read().decode("utf-8", errors="replace")
-            detail = parse_ollama_error_body(body)
-            raise ValueError(f"Ollama HTTP {exc.code}: {detail or exc.reason}") from exc
-        return data
+        return _post_ollama_chat(self.base_url, payload, self.timeout_seconds)
+
+
+def _post_ollama_chat(base_url: str, payload: dict[str, Any], timeout_seconds: float) -> dict[str, Any]:
+    """Shared low-level Ollama /api/chat POST, used by every Ollama-backed provider
+    (wild magic resolution, NPC dialogue, and any future LLM-driven subsystem) so
+    that swapping models per-purpose never requires duplicating HTTP plumbing."""
+    request = urllib.request.Request(
+        f"{base_url}/api/chat",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout_seconds) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode("utf-8", errors="replace")
+        detail = parse_ollama_error_body(body)
+        raise ValueError(f"Ollama HTTP {exc.code}: {detail or exc.reason}") from exc
 
 
 class MockWildMagicProvider:
@@ -641,6 +647,632 @@ def make_provider(provider_name: str | None = None) -> WildMagicProvider:
     if provider == "ollama":
         return OllamaWildMagicProvider()
     return AutoWildMagicProvider()
+
+
+# ----------------------------------------------------------------------
+# NPC dialogue. A deliberately separate, much simpler provider stack from
+# wild magic resolution: replies are plain spoken text with no JSON schema
+# to validate/normalize/retry, and the model can be swapped independently
+# (WILDMAGIC_DIALOGUE_MODEL / WILDMAGIC_DIALOGUE_PROVIDER) so spell
+# resolution and dialogue never have to share one model.
+# ----------------------------------------------------------------------
+
+DIALOGUE_SYSTEM_PROMPT = """You are voicing a single non-player character (NPC) in a turn-based tile roguelike.
+You will receive a JSON object describing who you are, what you have personally witnessed
+recently, your conversation so far, and what the player just said to you.
+
+Reply with ONLY the words your character speaks aloud - plain spoken text and nothing else.
+Do not include narration, stage directions, action descriptions, asterisks, quotation marks
+around the whole reply, your own name as a prefix, markdown, or <think> text.
+
+Guidelines:
+- Speak with some color and substance: two to five sentences, like someone who actually
+  has things to say rather than a curt one-line brush-off. Let your personality come
+  through in *how* you say it - a gossip rambles, a guard captain clips her words but
+  still gives you the gist, a peddler can't resist adding one more pitch.
+- Stay fully in character. Your "backstory" and "traits" shape your personality, opinions,
+  manner of speech, and how warm, wary, gruff, gossiping, or distracted you are.
+- Use "things_i_have_noticed" and "recent_conversation" so you sound aware of the world and
+  consistent with what you've already said. Reference them naturally when relevant - don't
+  recite them like a list.
+- React the way your character actually would to what the player says, including confusion,
+  suspicion, amusement, or alarm at anything strange. Don't explain game rules or describe
+  yourself in the third person.
+"""
+
+
+@dataclass
+class DialogueResolution:
+    reply: str | None
+    technical_failure: bool
+    error: str | None = None
+    provider_name: str = "unknown"
+    raw_response: str | None = None
+    audit_path: str | None = None
+
+
+class DialogueProvider(Protocol):
+    name: str
+
+    def reply(self, message: str, context: dict[str, Any]) -> str:
+        ...
+
+
+class OllamaDialogueProvider:
+    name = "ollama"
+
+    def __init__(
+        self,
+        model: str | None = None,
+        base_url: str | None = None,
+        timeout_seconds: float | None = None,
+    ) -> None:
+        self.model = (
+            model
+            or os.environ.get("WILDMAGIC_DIALOGUE_MODEL")
+            or os.environ.get("WILDMAGIC_MODEL", "qwen3:8b")
+        )
+        self.base_url = normalize_ollama_url(base_url or os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
+        self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds()
+
+    def reply(self, message: str, context: dict[str, Any]) -> str:
+        payload = {
+            "model": self.model,
+            "stream": False,
+            "think": ollama_thinking_enabled(),
+            "messages": [
+                {"role": "system", "content": DIALOGUE_SYSTEM_PROMPT},
+                {"role": "user", "content": json.dumps(context, ensure_ascii=True)},
+            ],
+            "options": {
+                "temperature": ollama_dialogue_temperature(),
+                "top_p": 0.9,
+                "num_predict": ollama_dialogue_num_predict(),
+                "num_ctx": ollama_num_ctx(),
+                "num_gpu": ollama_num_gpu(),
+            },
+            "keep_alive": "10m",
+        }
+        data = _post_ollama_chat(self.base_url, payload, self.timeout_seconds)
+        content = data.get("message", {}).get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("Ollama response did not include message.content")
+        return strip_thinking(content).strip()
+
+
+class MockDialogueProvider:
+    name = "mock"
+
+    def reply(self, message: str, context: dict[str, Any]) -> str:
+        npc = context.get("npc") or {}
+        role = str(npc.get("role") or "stranger").strip().lower()
+        text = message.lower().strip()
+        if not text:
+            return "Lost for words, are you?"
+        if any(word in text for word in ("hello", "hi", "greetings", "hail", "morning", "evening")):
+            return f"Well met, traveler. Not many stop to talk to a {role} like me."
+        if "?" in text:
+            return "Hard to say, honestly. I keep my head down and mind my own business."
+        if any(word in text for word in ("thank", "thanks")):
+            return "No need for that. Just doing what I do."
+        return "Mm. If you say so."
+
+
+class AutoDialogueProvider:
+    name = "auto"
+
+    def __init__(self) -> None:
+        self.ollama = OllamaDialogueProvider()
+        self.mock = MockDialogueProvider()
+        self.last_provider_name = "ollama"
+
+    def reply(self, message: str, context: dict[str, Any]) -> str:
+        try:
+            self.last_provider_name = self.ollama.name
+            return self.ollama.reply(message, context)
+        except (OSError, TimeoutError, urllib.error.URLError, ValueError):
+            if not fallbacks_enabled():
+                raise
+            self.last_provider_name = self.mock.name
+            return self.mock.reply(message, context)
+
+
+def make_dialogue_provider(provider_name: str | None = None) -> DialogueProvider:
+    provider = (
+        provider_name
+        or os.environ.get("WILDMAGIC_DIALOGUE_PROVIDER")
+        or os.environ.get("WILDMAGIC_PROVIDER", "ollama")
+    ).lower().strip()
+    if provider == "mock":
+        return MockDialogueProvider()
+    if provider == "ollama":
+        return OllamaDialogueProvider()
+    return AutoDialogueProvider()
+
+
+def _dialogue_provider_name(provider: DialogueProvider) -> str:
+    if isinstance(provider, AutoDialogueProvider):
+        return provider.last_provider_name
+    return getattr(provider, "name", "unknown")
+
+
+def _is_degenerate_echo(message: str, reply: str) -> bool:
+    """True when the model just parroted the player's words back as its own reply.
+    Observed live with qwen3:8b during playtesting (e.g. asked Quill the peddler
+    about a cutpurse, got "I heard there's a cutpurse... seen them yourself?" right
+    back) - a broken non-answer, not a creative one, so it's worth catching and
+    retrying rather than displaying as the NPC's voice."""
+    normalized_message = message.strip().strip('"').strip().lower()
+    normalized_reply = reply.strip().strip('"').strip().lower()
+    return bool(normalized_message) and normalized_message == normalized_reply
+
+
+def _is_self_repetition(reply: str, context: dict[str, Any]) -> bool:
+    """True when the model repeated its own most recent line back verbatim, no
+    matter what the player just said. Observed live with qwen3:8b: Captain Ressa
+    Vane gave the exact same "...but I've seen worse. What's your take?" deflection
+    both to an open question about the Empire AND to "I will burn the Empire to the
+    ground" - two wildly different prompts (confirmed via the audit log's stored
+    `prompt`, which genuinely differed turn to turn). The model anchored on its own
+    prior line in recent_conversation instead of reacting to the new message - a
+    stuck-in-a-loop failure, distinct from _is_degenerate_echo (which catches
+    parroting the *player's* words back, not the NPC's own)."""
+    npc = context.get("npc")
+    conversation = npc.get("recent_conversation") if isinstance(npc, dict) else None
+    if not isinstance(conversation, list):
+        return False
+    last_npc_line: str | None = None
+    for entry in reversed(conversation):
+        if isinstance(entry, dict) and entry.get("speaker") == "npc":
+            text = entry.get("text")
+            if isinstance(text, str):
+                last_npc_line = text
+            break
+    if not last_npc_line:
+        return False
+    normalized_last = last_npc_line.strip().strip('"').strip().lower()
+    normalized_reply = reply.strip().strip('"').strip().lower()
+    return bool(normalized_last) and normalized_last == normalized_reply
+
+
+def _dialogue_retry_context(context: dict[str, Any], note: str) -> dict[str, Any]:
+    updated = dict(context)
+    updated["retry_note"] = note
+    return updated
+
+
+def resolve_dialogue(
+    provider: DialogueProvider, npc_name: str, message: str, context: dict[str, Any]
+) -> DialogueResolution:
+    """Ask the dialogue provider what an NPC says back. Deliberately simpler than
+    resolve_spell: replies are plain flavor text with no schema to validate or
+    normalize - the engine just displays whatever the NPC says. The one thing worth
+    catching is a degenerate non-reply (empty, an echo of the player's own words back
+    at them, or a verbatim repeat of the NPC's own last line regardless of what the
+    player just said) - those break the conversational illusion outright, so we give
+    the model one retry with a nudge before giving up, mirroring resolve_spell's
+    single-retry-on-ollama convention."""
+    resolved_provider_name = _dialogue_provider_name(provider)
+    active_context = context
+    raw: str | None = None
+    for attempt in range(2):
+        try:
+            raw = provider.reply(message, active_context)
+        except (OSError, TimeoutError, urllib.error.URLError, ValueError) as exc:
+            error = str(exc)
+            audit_path = write_dialogue_audit_log(provider, npc_name, message, active_context, raw, None, True, error, resolved_provider_name)
+            return DialogueResolution(None, True, error, resolved_provider_name, raw, audit_path)
+
+        reply = strip_thinking(raw).strip().strip('"').strip()
+        if not reply:
+            problem = "empty reply"
+        elif _is_degenerate_echo(message, reply):
+            problem = "echoed the player's message"
+        elif _is_self_repetition(reply, active_context):
+            problem = "repeated its own last line verbatim"
+        else:
+            audit_path = write_dialogue_audit_log(provider, npc_name, message, active_context, raw, reply, False, None, resolved_provider_name)
+            return DialogueResolution(reply, False, None, resolved_provider_name, raw, audit_path)
+
+        can_retry = attempt == 0 and resolved_provider_name == "ollama"
+        if can_retry:
+            write_dialogue_audit_log(provider, npc_name, message, active_context, raw, reply or None, True, f"{problem}; retrying once", resolved_provider_name)
+            active_context = _dialogue_retry_context(
+                context,
+                "Your last reply was unusable - it was empty, just repeated the player's words "
+                "back instead of answering, or repeated something you yourself already said "
+                "regardless of what the player just said. Speak again in your own voice, fully "
+                "in character, and react freshly to what the player just said this time.",
+            )
+            continue
+
+        audit_path = write_dialogue_audit_log(provider, npc_name, message, active_context, raw, reply or None, True, problem, resolved_provider_name)
+        return DialogueResolution(None, True, problem, resolved_provider_name, raw, audit_path)
+
+    raise AssertionError("unreachable")
+
+
+def write_dialogue_audit_log(
+    provider: DialogueProvider,
+    npc_name: str,
+    message: str,
+    context: dict[str, Any],
+    raw_response: str | None,
+    reply: str | None,
+    technical_failure: bool,
+    error: str | None,
+    resolved_provider_name: str,
+) -> str | None:
+    if os.environ.get("WILDMAGIC_AUDIT_LOG", "1").lower().strip() in {"0", "false", "no", "off"}:
+        return None
+    audit_dir = Path(os.environ.get("WILDMAGIC_AUDIT_DIR", "logs"))
+    audit_path = audit_dir / "dialogue_audit.jsonl"
+    prompt_messages = [
+        {"role": "system", "content": DIALOGUE_SYSTEM_PROMPT},
+        {"role": "user", "content": json.dumps(context, ensure_ascii=True)},
+    ]
+    record = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "npc": npc_name,
+        "message": message,
+        "provider": resolved_provider_name,
+        "provider_requested": getattr(provider, "name", "unknown"),
+        "model": getattr(provider, "model", None),
+        "ollama_base_url": getattr(provider, "base_url", None),
+        "prompt": {
+            "messages": prompt_messages,
+            "context": context,
+        },
+        "raw_response": raw_response,
+        "reply": reply,
+        "technical_failure": technical_failure,
+        "error": error,
+    }
+    try:
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        with audit_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=True, sort_keys=True) + "\n")
+    except OSError:
+        return None
+    return str(audit_path)
+
+
+# ----------------------------------------------------------------------
+# Trade resolution: a small structured-JSON surface, deliberately separate
+# from resolve_dialogue. Dialogue stays plain prose with no schema to
+# contaminate; a cheap in-process keyword scan (see
+# GameEngine.scan_for_trade_intent) decides WHEN to even ask, and this
+# surface - mirroring resolve_spell's parse/validate/retry apparatus -
+# decides WHETHER the exchange amounts to a real trade and exactly what
+# it looks like, so the conversational voice and the schema never have to
+# share one model call.
+# ----------------------------------------------------------------------
+
+TRADE_SYSTEM_PROMPT = """You are reading a snippet of conversation between a player and an NPC in
+a turn-based tile roguelike, deciding whether it amounts to a concrete trade offer - and if so,
+structuring exactly what is being proposed.
+
+You will receive a JSON object describing the NPC (including what goods and gold they currently
+have to trade, if any, under "wares_for_sale"), the player (including their inventory and gold),
+and the most recent exchange: what the player said and how the NPC replied.
+
+Reply with ONLY one JSON object - no markdown fences, no commentary, no <think> text - shaped
+EXACTLY like this:
+
+{
+  "trade_proposed": true or false,
+  "initiator": "player" or "npc",
+  "npc_gives": [{"item": "<exact item name>", "quantity": <integer>}],
+  "npc_wants": [{"item": "<exact item name>", "quantity": <integer>}],
+  "proposal_text": "<one or two sentences in the NPC's voice, presenting the offer to the player>",
+  "rejected_reason": null or "<short private note on why this wasn't a real trade>"
+}
+
+If "trade_proposed" is false: only "rejected_reason" needs a real value (a short note such as
+"just idle chatter, no concrete offer was made" or "mentioned trading in the abstract, nothing
+specific on the table") - leave "npc_gives"/"npc_wants" as empty lists and "proposal_text" as "".
+Most exchanges that merely brush against trade-ish words are NOT actual proposals; only return
+true when a SPECIFIC exchange of items and/or gold is genuinely on the table and the NPC would
+plausibly go through with it.
+
+If "trade_proposed" is true:
+- "npc_gives"/"npc_wants" each list exact item names (drawn from "wares_for_sale" or the
+  player's inventory, matching the names you were given) with integer quantities; either side
+  may include "gold" as a generic entry - it is this world's ordinary currency, not a special case
+- "proposal_text" is shown to the player in a confirmation prompt, written in the NPC's voice,
+  presenting the deal as just agreed or about to be sealed
+- "initiator" is "player" if the player proposed the swap, "npc" if the NPC volunteered it
+
+Use rough judgment, not a price list, when sizing up a fair gold value: common raw materials and
+curios are worth a handful of gold; useful potions, scrolls, and charms notably more; rare or
+powerful effects more still. For items you don't recognize, size up a fair-ish value from the
+name and what's been said about it. These are negotiation starting points, not fixed prices -
+weigh the NPC's personality, mood, and how the conversation has gone, and feel free to swing the
+deal generously or stingily at your own discretion. Keep it loose and human, the way real people
+haggle - not a vending machine.
+"""
+
+
+@dataclass
+class TradeResolution:
+    data: dict[str, Any] | None
+    technical_failure: bool
+    error: str | None = None
+    provider_name: str = "unknown"
+    raw_response: str | None = None
+    audit_path: str | None = None
+
+
+class TradeProvider(Protocol):
+    name: str
+
+    def propose(self, context: dict[str, Any]) -> str:
+        ...
+
+
+class OllamaTradeProvider:
+    name = "ollama"
+
+    def __init__(
+        self,
+        model: str | None = None,
+        base_url: str | None = None,
+        timeout_seconds: float | None = None,
+    ) -> None:
+        self.model = (
+            model
+            or os.environ.get("WILDMAGIC_TRADE_MODEL")
+            or os.environ.get("WILDMAGIC_DIALOGUE_MODEL")
+            or os.environ.get("WILDMAGIC_MODEL", "qwen3:8b")
+        )
+        self.base_url = normalize_ollama_url(base_url or os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
+        self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds()
+
+    def propose(self, context: dict[str, Any]) -> str:
+        payload = {
+            "model": self.model,
+            "stream": False,
+            "think": ollama_thinking_enabled(),
+            "messages": [
+                {"role": "system", "content": TRADE_SYSTEM_PROMPT},
+                {"role": "user", "content": json.dumps(context, ensure_ascii=True)},
+            ],
+            "options": {
+                "temperature": ollama_trade_temperature(),
+                "top_p": 0.9,
+                "num_predict": ollama_trade_num_predict(),
+                "num_ctx": ollama_num_ctx(),
+                "num_gpu": ollama_num_gpu(),
+            },
+            "keep_alive": "10m",
+        }
+        if ollama_json_format_enabled():
+            payload["format"] = "json"
+        try:
+            data = _post_ollama_chat(self.base_url, payload, self.timeout_seconds)
+        except ValueError as exc:
+            if "Unexpected empty grammar stack" not in str(exc) or "format" not in payload:
+                raise
+            retry_payload = dict(payload)
+            retry_payload.pop("format", None)
+            data = _post_ollama_chat(self.base_url, retry_payload, self.timeout_seconds)
+        content = data.get("message", {}).get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("Ollama response did not include message.content")
+        return content
+
+
+class MockTradeProvider:
+    name = "mock"
+
+    def propose(self, context: dict[str, Any]) -> str:
+        return json.dumps(
+            {
+                "trade_proposed": False,
+                "initiator": "player",
+                "npc_gives": [],
+                "npc_wants": [],
+                "proposal_text": "",
+                "rejected_reason": "mock provider never proposes trades",
+            }
+        )
+
+
+class AutoTradeProvider:
+    name = "auto"
+
+    def __init__(self) -> None:
+        self.ollama = OllamaTradeProvider()
+        self.mock = MockTradeProvider()
+        self.last_provider_name = "ollama"
+
+    def propose(self, context: dict[str, Any]) -> str:
+        try:
+            self.last_provider_name = self.ollama.name
+            return self.ollama.propose(context)
+        except (OSError, TimeoutError, urllib.error.URLError, ValueError):
+            if not fallbacks_enabled():
+                raise
+            self.last_provider_name = self.mock.name
+            return self.mock.propose(context)
+
+
+def make_trade_provider(provider_name: str | None = None) -> TradeProvider:
+    provider = (
+        provider_name
+        or os.environ.get("WILDMAGIC_TRADE_PROVIDER")
+        or os.environ.get("WILDMAGIC_DIALOGUE_PROVIDER")
+        or os.environ.get("WILDMAGIC_PROVIDER", "ollama")
+    ).lower().strip()
+    if provider == "mock":
+        return MockTradeProvider()
+    if provider == "ollama":
+        return OllamaTradeProvider()
+    return AutoTradeProvider()
+
+
+def _trade_provider_name(provider: TradeProvider) -> str:
+    if isinstance(provider, AutoTradeProvider):
+        return provider.last_provider_name
+    return getattr(provider, "name", "unknown")
+
+
+def parse_trade_json(raw: str) -> dict[str, Any]:
+    """Defensive JSON parsing mirroring parse_resolution_json's strip-thinking +
+    json.loads + regex-extraction fallback - minus _normalize_resolution, whose
+    effect/cost normalization is wild-magic-specific and doesn't apply to trades."""
+    cleaned = strip_thinking(raw)
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+        if not match:
+            raise
+        parsed = json.loads(match.group(0))
+    if not isinstance(parsed, dict):
+        raise TypeError("trade response was not a JSON object")
+    return parsed
+
+
+def _validate_trade_item_list(value: Any, label: str) -> str | None:
+    if not isinstance(value, list):
+        return f"{label} must be a list"
+    if len(value) > 8:
+        return f"{label} must contain at most 8 entries"
+    for index, entry in enumerate(value):
+        if not isinstance(entry, dict):
+            return f"{label}[{index}] must be an object"
+        name = entry.get("item")
+        if not isinstance(name, str) or not name.strip():
+            return f"{label}[{index}] needs a non-empty item name"
+        try:
+            quantity = int(entry.get("quantity"))
+        except (TypeError, ValueError):
+            return f"{label}[{index}] quantity must be an integer"
+        if quantity < 1 or quantity > 99:
+            return f"{label}[{index}] quantity must be between 1 and 99"
+    return None
+
+
+def validate_trade_resolution(data: dict[str, Any]) -> str | None:
+    """Mirrors validate_resolution's accepted-branch asymmetry: a non-trade only
+    needs a reason, a real proposal needs the full structured payload."""
+    if "trade_proposed" not in data or not isinstance(data["trade_proposed"], bool):
+        return "trade_proposed must be a boolean"
+    if data["trade_proposed"] is False:
+        if not str(data.get("rejected_reason") or "").strip():
+            return "a non-trade needs a rejected_reason"
+        return None
+    if str(data.get("initiator") or "").strip().lower() not in {"player", "npc"}:
+        return "initiator must be 'player' or 'npc'"
+    error = _validate_trade_item_list(data.get("npc_gives", []), "npc_gives")
+    if error:
+        return error
+    error = _validate_trade_item_list(data.get("npc_wants", []), "npc_wants")
+    if error:
+        return error
+    if not data.get("npc_gives") and not data.get("npc_wants"):
+        return "a proposed trade needs at least one item or gold amount on one side"
+    if not str(data.get("proposal_text") or "").strip():
+        return "a proposed trade needs proposal_text to show the player"
+    return None
+
+
+def _trade_retry_context(context: dict[str, Any], raw_response: str | None, error: str) -> dict[str, Any]:
+    updated = dict(context)
+    updated["retry_after_invalid_resolution"] = {
+        "error": error,
+        "instruction": "The previous response could not be parsed or validated. Reply again with "
+        "only one complete, valid JSON object in the exact shape described - no markdown fences, "
+        "no commentary, no <think> text.",
+        "previous_response_prefix": (raw_response or "")[:600],
+    }
+    return updated
+
+
+def resolve_trade_proposal(provider: TradeProvider, npc_name: str, context: dict[str, Any]) -> TradeResolution:
+    """Ask the trade provider whether the exchange just displayed amounts to a real
+    trade and, if so, structure exactly what's proposed. Mirrors resolve_spell's
+    parse -> validate -> retry-once-on-ollama -> clean technical_failure shape, minus
+    its local-fallback machinery: "no trade" is always a safe, meaningful outcome on
+    its own, so there is no equivalent of a fallback resolution to fall back to."""
+    resolved_provider_name = _trade_provider_name(provider)
+    active_context = context
+    raw: str | None = None
+    for attempt in range(2):
+        try:
+            raw = provider.propose(active_context)
+        except (OSError, TimeoutError, urllib.error.URLError, ValueError) as exc:
+            error = str(exc)
+            resolved_provider_name = _trade_provider_name(provider)
+            audit_path = write_trade_audit_log(provider, npc_name, active_context, raw, None, True, error, resolved_provider_name)
+            return TradeResolution(None, True, error, resolved_provider_name, raw, audit_path)
+
+        resolved_provider_name = _trade_provider_name(provider)
+        try:
+            parsed = parse_trade_json(raw)
+            error = validate_trade_resolution(parsed)
+        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+            parsed = None
+            error = str(exc)
+
+        if error is None:
+            audit_path = write_trade_audit_log(provider, npc_name, active_context, raw, parsed, False, None, resolved_provider_name)
+            return TradeResolution(parsed, False, None, resolved_provider_name, raw, audit_path)
+
+        can_retry = attempt == 0 and resolved_provider_name == "ollama"
+        if can_retry:
+            write_trade_audit_log(provider, npc_name, active_context, raw, parsed, True, f"{error}; retrying once", resolved_provider_name)
+            active_context = _trade_retry_context(context, raw, error)
+            continue
+
+        audit_path = write_trade_audit_log(provider, npc_name, active_context, raw, parsed, True, error, resolved_provider_name)
+        return TradeResolution(None, True, error, resolved_provider_name, raw, audit_path)
+
+    raise AssertionError("unreachable")
+
+
+def write_trade_audit_log(
+    provider: TradeProvider,
+    npc_name: str,
+    context: dict[str, Any],
+    raw_response: str | None,
+    parsed: dict[str, Any] | None,
+    technical_failure: bool,
+    error: str | None,
+    resolved_provider_name: str,
+) -> str | None:
+    if os.environ.get("WILDMAGIC_AUDIT_LOG", "1").lower().strip() in {"0", "false", "no", "off"}:
+        return None
+    audit_dir = Path(os.environ.get("WILDMAGIC_AUDIT_DIR", "logs"))
+    audit_path = audit_dir / "trade_audit.jsonl"
+    prompt_messages = [
+        {"role": "system", "content": TRADE_SYSTEM_PROMPT},
+        {"role": "user", "content": json.dumps(context, ensure_ascii=True)},
+    ]
+    record = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "npc": npc_name,
+        "provider": resolved_provider_name,
+        "provider_requested": getattr(provider, "name", "unknown"),
+        "model": getattr(provider, "model", None),
+        "ollama_base_url": getattr(provider, "base_url", None),
+        "prompt": {
+            "messages": prompt_messages,
+            "context": context,
+        },
+        "raw_response": raw_response,
+        "parsed_resolution": parsed,
+        "technical_failure": technical_failure,
+        "error": error,
+    }
+    try:
+        audit_dir.mkdir(parents=True, exist_ok=True)
+        with audit_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=True, sort_keys=True) + "\n")
+    except OSError:
+        return None
+    return str(audit_path)
 
 
 def resolve_spell(provider: WildMagicProvider, spell: str, context: dict[str, Any]) -> MagicResolution:
@@ -1733,6 +2365,48 @@ def ollama_temperature() -> float:
     except ValueError:
         return 0.25
     return max(0.0, min(1.5, parsed))
+
+
+def ollama_dialogue_temperature() -> float:
+    value = os.environ.get("WILDMAGIC_DIALOGUE_TEMPERATURE", "0.7")
+    try:
+        parsed = float(value)
+    except ValueError:
+        return 0.7
+    return max(0.0, min(1.5, parsed))
+
+
+def ollama_dialogue_num_predict() -> int:
+    value = os.environ.get("WILDMAGIC_DIALOGUE_NUM_PREDICT", "320")
+    try:
+        parsed = int(value)
+    except ValueError:
+        return 200
+    return max(32, min(1024, parsed))
+
+
+def ollama_trade_temperature() -> float:
+    value = (
+        os.environ.get("WILDMAGIC_TRADE_TEMPERATURE")
+        or os.environ.get("WILDMAGIC_DIALOGUE_TEMPERATURE", "0.5")
+    )
+    try:
+        parsed = float(value)
+    except ValueError:
+        return 0.5
+    return max(0.0, min(1.5, parsed))
+
+
+def ollama_trade_num_predict() -> int:
+    value = (
+        os.environ.get("WILDMAGIC_TRADE_NUM_PREDICT")
+        or os.environ.get("WILDMAGIC_DIALOGUE_NUM_PREDICT", "320")
+    )
+    try:
+        parsed = int(value)
+    except ValueError:
+        return 320
+    return max(32, min(1024, parsed))
 
 
 def ollama_thinking_enabled() -> bool:

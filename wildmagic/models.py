@@ -251,6 +251,42 @@ class Curse:
 
 
 @dataclass
+class NPCProfile:
+    """Persona and perception data for a talkable NPC, kept separate from Entity
+    (which only carries physical/combat state) the same way Curse is kept separate."""
+
+    entity_id: str
+    name: str
+    role: str
+    backstory: str
+    traits: list[str] = field(default_factory=list)
+    memory: list[str] = field(default_factory=list)
+    conversation: list[dict[str, str]] = field(default_factory=list)
+    wares: dict[str, int] = field(default_factory=dict)
+
+    def remember(self, text: str, limit: int = 12) -> None:
+        self.memory.append(text)
+        self.memory = self.memory[-limit:]
+
+    def record_exchange(self, speaker: str, text: str, limit: int = 16) -> None:
+        self.conversation.append({"speaker": speaker, "text": text})
+        self.conversation = self.conversation[-limit:]
+
+    def to_dialogue_context(self) -> dict[str, Any]:
+        context: dict[str, Any] = {
+            "name": self.name,
+            "role": self.role,
+            "backstory": self.backstory,
+            "traits": list(self.traits),
+            "things_i_have_noticed": list(self.memory),
+            "recent_conversation": list(self.conversation),
+        }
+        if self.wares:
+            context["wares_for_sale"] = dict(sorted(self.wares.items()))
+        return context
+
+
+@dataclass
 class GameStats:
     enemies_killed: int = 0
     spells_cast: int = 0

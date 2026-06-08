@@ -48,6 +48,17 @@ SELECTED = (58, 90, 112)
 DANGER = (232, 105, 85)
 MANA = (102, 168, 255)
 GOLD = (224, 177, 92)
+MODE_PURPLE = (160, 124, 226)
+MODE_YELLOW = (226, 198, 92)
+MODE_GREEN = (118, 208, 130)
+MODE_ORANGE = (228, 146, 74)
+MODE_COLORS = {"spell": MODE_PURPLE, "talk": MODE_YELLOW, "control": MODE_GREEN, "confirm_trade": MODE_ORANGE}
+
+CONTROLS_HINT = (
+    "Keyboard controls active - arrows/WASD/hjkl move, > descend, < ascend, o open, "
+    "g pick up, f cast spark, period or keypad-5 to wait, Esc back to Wild Spell."
+)
+CONTROLS_HINT_WRAP = 48
 
 TILE_COLORS = {
     FLOOR: (77, 80, 88),
@@ -85,10 +96,14 @@ class GameUI:
         self.tile_font = pygame.font.SysFont("consolas", 20, bold=True)
         self.ui_font = pygame.font.SysFont("consolas", 17)
         self.small_font = pygame.font.SysFont("consolas", 14)
-        self.session = GameSession(scenario="frontier")
+        self.session = GameSession(scenario="town")
         self.engine = self.session.engine
         self.input_text = ""
         self.input_active = True
+        self.input_mode = "spell"
+        self.mode_label_rects: list[tuple[pygame.Rect, str]] = []
+        self._last_talk_target_id: int | None = None
+        self._last_trade_active: bool = False
         self.provider_label = self.session.provider_label
         self.log_line_rects: list[tuple[pygame.Rect, str]] = []
         self.log_selection_anchor: int | None = None
@@ -151,7 +166,18 @@ class GameUI:
             self.restart_run()
             return
 
+        if self.engine.state.pending_trade is not None:
+            if event.key in (pygame.K_y, pygame.K_RETURN, pygame.K_KP_ENTER):
+                self.session.execute_command("accept")
+            elif event.key in (pygame.K_n, pygame.K_ESCAPE):
+                self.session.execute_command("reject")
+            return
+
         if event.key == pygame.K_ESCAPE:
+            if self.input_mode == "control":
+                self.input_mode = "spell"
+                self.input_active = True
+                return
             if self.input_text:
                 self.input_text = ""
                 self.input_active = True
@@ -159,9 +185,9 @@ class GameUI:
                 pygame.event.post(pygame.event.Event(pygame.QUIT))
             return
 
-        if self.input_active:
+        if self.input_active and self.input_mode != "control":
             if event.key == pygame.K_RETURN:
-                self.cast_input_spell()
+                self.submit_input()
                 return
             if event.key == pygame.K_BACKSPACE:
                 self.input_text = self.input_text[:-1]
@@ -173,7 +199,7 @@ class GameUI:
                 self.input_text += event.unicode
                 return
 
-        if event.key in {pygame.K_SLASH, pygame.K_RETURN}:
+        if self.input_mode != "control" and event.key in {pygame.K_SLASH, pygame.K_RETURN}:
             self.input_active = True
             return
         if event.key in {pygame.K_UP, pygame.K_w, pygame.K_k, pygame.K_KP8}:
@@ -224,6 +250,17 @@ class GameUI:
                 self._llm_scroll_to_fraction(fraction)
                 self.llm_dragging_scrollbar = True
                 return
+            for rect, mode in self.mode_label_rects:
+                if rect.collidepoint(event.pos):
+                    self.input_mode = mode
+                    self.input_active = True
+                    self.dragging_log_selection = False
+                    self.log_selection_anchor = None
+                    self.log_selection_focus = None
+                    self.dragging_llm_selection = False
+                    self.llm_selection_anchor = None
+                    self.llm_selection_focus = None
+                    return
             if self.spell_box_rect.collidepoint(event.pos):
                 self.input_active = True
                 self.dragging_log_selection = False
@@ -287,10 +324,14 @@ class GameUI:
             self.dragging_log_selection = False
 
     def restart_run(self) -> None:
-        self.session = GameSession(scenario="frontier")
+        self.session = GameSession(scenario="town")
         self.engine = self.session.engine
         self.input_text = ""
         self.input_active = True
+        self.input_mode = "spell"
+        self.mode_label_rects = []
+        self._last_talk_target_id = None
+        self._last_trade_active = False
         self.provider_label = self.session.provider_label
         self.llm_debug_entries = []
         self._llm_lines_cache = None
@@ -381,13 +422,16 @@ class GameUI:
             return []
         return [text for text, _color in self._llm_lines_cache[start : end + 1]]
 
-    def cast_input_spell(self) -> None:
-        spell = self.input_text.strip()
-        if not spell:
+    def submit_input(self) -> None:
+        text = self.input_text.strip()
+        if not text:
             return
         self.input_text = ""
         self.input_active = True
-        result = self.session.cast_wild(spell)
+        if self.input_mode == "talk":
+            self.session.execute_command(f"talk {text}")
+            return
+        result = self.session.cast_wild(text)
         if result.wild_magic:
             self.provider_label = str(result.wild_magic.get("provider") or self.session.provider_label)
         self._record_llm_debug_entry(result)
@@ -488,15 +532,16 @@ class GameUI:
             MUTED,
         )
         cursor_y = self.draw_bars(x + 20, cursor_y + 16, player)
+        cursor_y = self.draw_gold(x + 20, cursor_y + 4)
         cursor_y = self.draw_statuses(x + 20, cursor_y + 10, player)
         cursor_y = self.draw_visible_enemies(x + 20, cursor_y + 8)
         cursor_y = self.draw_inventory(x + 20, cursor_y + 8)
         cursor_y = self.draw_floor_items(x + 20, cursor_y + 6)
         cursor_y = self.draw_curses(x + 20, cursor_y + 6)
         spell_height = self.spell_box_height()
-        spell_y = WINDOW_HEIGHT - spell_height - 38
+        spell_y = WINDOW_HEIGHT - spell_height - 46
         log_y = cursor_y + 16
-        log_height = max(120, spell_y - log_y - 38)
+        log_height = max(120, spell_y - log_y - 46)
         self.draw_log(x + 20, log_y, log_height)
         self.draw_spell_box(x + 20, spell_y, spell_height)
         if state.game_over:
@@ -521,6 +566,14 @@ class GameUI:
         y = self.draw_stat_bar(x, y, "HP", player.hp, player.max_hp, DANGER)
         y = self.draw_stat_bar(x, y + 8, "MP", player.mana, player.max_mana, MANA)
         return y
+
+    def draw_gold(self, x: int, y: int) -> int:
+        """Gold reads as a first-class resource (the setting's default currency,
+        the LLM's reference unit when structuring trades) rather than just another
+        line buried alphabetically in the inventory - so it gets its own readout,
+        in the same accent color the inventory header already uses for it."""
+        amount = self.engine.state.inventory.get("gold", 0)
+        return self.draw_text(f"Gold: {amount}", x, y, self.small_font, GOLD)
 
     def draw_stat_bar(self, x: int, y: int, label: str, value: int, maximum: int, color: tuple[int, int, int]) -> int:
         self.draw_text(f"{label} {value}/{maximum}", x, y, self.small_font, TEXT)
@@ -630,7 +683,11 @@ class GameUI:
 
     def draw_inventory(self, x: int, y: int) -> int:
         state = self.engine.state
-        items = ", ".join(f"{name} x{amount}" for name, amount in state.inventory.items()) or "empty"
+        # Gold gets its own dedicated readout (draw_gold) right next to the HP/MP
+        # bars - showing it again here would just be visual noise.
+        items = ", ".join(
+            f"{name} x{amount}" for name, amount in state.inventory.items() if name != "gold"
+        ) or "empty"
         y = self.draw_text("Inventory", x, y, self.small_font, GOLD)
         for line in wrap_text(items, 42):
             y = self.draw_text(line, x, y, self.small_font, TEXT)
@@ -679,19 +736,113 @@ class GameUI:
         return {index for index in range(max(0, start), min(visible_line_count - 1, end) + 1)}
 
     def spell_box_height(self) -> int:
-        line_count = len(wrap_text(self.input_text or " ", 42))
-        visible_lines = min(max(2, line_count), 6)
+        if self.input_mode == "control":
+            visible_lines = len(wrap_text(CONTROLS_HINT, CONTROLS_HINT_WRAP))
+        elif self.engine.state.pending_trade is not None:
+            # Keyed off pending_trade rather than input_mode == "confirm_trade":
+            # this runs before draw_spell_box's forced-transition logic, so on the
+            # very first frame a trade appears, input_mode would still read the old
+            # mode and undersize the box for the proposal text + Y/N hint.
+            proposal_text = str(self.engine.state.pending_trade.get("proposal_text") or "")
+            visible_lines = len(wrap_text(proposal_text, 42)) + 2
+        else:
+            visible_lines = min(max(2, len(wrap_text(self.input_text or " ", 42))), 6)
         return 18 + visible_lines * 18
+
+    def draw_mode_box(self, text: str, x: int, y: int, color: tuple[int, int, int], active: bool) -> pygame.Rect:
+        """A clickable mode-switch box, tinted with its own color when active and
+        faded toward the panel background when not - so the three options (Wild
+        Spell/Talk/Controls) read as distinct colored controls at a glance, with
+        the current one clearly lit up."""
+        surface = self.small_font.render(text, True, TEXT if active else MUTED)
+        pad_x, pad_y = 10, 5
+        rect = pygame.Rect(x, y, surface.get_width() + pad_x * 2, surface.get_height() + pad_y * 2)
+        if active:
+            pygame.draw.rect(self.screen, blend_color(PANEL, color, 0.24), rect, border_radius=6)
+            pygame.draw.rect(self.screen, color, rect, width=2, border_radius=6)
+        else:
+            pygame.draw.rect(self.screen, blend_color(PANEL, color, 0.12), rect, width=1, border_radius=6)
+        self.screen.blit(surface, (x + pad_x, y + pad_y))
+        return rect
 
     def draw_spell_box(self, x: int, y: int, height: int) -> None:
         width = PANEL_WIDTH - 40
-        pygame.draw.line(self.screen, PANEL_EDGE, (x, y - 14), (WINDOW_WIDTH - 20, y - 14), 1)
-        label_color = ACCENT if self.input_active else MUTED
-        self.draw_text("Wild Spell", x, y - 26, self.small_font, label_color)
+        pygame.draw.line(self.screen, PANEL_EDGE, (x, y - 42), (WINDOW_WIDTH - 20, y - 42), 1)
+        box_y = y - 34
+
+        talk_target = self.engine.find_talk_target()
+        talk_target_id = talk_target.id if talk_target is not None else None
+        if talk_target_id != self._last_talk_target_id:
+            if talk_target_id is not None:
+                # Just became adjacent to someone talkable - default to Talk mode,
+                # but only on this transition, so a deliberate click away from Talk
+                # sticks for as long as the player stays next to the same NPC.
+                self.input_mode = "talk"
+                self.input_active = True
+            elif self.input_mode == "talk":
+                # Walked out of talking range while in Talk mode - nothing legal to
+                # talk to anymore, so fall back to casting.
+                self.input_mode = "spell"
+                self.input_active = True
+            self._last_talk_target_id = talk_target_id
+
+        # Same transition-based pattern as talk-target switching above: force the
+        # mode the *moment* a trade appears or resolves, not every frame - so a
+        # confirmation can't be dodged by clicking elsewhere, and resolving it
+        # (accept/reject) hands control straight back to whatever made sense before.
+        trade_active = self.engine.state.pending_trade is not None
+        if trade_active != self._last_trade_active:
+            if trade_active:
+                self.input_mode = "confirm_trade"
+                self.input_active = False
+                # `talk` can block on up to two sequential LLM calls (6-24s) with
+                # the whole event loop frozen. Any Enter/Y the player pressed
+                # (or that key-repeat queued) during that wait is still sitting
+                # in the queue when this modal claims control on the next frame
+                # -- without this, handle_key's confirm_trade gate immediately
+                # "accepts" using that stale keypress, before the player ever
+                # sees the proposal. Flush it so only fresh input reaches the modal.
+                pygame.event.clear((pygame.KEYDOWN, pygame.KEYUP))
+            elif self.input_mode == "confirm_trade":
+                self.input_mode = "talk" if talk_target is not None else "spell"
+                self.input_active = True
+            self._last_trade_active = trade_active
+
+        specs = [("spell", "Wild Spell", MODE_PURPLE)]
+        if talk_target is not None:
+            specs.append(("talk", "Talk", MODE_YELLOW))
+        specs.append(("control", "Controls", MODE_GREEN))
+        cursor_x = x
+        self.mode_label_rects = []
+        for mode, label, color in specs:
+            rect = self.draw_mode_box(label, cursor_x, box_y, color, self.input_mode == mode)
+            self.mode_label_rects.append((rect, mode))
+            cursor_x = rect.right + 10
+        if trade_active:
+            # Deliberately not in `specs` / `mode_label_rects` - this box appears
+            # only when a real decision is pending, never as a voluntary tab.
+            self.draw_mode_box("Confirm Trade", cursor_x, box_y, MODE_ORANGE, True)
+
         rect = pygame.Rect(x, y, width, height)
         self.spell_box_rect = rect
         pygame.draw.rect(self.screen, (17, 19, 24), rect, border_radius=6)
-        pygame.draw.rect(self.screen, ACCENT if self.input_active else PANEL_EDGE, rect, width=1, border_radius=6)
+        pygame.draw.rect(self.screen, MODE_COLORS[self.input_mode], rect, width=1, border_radius=6)
+        if self.input_mode == "control":
+            for index, line in enumerate(wrap_text(CONTROLS_HINT, CONTROLS_HINT_WRAP)):
+                self.draw_text(line, x + 10, y + 9 + index * 18, self.small_font, MUTED)
+            return
+        if self.input_mode == "confirm_trade" and self.engine.state.pending_trade is not None:
+            trade = self.engine.state.pending_trade
+            npc_name = str(trade.get("npc_name") or "The trader")
+            proposal_text = str(trade.get("proposal_text") or f"{npc_name} has a deal in mind.")
+            cursor_y = y + 9
+            for line in wrap_text(proposal_text, 42):
+                cursor_y = self.draw_text(line, x + 10, cursor_y, self.ui_font, TEXT)
+            self.draw_text("[Y]es accept    [N]o reject", x + 10, cursor_y + 6, self.small_font, MODE_ORANGE)
+            return
+        if not self.input_text and self.input_mode == "talk" and talk_target is not None:
+            self.draw_text(f"Say something to {talk_target.name}...", x + 10, y + 9, self.ui_font, MUTED)
+            return
         shown = self.input_text
         if self.input_active and pygame.time.get_ticks() % 1000 < 500:
             shown += "_"
