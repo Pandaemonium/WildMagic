@@ -185,13 +185,13 @@ class OllamaWildMagicProvider:
         base_url: str | None = None,
         timeout_seconds: float | None = None,
     ) -> None:
-        self.model = model or os.environ.get("WILDMAGIC_MODEL", "qwen3:8b")
+        self.model = model or os.environ.get("WILDMAGIC_MODEL", "qwen3.5:9b-q4_K_M")
         self.base_url = normalize_ollama_url(base_url or os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
         self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds()
 
     def resolve(self, spell: str, context: dict[str, Any]) -> str:
         payload = {
-            "model": self.model,
+            "model": os.environ.get("WILDMAGIC_MODEL") or self.model,
             "stream": False,
             "think": ollama_thinking_enabled(),
             "messages": [
@@ -710,14 +710,14 @@ class OllamaDialogueProvider:
         self.model = (
             model
             or os.environ.get("WILDMAGIC_DIALOGUE_MODEL")
-            or os.environ.get("WILDMAGIC_MODEL", "qwen3:8b")
+            or os.environ.get("WILDMAGIC_MODEL", "qwen3.5:9b-q4_K_M")
         )
         self.base_url = normalize_ollama_url(base_url or os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
         self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds()
 
     def reply(self, message: str, context: dict[str, Any]) -> str:
         payload = {
-            "model": self.model,
+            "model": os.environ.get("WILDMAGIC_DIALOGUE_MODEL") or os.environ.get("WILDMAGIC_MODEL") or self.model,
             "stream": False,
             "think": ollama_thinking_enabled(),
             "messages": [
@@ -1023,14 +1023,14 @@ class OllamaTradeProvider:
             model
             or os.environ.get("WILDMAGIC_TRADE_MODEL")
             or os.environ.get("WILDMAGIC_DIALOGUE_MODEL")
-            or os.environ.get("WILDMAGIC_MODEL", "qwen3:8b")
+            or os.environ.get("WILDMAGIC_MODEL", "qwen3.5:9b-q4_K_M")
         )
         self.base_url = normalize_ollama_url(base_url or os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
         self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds()
 
     def propose(self, context: dict[str, Any]) -> str:
         payload = {
-            "model": self.model,
+            "model": os.environ.get("WILDMAGIC_TRADE_MODEL") or os.environ.get("WILDMAGIC_MODEL") or self.model,
             "stream": False,
             "think": ollama_thinking_enabled(),
             "messages": [
@@ -2333,7 +2333,7 @@ def ollama_timeout_seconds() -> float:
 
 
 def ollama_num_predict() -> int:
-    value = os.environ.get("WILDMAGIC_OLLAMA_NUM_PREDICT", "800")
+    value = os.environ.get("WILDMAGIC_OLLAMA_NUM_PREDICT", "1024")
     try:
         parsed = int(value)
     except ValueError:
@@ -2419,6 +2419,15 @@ def ollama_json_format_enabled() -> bool:
     return value in {"1", "true", "yes", "on", "json"}
 
 
+def ollama_town_num_predict() -> int:
+    value = os.environ.get("WILDMAGIC_TOWN_NUM_PREDICT", "2000")
+    try:
+        parsed = int(value)
+    except ValueError:
+        return 2000
+    return max(256, min(8192, parsed))
+
+
 def ollama_num_gpu() -> int:
     value = os.environ.get("WILDMAGIC_OLLAMA_NUM_GPU", "999")
     try:
@@ -2426,6 +2435,19 @@ def ollama_num_gpu() -> int:
     except ValueError:
         return 999
     return max(0, min(999, parsed))
+
+
+def fetch_ollama_models(base_url: str | None = None) -> list[str]:
+    """Return sorted list of model names available from Ollama. Empty list on failure."""
+    url = normalize_ollama_url(base_url or os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
+    try:
+        req = urllib.request.Request(f"{url}/api/tags")
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+        return sorted(m["name"] for m in data.get("models", []))
+    except Exception:
+        return []
+
 
 
 def ollama_resolution_attempts() -> int:
@@ -2561,14 +2583,14 @@ class OllamaTownProvider:
         self.model = (
             model
             or os.environ.get("WILDMAGIC_TOWN_MODEL")
-            or os.environ.get("WILDMAGIC_MODEL", "qwen3:8b")
+            or os.environ.get("WILDMAGIC_MODEL", "qwen3.5:9b-q4_K_M")
         )
         self.base_url = normalize_ollama_url(base_url or os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
         self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds()
 
     def generate(self, zx: int, zy: int, context: dict[str, Any]) -> TownSpec:
         payload = {
-            "model": self.model,
+            "model": os.environ.get("WILDMAGIC_TOWN_MODEL") or os.environ.get("WILDMAGIC_MODEL") or self.model,
             "stream": False,
             "think": ollama_thinking_enabled(),
             "messages": [
@@ -2578,7 +2600,7 @@ class OllamaTownProvider:
             "options": {
                 "temperature": ollama_temperature(),
                 "top_p": 0.9,
-                "num_predict": ollama_num_predict(),
+                "num_predict": ollama_town_num_predict(),
                 "num_ctx": ollama_num_ctx(),
                 "num_gpu": ollama_num_gpu(),
             },

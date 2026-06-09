@@ -12,6 +12,7 @@ import pygame
 
 from .actions import ActionResult, GameSession
 from .engine import _TOWN_GEN_TIMEOUT
+from .wild_magic import fetch_ollama_models
 from .wild_magic import SYSTEM_PROMPT, extract_thinking, strip_thinking
 from .models import (
     DOOR,
@@ -70,6 +71,62 @@ _MOVE_KEY_MAP: dict[int, str] = {
     pygame.K_KP1: "southwest", pygame.K_KP3: "southeast",
 }
 CONTROLS_HINT_WRAP = 48
+
+# ---------------------------------------------------------------------------
+# Config menu spec — each entry drives the menu display and env-var mutation
+# ---------------------------------------------------------------------------
+_CONFIG_FILE = os.path.join(os.path.dirname(__file__), "..", "wildmagic_config.json")
+_CONFIG_SPEC: list[dict] = [
+    {
+        "key": "WILDMAGIC_MODEL",
+        "label": "Model",
+        "type": "model",          # special: opens model-list submenu
+        "default": "qwen3.5:9b-q4_K_M",
+    },
+    {
+        "key": "WILDMAGIC_OLLAMA_THINK",
+        "label": "Thinking mode",
+        "type": "toggle",
+        "values": ["0", "1"],
+        "display": {"0": "OFF", "1": "ON"},
+        "default": "0",
+    },
+    {
+        "key": "WILDMAGIC_OLLAMA_TEMPERATURE",
+        "label": "Spell temperature",
+        "type": "cycle",
+        "values": ["0.1", "0.2", "0.25", "0.3", "0.4", "0.5", "0.7", "0.9", "1.0", "1.2"],
+        "default": "0.25",
+    },
+    {
+        "key": "WILDMAGIC_DIALOGUE_TEMPERATURE",
+        "label": "Dialogue temperature",
+        "type": "cycle",
+        "values": ["0.3", "0.4", "0.5", "0.6", "0.7", "0.8", "0.9", "1.0"],
+        "default": "0.7",
+    },
+    {
+        "key": "WILDMAGIC_OLLAMA_NUM_PREDICT",
+        "label": "Spell tokens",
+        "type": "cycle",
+        "values": ["512", "768", "1024", "1536", "2048"],
+        "default": "1024",
+    },
+    {
+        "key": "WILDMAGIC_TOWN_NUM_PREDICT",
+        "label": "Town gen tokens",
+        "type": "cycle",
+        "values": ["1024", "1536", "2000", "2500", "3000", "4096"],
+        "default": "2000",
+    },
+    {
+        "key": "WILDMAGIC_OLLAMA_TIMEOUT",
+        "label": "LLM timeout (s)",
+        "type": "cycle",
+        "values": ["30", "60", "90", "120", "180", "300"],
+        "default": "180",
+    },
+]
 
 TILE_COLORS = {
     FLOOR: (77, 80, 88),
@@ -138,6 +195,55 @@ class GameUI:
         self.llm_selection_focus: int | None = None
         self.dragging_llm_selection = False
 
+        # Menu state
+        self.menu_active = False
+        self.menu_page: str = "main"       # "main" | "config" | "model"
+        self.menu_cursor: int = 0
+        self.menu_prev_page: str = "main"  # for back navigation
+        self.menu_models: list[str] = []   # populated when model page opens
+
+        self._load_config()
+
+    def _load_config(self) -> None:
+        """Load persisted config from JSON and apply to os.environ."""
+        try:
+            with open(_CONFIG_FILE, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+            for key, value in saved.items():
+                if isinstance(value, str):
+                    os.environ[key] = value
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+
+    def _save_config(self) -> None:
+        """Persist current config env vars to JSON."""
+        data = {}
+        for spec in _CONFIG_SPEC:
+            key = spec["key"]
+            val = os.environ.get(key)
+            if val is not None:
+                data[key] = val
+        try:
+            with open(_CONFIG_FILE, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+        except OSError:
+            pass
+
+    def _config_value(self, spec: dict) -> str:
+        """Current display value for a config spec entry."""
+        raw = os.environ.get(spec["key"], spec["default"])
+        if spec["type"] == "toggle":
+            return spec["display"].get(raw, raw)
+        return raw
+
+    def _open_menu(self) -> None:
+        self.menu_active = True
+        self.menu_page = "main"
+        self.menu_cursor = 0
+
+    def _close_menu(self) -> None:
+        self.menu_active = False
+
     def run(self) -> None:
         running = True
         while running:
@@ -156,6 +262,10 @@ class GameUI:
         pygame.quit()
 
     def handle_key(self, event: pygame.event.Event) -> None:
+        if self.menu_active:
+            self._handle_menu_key(event)
+            return
+
         if event.mod & pygame.KMOD_CTRL:
             hovering_llm = self.llm_content_rect.collidepoint(pygame.mouse.get_pos())
             if event.key == pygame.K_c:
@@ -192,8 +302,8 @@ class GameUI:
             if self.input_text:
                 self.input_text = ""
                 self.input_active = True
-            else:
-                pygame.event.post(pygame.event.Event(pygame.QUIT))
+                return
+            self._open_menu()
             return
 
         if self.input_active and self.input_mode != "control":
@@ -206,7 +316,7 @@ class GameUI:
             if event.key == pygame.K_TAB:
                 self.input_active = False
                 return
-            if event.unicode and event.unicode.isprintable() and len(self.input_text) < 120:
+            if event.unicode and event.unicode.isprintable():
                 self.input_text += event.unicode
                 return
 
@@ -323,6 +433,112 @@ class GameUI:
                 if index is not None:
                     self.log_selection_focus = index
             self.dragging_log_selection = False
+
+    # ------------------------------------------------------------------
+    # Config menu
+    # ------------------------------------------------------------------
+
+    def _menu_items(self) -> list[dict]:
+        if self.menu_page == "main":
+            return [
+                {"label": "Resume",        "action": "resume"},
+                {"label": "Configuration", "action": "config"},
+                {"label": "Quit",          "action": "quit"},
+            ]
+        if self.menu_page == "config":
+            items = []
+            for spec in _CONFIG_SPEC:
+                val = self._config_value(spec)
+                items.append({"label": f"{spec['label']:<22} {val}", "action": "config_item", "spec": spec})
+            items.append({"label": "Back", "action": "back"})
+            return items
+        if self.menu_page == "model":
+            items = [{"label": m, "action": "set_model", "model": m} for m in self.menu_models]
+            if not items:
+                items = [{"label": "(no models found)", "action": "noop"}]
+            items.append({"label": "Back", "action": "back"})
+            return items
+        return []
+
+    def _handle_menu_key(self, event: pygame.event.Event) -> None:
+        items = self._menu_items()
+        n = len(items)
+        if event.key in (pygame.K_UP, pygame.K_k, pygame.K_KP8):
+            self.menu_cursor = (self.menu_cursor - 1) % n
+        elif event.key in (pygame.K_DOWN, pygame.K_j, pygame.K_KP2):
+            self.menu_cursor = (self.menu_cursor + 1) % n
+        elif event.key in (pygame.K_LEFT, pygame.K_h, pygame.K_KP4):
+            self._menu_cycle(items, -1)
+        elif event.key in (pygame.K_RIGHT, pygame.K_l, pygame.K_KP6):
+            self._menu_cycle(items, +1)
+        elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            self._menu_select(items)
+        elif event.key == pygame.K_ESCAPE:
+            self._close_menu()
+
+    def _menu_cycle(self, items: list[dict], direction: int) -> None:
+        """Left/right arrow: cycle a config value in-place."""
+        if self.menu_cursor >= len(items):
+            return
+        item = items[self.menu_cursor]
+        if item["action"] != "config_item":
+            return
+        spec = item["spec"]
+        if spec["type"] not in ("cycle", "toggle"):
+            return
+        values = spec["values"]
+        current = os.environ.get(spec["key"], spec["default"])
+        try:
+            idx = values.index(current)
+        except ValueError:
+            idx = 0
+        new_idx = (idx + direction) % len(values)
+        os.environ[spec["key"]] = values[new_idx]
+        self._save_config()
+
+    def _menu_select(self, items: list[dict]) -> None:
+        if self.menu_cursor >= len(items):
+            return
+        item = items[self.menu_cursor]
+        action = item["action"]
+        if action == "resume":
+            self._close_menu()
+        elif action == "quit":
+            pygame.event.post(pygame.event.Event(pygame.QUIT))
+        elif action == "config":
+            self.menu_prev_page = "main"
+            self.menu_page = "config"
+            self.menu_cursor = 0
+        elif action == "back":
+            if self.menu_page in ("config", "model"):
+                self._close_menu()
+            else:
+                self.menu_page = self.menu_prev_page
+                self.menu_cursor = 0
+        elif action == "config_item":
+            spec = item["spec"]
+            if spec["type"] == "toggle":
+                self._menu_cycle(items, +1)
+            elif spec["type"] == "cycle":
+                self._menu_cycle(items, +1)
+            elif spec["type"] == "model":
+                self.menu_prev_page = "config"
+                self.menu_page = "model"
+                self.menu_cursor = 0
+                self.menu_models = fetch_ollama_models()
+                # pre-select current model
+                current = os.environ.get("WILDMAGIC_MODEL", "qwen3.5:9b-q4_K_M")
+                try:
+                    self.menu_cursor = self.menu_models.index(current)
+                except ValueError:
+                    self.menu_cursor = 0
+        elif action == "set_model":
+            os.environ["WILDMAGIC_MODEL"] = item["model"]
+            self._save_config()
+            self.menu_page = "config"
+            self.menu_cursor = 0
+
+    # ------------------------------------------------------------------
 
     def restart_run(self) -> None:
         self.session = GameSession(scenario="town")
@@ -466,6 +682,58 @@ class GameUI:
         self.draw_llm_panel()
         self.draw_map()
         self.draw_panel()
+        if self.menu_active:
+            self.draw_menu()
+
+    def draw_menu(self) -> None:
+        overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 170))
+        self.screen.blit(overlay, (0, 0))
+
+        items = self._menu_items()
+        row_h = 32
+        padding = 24
+        title = {"main": "MENU", "config": "CONFIGURATION", "model": "SELECT MODEL"}[self.menu_page]
+        box_w = 480
+        box_h = padding * 2 + 28 + len(items) * row_h + 20
+        bx = (WINDOW_WIDTH - box_w) // 2
+        by = (WINDOW_HEIGHT - box_h) // 2
+
+        pygame.draw.rect(self.screen, (28, 30, 38), (bx, by, box_w, box_h), border_radius=6)
+        pygame.draw.rect(self.screen, PANEL_EDGE, (bx, by, box_w, box_h), 1, border_radius=6)
+
+        # Title
+        title_surf = self.ui_font.render(title, True, ACCENT)
+        self.screen.blit(title_surf, (bx + padding, by + padding))
+        pygame.draw.line(self.screen, PANEL_EDGE,
+                         (bx + padding, by + padding + 22),
+                         (bx + box_w - padding, by + padding + 22), 1)
+
+        # Items
+        for i, item in enumerate(items):
+            iy = by + padding + 30 + i * row_h
+            is_selected = i == self.menu_cursor
+            if is_selected:
+                pygame.draw.rect(self.screen, (50, 55, 70),
+                                 (bx + 8, iy - 4, box_w - 16, row_h - 4), border_radius=4)
+            color = GOLD if is_selected else TEXT
+            label = item["label"]
+            surf = self.ui_font.render(label, True, color)
+            self.screen.blit(surf, (bx + padding, iy))
+
+            # Show ◄ ► hint for cycle/toggle items when selected
+            if is_selected and item.get("action") == "config_item":
+                spec = item["spec"]
+                if spec["type"] in ("cycle", "toggle"):
+                    hint = self.small_font.render("◄ ► or Enter", True, MUTED)
+                    self.screen.blit(hint, (bx + box_w - padding - hint.get_width(), iy + 4))
+
+        # Footer hint
+        hints = {"main": "Enter select  •  Esc close",
+                 "config": "Enter/◄► change  •  Esc back",
+                 "model": "Enter select  •  Esc back"}
+        hint_surf = self.small_font.render(hints[self.menu_page], True, MUTED)
+        self.screen.blit(hint_surf, (bx + padding, by + box_h - 20))
 
     def draw_map(self) -> None:
         state = self.engine.state
