@@ -18,6 +18,7 @@ POISON_CLOUD = "%"
 VINES = "&"
 RUBBLE = ";"
 MIST = ":"
+ROAD = "="
 
 
 TILE_NAMES = {
@@ -35,6 +36,7 @@ TILE_NAMES = {
     VINES: "vines",
     RUBBLE: "rubble",
     MIST: "mist",
+    ROAD: "dirt road",
 }
 
 
@@ -53,6 +55,7 @@ TILE_TAGS = {
     VINES: {"plant", "flammable", "snaring"},
     RUBBLE: {"stone", "rough"},
     MIST: {"water", "gas"},
+    ROAD: {"walkable", "road"},
 }
 
 
@@ -119,6 +122,10 @@ TILE_ALIASES = {
     ":": MIST,
     "mud": WATER,
     "swamp": WATER,
+    "road": ROAD,
+    "path": ROAD,
+    "trail": ROAD,
+    "=": ROAD,
 }
 
 

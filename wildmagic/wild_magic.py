@@ -2450,3 +2450,226 @@ def parse_ollama_error_body(body: str) -> str:
         if isinstance(error, str):
             return error
     return stripped[:500]
+
+
+# ---------------------------------------------------------------------------
+# Town generation provider — one JSON call produces a full settlement spec
+# ---------------------------------------------------------------------------
+
+@dataclass
+class BuildingSpec:
+    type: str
+    name: str | None
+
+
+@dataclass
+class NpcSpec:
+    name: str
+    role: str
+    backstory: str
+    traits: list[str]
+    building: str | None
+    wares: dict[str, int] | None
+
+
+@dataclass
+class TownSpec:
+    town_name: str
+    description: str
+    buildings: list[BuildingSpec]
+    npcs: list[NpcSpec]
+
+
+TOWN_SYSTEM_PROMPT = """You are a world-builder for a dark fantasy roguelike. Generate a small frontier settlement.
+The settlement should feel lived-in, rough around the edges, and distinct from generic fantasy towns.
+Respond with ONLY a JSON object in this exact format — no prose, no explanation, no markdown:
+{
+  "town_name": "2-4 word evocative name",
+  "description": "1-2 sentence flavor text, 40-80 words, present tense",
+  "buildings": [
+    {"type": "building_type", "name": "Building Name or null"}
+  ],
+  "npcs": [
+    {
+      "name": "Full Name",
+      "role": "occupation",
+      "backstory": "1-2 sentences",
+      "traits": ["trait1", "trait2"],
+      "building": "building_type or null",
+      "wares": {"item_name": quantity} or null
+    }
+  ]
+}
+Building types (use only these): tavern, inn, shrine, temple, market, smithy, home, barracks, stable
+The user message will include four seeds: location, defining_trait, current_situation, and settlement_type. Use all of them. They should shape the town's name, its description, which NPCs live here, their personalities, what they carry, and what they'll say. The seeds are constraints, not suggestions — a town "at a worked-out mine" should feel like it; a town whose defining trait is "people come here to disappear" should have residents who act like it.
+NPCs: number of NPCs is given by npc_count_range in the user message. Include a varied mix of occupations suited to the seeds.
+Names: invent distinctive, culturally varied names — not generic fantasy. Mix naming styles: short rough names (Dav, Fen, Rust), foreign-sounding names, names with epithets (One-Eye, the Mute), names that hint at history. Avoid names ending in -ius, -iel, -yn, or starting with El-, Al-, Thal-.
+Wares: most NPCs should have 1-3 items they can trade (include "gold" as one, quantity 5-30). Merchants and traders should have more (4-7 items). Invent creative, specific items suited to each NPC's role and backstory — e.g. a tanner might sell "cured hide strips" and "tallow candles"; a disgraced soldier might sell "a dented Imperial buckle" and "faded campaign maps"; a hedge witch might sell "dried crow feet" and "a stoppered vial of bad dreams". Do not limit yourself to any fixed list. "gold" is always acceptable as a trade currency.
+The building field for each NPC should match one of the building types you listed, or null if they are outdoors."""
+
+
+def _parse_town_spec(raw: str) -> TownSpec:
+    """Parse a JSON string from the LLM into a TownSpec, tolerating missing fields."""
+    data = json.loads(strip_thinking(raw).strip())
+    buildings = []
+    for b in data.get("buildings") or []:
+        if isinstance(b, dict) and b.get("type"):
+            buildings.append(BuildingSpec(
+                type=str(b["type"]).lower().strip(),
+                name=str(b["name"]).strip() if b.get("name") else None,
+            ))
+    npcs = []
+    for n in data.get("npcs") or []:
+        if not isinstance(n, dict) or not n.get("name"):
+            continue
+        raw_wares = n.get("wares")
+        wares: dict[str, int] | None = None
+        if isinstance(raw_wares, dict):
+            wares = {str(k): int(v) for k, v in raw_wares.items() if isinstance(v, (int, float)) and int(v) > 0}
+        npcs.append(NpcSpec(
+            name=str(n["name"]).strip(),
+            role=str(n.get("role") or "resident").strip(),
+            backstory=str(n.get("backstory") or "").strip(),
+            traits=[str(t) for t in (n.get("traits") or []) if t],
+            building=str(n["building"]).lower().strip() if n.get("building") else None,
+            wares=wares or None,
+        ))
+    return TownSpec(
+        town_name=str(data.get("town_name") or "Unnamed Settlement").strip(),
+        description=str(data.get("description") or "").strip(),
+        buildings=buildings,
+        npcs=npcs,
+    )
+
+
+class TownProvider(Protocol):
+    name: str
+
+    def generate(self, zx: int, zy: int, context: dict[str, Any]) -> TownSpec:
+        ...
+
+
+class OllamaTownProvider:
+    name = "ollama"
+
+    def __init__(
+        self,
+        model: str | None = None,
+        base_url: str | None = None,
+        timeout_seconds: float | None = None,
+    ) -> None:
+        self.model = (
+            model
+            or os.environ.get("WILDMAGIC_TOWN_MODEL")
+            or os.environ.get("WILDMAGIC_MODEL", "qwen3:8b")
+        )
+        self.base_url = normalize_ollama_url(base_url or os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
+        self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds()
+
+    def generate(self, zx: int, zy: int, context: dict[str, Any]) -> TownSpec:
+        payload = {
+            "model": self.model,
+            "stream": False,
+            "think": ollama_thinking_enabled(),
+            "messages": [
+                {"role": "system", "content": TOWN_SYSTEM_PROMPT},
+                {"role": "user", "content": json.dumps(context, ensure_ascii=True)},
+            ],
+            "options": {
+                "temperature": ollama_temperature(),
+                "top_p": 0.9,
+                "num_predict": ollama_num_predict(),
+                "num_ctx": ollama_num_ctx(),
+                "num_gpu": ollama_num_gpu(),
+            },
+            "keep_alive": "10m",
+        }
+        if ollama_json_format_enabled():
+            payload["format"] = "json"
+        try:
+            data = _post_ollama_chat(self.base_url, payload, self.timeout_seconds)
+        except ValueError as exc:
+            if "Unexpected empty grammar stack" not in str(exc) or "format" not in payload:
+                raise
+            retry_payload = dict(payload)
+            retry_payload.pop("format", None)
+            data = _post_ollama_chat(self.base_url, retry_payload, self.timeout_seconds)
+        content = data.get("message", {}).get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("Ollama response did not include message.content")
+        return _parse_town_spec(content)
+
+
+class MockTownProvider:
+    name = "mock"
+
+    def generate(self, zx: int, zy: int, context: dict[str, Any]) -> TownSpec:
+        names = ["Ashford Crossing", "Grimholt", "Cinder Vale", "The Waypost", "Brackenmere"]
+        idx = abs(hash((zx, zy))) % len(names)
+        return TownSpec(
+            town_name=names[idx],
+            description="A rough cluster of buildings where the road bends. Travelers stop here to rest; most keep moving.",
+            buildings=[
+                BuildingSpec(type="tavern", name="The Hollow Cup"),
+                BuildingSpec(type="market", name=None),
+                BuildingSpec(type="home", name=None),
+            ],
+            npcs=[
+                NpcSpec(
+                    name="Dara Mull",
+                    role="innkeeper",
+                    backstory="Runs the tavern alone since her husband left for the capital. Claims he'll be back any day.",
+                    traits=["tired", "hospitable"],
+                    building="tavern",
+                    wares={"smoke vial": 2, "gold": 15},
+                ),
+                NpcSpec(
+                    name="Oswin Fetch",
+                    role="traveling merchant",
+                    backstory="Hauls goods between the frontier settlements. Knows every road and most of the people on them.",
+                    traits=["chatty", "shrewd"],
+                    building="market",
+                    wares={"lockpick": 1, "trinket": 2, "gold": 20},
+                ),
+                NpcSpec(
+                    name="Old Britta",
+                    role="herbalist",
+                    backstory="Has lived here longer than the buildings. Knows every plant in a day's walk.",
+                    traits=["quiet", "observant"],
+                    building="home",
+                    wares={"blood moss": 2, "grave salt": 1, "gold": 10},
+                ),
+            ],
+        )
+
+
+class AutoTownProvider:
+    name = "auto"
+
+    def __init__(self) -> None:
+        self.ollama = OllamaTownProvider()
+        self.mock = MockTownProvider()
+        self.last_provider_name = "ollama"
+
+    def generate(self, zx: int, zy: int, context: dict[str, Any]) -> TownSpec:
+        try:
+            self.last_provider_name = self.ollama.name
+            return self.ollama.generate(zx, zy, context)
+        except (OSError, TimeoutError, urllib.error.URLError, ValueError):
+            if not fallbacks_enabled():
+                raise
+            self.last_provider_name = self.mock.name
+            return self.mock.generate(zx, zy, context)
+
+
+def make_town_provider(provider_name: str | None = None) -> TownProvider:
+    provider = (
+        provider_name
+        or os.environ.get("WILDMAGIC_TOWN_PROVIDER")
+        or os.environ.get("WILDMAGIC_PROVIDER", "ollama")
+    ).lower().strip()
+    if provider == "mock":
+        return MockTownProvider()
+    if provider == "ollama":
+        return OllamaTownProvider()
+    return AutoTownProvider()

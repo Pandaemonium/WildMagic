@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import textwrap
+import time
 from typing import Any
 
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
@@ -10,6 +11,7 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame
 
 from .actions import ActionResult, GameSession
+from .engine import _TOWN_GEN_TIMEOUT
 from .wild_magic import SYSTEM_PROMPT, extract_thinking, strip_thinking
 from .models import (
     DOOR,
@@ -58,6 +60,15 @@ CONTROLS_HINT = (
     "Keyboard controls active - arrows/WASD/hjkl move, > descend, < ascend, o open, "
     "g pick up, f cast spark, period or keypad-5 to wait, Esc back to Wild Spell."
 )
+
+_MOVE_KEY_MAP: dict[int, str] = {
+    pygame.K_UP: "north", pygame.K_w: "north", pygame.K_k: "north", pygame.K_KP8: "north",
+    pygame.K_DOWN: "south", pygame.K_s: "south", pygame.K_j: "south", pygame.K_KP2: "south",
+    pygame.K_LEFT: "west", pygame.K_a: "west", pygame.K_h: "west", pygame.K_KP4: "west",
+    pygame.K_RIGHT: "east", pygame.K_d: "east", pygame.K_l: "east", pygame.K_KP6: "east",
+    pygame.K_KP7: "northwest", pygame.K_KP9: "northeast",
+    pygame.K_KP1: "southwest", pygame.K_KP3: "southeast",
+}
 CONTROLS_HINT_WRAP = 48
 
 TILE_COLORS = {
@@ -202,22 +213,12 @@ class GameUI:
         if self.input_mode != "control" and event.key in {pygame.K_SLASH, pygame.K_RETURN}:
             self.input_active = True
             return
-        if event.key in {pygame.K_UP, pygame.K_w, pygame.K_k, pygame.K_KP8}:
-            self.session.execute_command("move north")
-        elif event.key in {pygame.K_DOWN, pygame.K_s, pygame.K_j, pygame.K_KP2}:
-            self.session.execute_command("move south")
-        elif event.key in {pygame.K_LEFT, pygame.K_a, pygame.K_h, pygame.K_KP4}:
-            self.session.execute_command("move west")
-        elif event.key in {pygame.K_RIGHT, pygame.K_d, pygame.K_l, pygame.K_KP6}:
-            self.session.execute_command("move east")
-        elif event.key == pygame.K_KP7:
-            self.session.execute_command("move northwest")
-        elif event.key == pygame.K_KP9:
-            self.session.execute_command("move northeast")
-        elif event.key == pygame.K_KP1:
-            self.session.execute_command("move southwest")
-        elif event.key == pygame.K_KP3:
-            self.session.execute_command("move southeast")
+        _move_dir = _MOVE_KEY_MAP.get(event.key)
+        if _move_dir is not None:
+            _zone_before = (self.engine.state.zone_x, self.engine.state.zone_y)
+            self.session.execute_command(f"move {_move_dir}")
+            if (self.engine.state.zone_x, self.engine.state.zone_y) != _zone_before:
+                pygame.event.clear((pygame.KEYDOWN, pygame.KEYUP))
         elif event.key in {pygame.K_KP5}:
             self.session.execute_command("wait")
         elif event.key == pygame.K_GREATER or (event.key == pygame.K_PERIOD and event.mod & pygame.KMOD_SHIFT):
@@ -739,12 +740,9 @@ class GameUI:
         if self.input_mode == "control":
             visible_lines = len(wrap_text(CONTROLS_HINT, CONTROLS_HINT_WRAP))
         elif self.engine.state.pending_trade is not None:
-            # Keyed off pending_trade rather than input_mode == "confirm_trade":
-            # this runs before draw_spell_box's forced-transition logic, so on the
-            # very first frame a trade appears, input_mode would still read the old
-            # mode and undersize the box for the proposal text + Y/N hint.
-            proposal_text = str(self.engine.state.pending_trade.get("proposal_text") or "")
-            visible_lines = len(wrap_text(proposal_text, 42)) + 2
+            # Two item lines ("You receive:" + "You give:") plus the Y/N hint.
+            # Fixed at 3 lines — the flavor text stays in the message log above.
+            visible_lines = 3
         else:
             visible_lines = min(max(2, len(wrap_text(self.input_text or " ", 42))), 6)
         return 18 + visible_lines * 18
@@ -833,11 +831,22 @@ class GameUI:
             return
         if self.input_mode == "confirm_trade" and self.engine.state.pending_trade is not None:
             trade = self.engine.state.pending_trade
-            npc_name = str(trade.get("npc_name") or "The trader")
-            proposal_text = str(trade.get("proposal_text") or f"{npc_name} has a deal in mind.")
+
+            def _fmt_items(items: list) -> str:
+                if not items:
+                    return "nothing"
+                parts = []
+                for entry in items:
+                    qty = entry.get("quantity", 1)
+                    name = str(entry.get("item", "?"))
+                    parts.append(f"{qty} {name}" if qty != 1 else name)
+                return ", ".join(parts)
+
+            receive_line = f"You receive:  {_fmt_items(trade.get('npc_gives') or [])}"
+            give_line    = f"You give:     {_fmt_items(trade.get('npc_wants') or [])}"
             cursor_y = y + 9
-            for line in wrap_text(proposal_text, 42):
-                cursor_y = self.draw_text(line, x + 10, cursor_y, self.ui_font, TEXT)
+            cursor_y = self.draw_text(receive_line, x + 10, cursor_y, self.ui_font, TEXT)
+            cursor_y = self.draw_text(give_line,    x + 10, cursor_y, self.ui_font, TEXT)
             self.draw_text("[Y]es accept    [N]o reject", x + 10, cursor_y + 6, self.small_font, MODE_ORANGE)
             return
         if not self.input_text and self.input_mode == "talk" and talk_target is not None:
@@ -881,6 +890,11 @@ class GameUI:
         wrap_chars = max(10, text_width // char_width)
         if self._llm_lines_cache is None:
             self._llm_lines_cache = self._build_llm_lines(wrap_chars)
+        elif getattr(self.engine, "_pending_towns", None):
+            now_sec = int(time.monotonic())
+            if now_sec != getattr(self, "_llm_cache_sec", -1):
+                self._llm_cache_sec = now_sec
+                self._llm_lines_cache = self._build_llm_lines(wrap_chars)
         lines = self._llm_lines_cache
 
         line_height = self.small_font.get_linesize() + 1
@@ -941,6 +955,29 @@ class GameUI:
         emit(SYSTEM_PROMPT.strip(), MUTED)
         lines.append(("", MUTED))
         lines.append(("=" * wrap_chars, PANEL_EDGE))
+
+        pending = getattr(self.engine, "_pending_towns", {})
+        if pending:
+            lines.append(("", MUTED))
+            emit("TOWN GENERATION IN PROGRESS", GOLD)
+            now = time.monotonic()
+            for key in pending:
+                ctx = getattr(self.engine, "_pending_town_contexts", {}).get(key, {})
+                start = getattr(self.engine, "_pending_town_start_times", {}).get(key, now)
+                elapsed = now - start
+                remaining = max(0.0, _TOWN_GEN_TIMEOUT - elapsed)
+                zx, zy = key
+                emit(f"  Zone ({zx}, {zy}) — {remaining:.0f}s remaining", MODE_ORANGE)
+                if ctx.get("settlement_type"):
+                    emit(f"  Type: {ctx['settlement_type']}", TEXT)
+                if ctx.get("location"):
+                    emit(f"  Location: {ctx['location']}", TEXT)
+                if ctx.get("defining_trait"):
+                    emit(f"  Trait: {ctx['defining_trait']}", TEXT)
+                if ctx.get("current_situation"):
+                    emit(f"  Situation: {ctx['current_situation']}", TEXT)
+                lines.append(("", MUTED))
+            lines.append(("=" * wrap_chars, PANEL_EDGE))
 
         if not self.llm_debug_entries:
             lines.append(("", MUTED))

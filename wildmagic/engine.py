@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 from collections import deque
+import concurrent.futures
 from dataclasses import dataclass, field
 import math
 import random
 import re
+import time
 from typing import Any
 
 from .models import (
@@ -18,6 +20,7 @@ from .models import (
     MIST,
     OPEN_DOOR,
     POISON_CLOUD,
+    ROAD,
     RUBBLE,
     SLICK_ICE,
     STAIRS_DOWN,
@@ -329,21 +332,167 @@ def scan_for_trade_intent(message: str, reply: str) -> bool:
     return any(keyword in text for keyword in TRADE_KEYWORDS)
 
 
+# ---------------------------------------------------------------------------
+# Road network helpers (module-level — pure math, no engine state)
+# ---------------------------------------------------------------------------
+
+def _on_bresenham(a: tuple[int, int], b: tuple[int, int], p: tuple[int, int]) -> bool:
+    """True if point p lies on the Bresenham line from a to b (inclusive)."""
+    x0, y0 = a
+    x1, y1 = b
+    px, py = p
+    dx, dy = abs(x1 - x0), abs(y1 - y0)
+    sx = 1 if x1 > x0 else -1
+    sy = 1 if y1 > y0 else -1
+    err = dx - dy
+    x, y = x0, y0
+    while True:
+        if (x, y) == (px, py):
+            return True
+        if (x, y) == (x1, y1):
+            return False
+        e2 = 2 * err
+        if e2 > -dy:
+            err -= dy
+            x += sx
+        if e2 < dx:
+            err += dx
+            y += sy
+
+
+# Building dimensions (w, h) keyed by building type name from LLM output.
+_BUILDING_SIZES: dict[str, tuple[int, int]] = {
+    "tavern": (8, 6),
+    "inn": (8, 6),
+    "market": (7, 5),
+    "shop": (7, 5),
+    "shrine": (5, 5),
+    "temple": (6, 5),
+    "home": (4, 4),
+    "house": (4, 4),
+    "smithy": (5, 4),
+    "forge": (5, 4),
+    "barracks": (8, 5),
+    "stable": (6, 4),
+}
+_DEFAULT_BUILDING_SIZE = (5, 4)
+
+# Override stats for NPC roles that should be able to fight back.
+_ROLE_STATS: dict[str, dict[str, int]] = {
+    "guard": {"hp": 18, "attack": 4, "defense": 1},
+    "soldier": {"hp": 20, "attack": 5, "defense": 2},
+    "captain": {"hp": 22, "attack": 5, "defense": 2},
+    "militia": {"hp": 15, "attack": 3, "defense": 1},
+    "mercenary": {"hp": 16, "attack": 4, "defense": 1},
+}
+_DEFAULT_NPC_STATS: dict[str, int] = {"hp": 10, "attack": 1, "defense": 0}
+
+# ---------------------------------------------------------------------------
+# Procedural town context seeds — picked deterministically per zone so the
+# same zone always generates the same town, but different zones feel distinct.
+# ---------------------------------------------------------------------------
+
+_TOWN_LOCATIONS: list[str] = [
+    "at a river crossing that floods each spring",
+    "on the edge of a worked-out mine",
+    "where two old Imperial roads meet",
+    "built into the ruins of something much older",
+    "on the only high ground for miles around",
+    "at the base of a collapsed watchtower",
+    "hidden in a fold of the hills, hard to find from the road",
+    "at the mouth of a steep ravine",
+    "beside a spring that never runs dry even in drought",
+    "in the shadow of a long-dead volcano",
+    "at the edge of a near-impassable marsh",
+    "along a stretch of road known for ambushes",
+    "near a stone circle that the locals won't discuss",
+    "at a crossroads with a history of violence",
+    "on a bluff above a wide, slow-moving river",
+    "where the forest thins and the plain begins",
+    "sheltered in a natural hollow that traps fog",
+    "at the end of a road that used to go further",
+]
+
+_TOWN_DEFINING_TRAITS: list[str] = [
+    "Everyone here owes something to someone else",
+    "The town was founded by deserters who never went home",
+    "People come here to disappear, and most do",
+    "The locals have survived three changes of ruler in ten years",
+    "Something was found here once; people still come looking",
+    "No one asks where you came from or what you left behind",
+    "Every family here has someone buried under the foundations",
+    "The town exists because of one trade, and it is slowly dying",
+    "There is one person here that everyone else defers to, for reasons no one states openly",
+    "The town had a different name before; no one uses it anymore",
+    "Outsiders are welcome for exactly as long as their money lasts",
+    "A pact of some kind holds this community together — ask the wrong questions and you feel it",
+    "The young leave as soon as they can; those who stay have their reasons",
+    "The Empire ignores this place, which is precisely why it survives",
+    "Strange things happen here at certain times of year; the locals call it ordinary",
+    "Everyone here is running from something, and everyone knows it",
+    "The town has a good reputation in the region, built on one lie told consistently for years",
+    "The founding family still runs everything, though the last of them is very old",
+]
+
+_TOWN_SITUATIONS: list[str] = [
+    "A caravan has been stranded here for two weeks and the mood is souring",
+    "Someone important died last month and no one agrees on what comes next",
+    "A new Imperial tax collector arrived and shows no sign of leaving",
+    "A rumor is spreading about something valuable hidden in the hills nearby",
+    "Winter came early and the stores are already running low",
+    "A sickness passed through recently — most recovered, a few didn't, and no one knows why",
+    "An old grudge between two families has resurfaced over something trivial",
+    "A merchant passed through last week with strange news from further east",
+    "Someone has been leaving offerings at the edge of town each night",
+    "A group of refugees arrived and the welcome is wearing thin",
+    "A fire took one of the buildings last month; the cause was never settled",
+    "Imperial patrols have been passing through more frequently than usual",
+    "A traveling performer arrived six days ago and has not moved on",
+    "The well started tasting wrong and no one will say anything definitive about it",
+    "Two residents vanished last month; one body was found, the other wasn't",
+    "An unexpected early thaw has flooded the lower roads; people are stuck here",
+    "A large debt came due recently and everyone is feeling the pressure",
+    "Someone new arrived claiming to own something here, and the paperwork looks real",
+]
+
+_TOWN_GEN_TIMEOUT = 90  # seconds to wait for background LLM town generation before falling back to mock
+
+_TOWN_SETTLEMENT_TYPES: list[tuple[str, int, int]] = [
+    ("hamlet", 2, 3),
+    ("waypost", 2, 4),
+    ("rough camp", 2, 3),
+    ("settlement", 3, 5),
+    ("crossroads town", 4, 6),
+    ("trading post", 3, 5),
+    ("refuge", 3, 5),
+    ("outpost", 2, 4),
+]
+
+
 class GameEngine:
-    def __init__(self, seed: int | None = None, scenario: str = "dungeon") -> None:
+    def __init__(self, seed: int | None = None, scenario: str = "dungeon", provider_name: str | None = None) -> None:
         self.rng = random.Random(seed)
         self.state = GameState(rng_seed=seed, scenario=scenario)
         self._next_entity_number = 1
         self._conducting_lightning = False
         self._npc_perception_message_count = 0
+        # Town generation: background executor + pending futures (not in GameState — not serializable)
+        self._pending_towns: dict[tuple[int, int], concurrent.futures.Future[Any]] = {}
+        self._pending_town_contexts: dict[tuple[int, int], dict] = {}
+        self._pending_town_start_times: dict[tuple[int, int], float] = {}
+        self._town_executor: concurrent.futures.ThreadPoolExecutor | None = None
+        from .wild_magic import make_town_provider
+        self.town_provider = make_town_provider(provider_name)
         if scenario == "test_chamber":
             self._generate_test_chamber()
         elif scenario == "empire_compound":
             self._generate_empire_compound()
         elif scenario == "frontier":
             self._generate_frontier_start()
+            self._maybe_pregenerate_adjacent_towns()
         elif scenario == "town":
             self._generate_town_start()
+            self._maybe_pregenerate_adjacent_towns()
         else:
             self._generate_new_run()
 
@@ -809,8 +958,11 @@ class GameEngine:
         imperial_density = self._imperial_density(zx, zy)
 
         self._scatter_terrain_features(zone_rng)
-        buildings = self._place_zone_buildings(zone_rng, imperial_density)
-        self._populate_zone(zone_rng, buildings, imperial_density)
+        self._populate_zone(zone_rng, [], imperial_density)
+
+        if self._zone_is_road(zx, zy):
+            self._draw_road_through_zone(zx, zy)
+            state.add_message("A dirt road cuts through here, worn flat by countless boots.")
 
         if imperial_density >= 0.7:
             zone_type = "imperial reach"
@@ -976,6 +1128,115 @@ class GameEngine:
                 return x, y
         return None
 
+    def _draw_road_through_zone(self, zx: int, zy: int) -> None:
+        """Stamp ROAD tiles from each road-bearing edge toward the zone center.
+        Skips WALL tiles so buildings placed earlier don't get holes punched in them."""
+        if not self._zone_is_road(zx, zy):
+            return
+        state = self.state
+        edges = self._road_edges(zx, zy)
+        if not edges:
+            return
+        cx, cy = state.width // 2, state.height // 2
+        edge_points: dict[str, tuple[int, int]] = {
+            "north": (state.width // 2, 0),
+            "south": (state.width // 2, state.height - 1),
+            "west": (0, state.height // 2),
+            "east": (state.width - 1, state.height // 2),
+        }
+        for edge in edges:
+            ex, ey = edge_points[edge]
+            # Horizontal leg from entry to cx, then vertical leg to cy.
+            x = ex
+            while x != cx:
+                if self.in_bounds(x, ey) and state.tiles[ey][x] != WALL:
+                    state.tiles[ey][x] = ROAD
+                x += 1 if cx > x else -1
+            y = ey
+            while y != cy:
+                if self.in_bounds(cx, y) and state.tiles[y][cx] != WALL:
+                    state.tiles[y][cx] = ROAD
+                y += 1 if cy > y else -1
+        if self.in_bounds(cx, cy) and state.tiles[cy][cx] != WALL:
+            state.tiles[cy][cx] = ROAD
+
+    def _generate_llm_town(self, zx: int, zy: int, spec: Any) -> str:
+        """Generate an open-zone town from an LLM-produced TownSpec."""
+        state = self.state
+        state.tiles = [[FLOOR for _ in range(state.width)] for _ in range(state.height)]
+        state.visible.clear()
+        state.tile_tags.clear()
+        state.tile_durations.clear()
+
+        zone_rng = random.Random(hash((state.rng_seed, "llm_town", zx, zy)))
+        self._scatter_terrain_features(zone_rng)
+        # Draw road before placing buildings so buildings can overwrite road tiles where they sit.
+        self._draw_road_through_zone(zx, zy)
+
+        # Place buildings from the spec.
+        margin = 3
+        placed: list[Room] = []
+        placed_by_type: dict[str, Room] = {}
+        for building_spec in spec.buildings:
+            btype = building_spec.type.lower().strip()
+            w, h = _BUILDING_SIZES.get(btype, _DEFAULT_BUILDING_SIZE)
+            placed_room: Room | None = None
+            for _ in range(80):
+                x = zone_rng.randint(margin, state.width - w - margin)
+                y = zone_rng.randint(margin, state.height - h - margin)
+                room = Room(x, y, w, h)
+                if any(room.intersects(existing) for existing in placed):
+                    continue
+                placed_room = room
+                break
+            if placed_room is None:
+                continue
+            placed.append(placed_room)
+            self._wall_room_perimeter(placed_room)
+            self._build_common_structure(placed_room, zone_rng)
+            if btype not in placed_by_type:
+                placed_by_type[btype] = placed_room
+
+        # Spawn NPCs.
+        occupied: set[tuple[int, int]] = {(state.player.x, state.player.y)} if state.player_id in state.entities else set()
+        for npc_spec in spec.npcs:
+            btype = (npc_spec.building or "").lower().strip()
+            room = placed_by_type.get(btype)
+            if room is not None:
+                spot: tuple[int, int] | None = None
+                for _ in range(20):
+                    candidate = self._random_open_tile_in_room(room)
+                    if candidate not in occupied:
+                        spot = candidate
+                        break
+            else:
+                spot = self._random_open_ground_tile(zone_rng, occupied)
+            if spot is None:
+                continue
+            occupied.add(spot)
+            role = npc_spec.role.lower().strip()
+            stats = _ROLE_STATS.get(role, _DEFAULT_NPC_STATS)
+            self.spawn_npc(
+                name=npc_spec.name,
+                char="@",
+                x=spot[0],
+                y=spot[1],
+                role=npc_spec.role,
+                backstory=npc_spec.backstory,
+                traits=npc_spec.traits,
+                tags={"npc"},
+                wares=npc_spec.wares,
+                hp=stats["hp"],
+                attack=stats["attack"],
+                defense=stats["defense"],
+                faction="neutral",
+            )
+
+        state.add_message(f"You arrive at {spec.town_name}.")
+        if spec.description:
+            state.add_message(spec.description)
+        return f"town: {spec.town_name}"
+
     def _cross_zone_edge(self, target_x: int, target_y: int) -> bool:
         """Step off the edge of the map to arrive at the corresponding edge of the neighboring zone."""
         state = self.state
@@ -1025,6 +1286,110 @@ class GameEngine:
             zone_type=state.zone_type,
         )
 
+    # ------------------------------------------------------------------
+    # Road network + town distribution
+    # ------------------------------------------------------------------
+
+    def _road_anchor(self, cx: int, cy: int) -> tuple[int, int]:
+        """Deterministic anchor point for grid cell (cx, cy), cell size = 8 zones."""
+        rng = random.Random(hash((self.state.rng_seed, "road_anchor", cx, cy)))
+        return (cx * 8 + rng.randint(2, 5), cy * 8 + rng.randint(2, 5))
+
+    def _zone_is_road(self, zx: int, zy: int) -> bool:
+        """True if (zx, zy) lies on the Bresenham line between any pair of adjacent
+        road-network anchors. Checks the zone's own 3x3 cell neighbourhood so no
+        road segment longer than ~11 tiles can be missed."""
+        cx, cy = math.floor(zx / 8), math.floor(zy / 8)
+        for dcx in range(-1, 2):
+            for dcy in range(-1, 2):
+                a = self._road_anchor(cx + dcx, cy + dcy)
+                for ddx, ddy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+                    b = self._road_anchor(cx + dcx + ddx, cy + dcy + ddy)
+                    if _on_bresenham(a, b, (zx, zy)):
+                        return True
+        return False
+
+    def _road_edges(self, zx: int, zy: int) -> set[str]:
+        """Which edges of zone (zx, zy) carry a road crossing into an adjacent zone."""
+        edges: set[str] = set()
+        if self._zone_is_road(zx, zy - 1):
+            edges.add("north")
+        if self._zone_is_road(zx, zy + 1):
+            edges.add("south")
+        if self._zone_is_road(zx - 1, zy):
+            edges.add("west")
+        if self._zone_is_road(zx + 1, zy):
+            edges.add("east")
+        return edges
+
+    def _zone_should_be_town(self, zx: int, zy: int) -> bool:
+        """Deterministic: ~30% chance on road zones, ~10% elsewhere."""
+        rng = random.Random(hash((self.state.rng_seed, "town_check", zx, zy)))
+        threshold = 0.30 if self._zone_is_road(zx, zy) else 0.10
+        return rng.random() < threshold
+
+    # ------------------------------------------------------------------
+    # Background town pre-generation
+    # ------------------------------------------------------------------
+
+    def _build_town_context(self, zx: int, zy: int) -> dict:
+        """Build a procedurally varied context dict for the town LLM prompt."""
+        rng = random.Random(hash((self.state.rng_seed, "town_ctx", zx, zy)))
+        location = rng.choice(_TOWN_LOCATIONS)
+        defining_trait = rng.choice(_TOWN_DEFINING_TRAITS)
+        current_situation = rng.choice(_TOWN_SITUATIONS)
+        stype, npc_min, npc_max = rng.choice(_TOWN_SETTLEMENT_TYPES)
+        return {
+            "zone": {"x": zx, "y": zy},
+            "world_seed": self.state.rng_seed,
+            "npc_count_range": [npc_min, npc_max],
+            "location": location,
+            "defining_trait": defining_trait,
+            "current_situation": current_situation,
+            "settlement_type": stype,
+        }
+
+    def _maybe_pregenerate_adjacent_towns(self) -> None:
+        """Submit background LLM generation for any adjacent unvisited town zones."""
+        zx, zy = self.state.zone_x, self.state.zone_y
+        for nx, ny in ((zx + 1, zy), (zx - 1, zy), (zx, zy + 1), (zx, zy - 1)):
+            key = (nx, ny)
+            if key in self.state.zones:
+                continue
+            if key in self._pending_towns:
+                continue
+            if not self._zone_should_be_town(nx, ny):
+                continue
+            if self._town_executor is None:
+                self._town_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            ctx = self._build_town_context(nx, ny)
+            self._pending_town_contexts[key] = ctx
+            self._pending_town_start_times[key] = time.monotonic()
+            self._pending_towns[key] = self._town_executor.submit(
+                self.town_provider.generate, nx, ny, ctx
+            )
+
+    def _get_town_spec(self, zx: int, zy: int) -> Any:
+        """Return TownSpec for (zx, zy) — from pending future or generate now. Never blocks >_TOWN_GEN_TIMEOUT."""
+        from .wild_magic import MockTownProvider
+        key = (zx, zy)
+        if self._town_executor is None:
+            self._town_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        if key not in self._pending_towns:
+            ctx = self._build_town_context(zx, zy)
+            self._pending_town_contexts[key] = ctx
+            self._pending_town_start_times[key] = time.monotonic()
+            self._pending_towns[key] = self._town_executor.submit(
+                self.town_provider.generate, zx, zy, ctx
+            )
+        future = self._pending_towns.pop(key)
+        self._pending_town_contexts.pop(key, None)
+        self._pending_town_start_times.pop(key, None)
+        try:
+            return future.result(timeout=_TOWN_GEN_TIMEOUT)
+        except Exception:
+            return MockTownProvider().generate(zx, zy, {})
+
     def _load_or_generate_zone(self, zx: int, zy: int, entry_x: int, entry_y: int) -> None:
         state = self.state
         player = state.entities[state.player_id]
@@ -1040,11 +1405,16 @@ class GameEngine:
             state.zone_type = snapshot.zone_type
         else:
             state.explored = set()
-            state.zone_type = self._generate_open_zone(zx, zy)
+            if self._zone_should_be_town(zx, zy):
+                spec = self._get_town_spec(zx, zy)
+                state.zone_type = self._generate_llm_town(zx, zy, spec)
+            else:
+                state.zone_type = self._generate_open_zone(zx, zy)
         state.entities[player.id] = player
         player.x, player.y = self._find_entry_tile(entry_x, entry_y)
         state.visible.clear()
         self.update_fov()
+        self._maybe_pregenerate_adjacent_towns()
 
     def _find_entry_tile(self, x: int, y: int) -> tuple[int, int]:
         if self.can_occupy(x, y):
@@ -1533,7 +1903,7 @@ class GameEngine:
         target_x = player.x + dx
         target_y = player.y + dy
         if not self.in_bounds(target_x, target_y):
-            if self.state.scenario == "frontier" and self._cross_zone_edge(target_x, target_y):
+            if self.state.scenario in {"frontier", "town"} and self._cross_zone_edge(target_x, target_y):
                 self.finish_player_turn()
                 return True
             self.state.add_message("The dungeon refuses that edge.")
@@ -2195,6 +2565,7 @@ class GameEngine:
             entity.statuses.clear()
             if entity.id == self.state.player_id:
                 self.state.game_over = True
+                self.state.victory = False
                 self.state.add_message("You die. The dungeon keeps your echo.")
             elif entity.kind == "npc":
                 # NPCs have no kill stat, loot table, or victory check of their own --
