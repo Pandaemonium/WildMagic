@@ -11,7 +11,7 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame
 
 from .actions import ActionResult, GameSession
-from .engine import _TOWN_GEN_TIMEOUT
+from .game_data import _TOWN_GEN_TIMEOUT
 from .wild_magic import fetch_ollama_models
 from .wild_magic import SYSTEM_PROMPT, extract_thinking, strip_thinking
 from .models import (

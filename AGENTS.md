@@ -45,6 +45,7 @@ Examples to avoid:
 - `wildmagic/ui.py`: Pygame renderer and input handling.
 - `wildmagic/cli.py`: headless agent-playable interface.
 - `wildmagic/replay.py`: deterministic replay runner.
+- `docs/ARCHITECTURE.md`: full map of every module — what it contains, what it imports, and how the layers fit together. Read this first when orienting to the codebase.
 - `docs/WILD_MAGIC_SCHEMA.md`: current wild-magic operation surface.
 - `docs/AGENT_PLAYTESTING.md`: practical playtesting guide.
 - `docs/EXECUTION_PLAN.md`: staged project plan.
@@ -142,6 +143,8 @@ Keep changes scoped and testable:
 - Make costs visible after casting, not before, except for severe warning behavior explicitly supported by the design.
 - Do not let technical LLM failures consume a turn.
 - Do not let rejected overpowered spells avoid turn cost.
+
+Keep `docs/ARCHITECTURE.md` current. Update it whenever you add a new module, move code between files, rename a significant class, or introduce a new subsystem. The blurb for each file should reflect what actually lives there after your change, not what used to live there.
 
 When adding mechanics, ask: "Can this support ten weird spell prompts, not just one?"
 

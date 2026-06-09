@@ -4,7 +4,8 @@ from dataclasses import dataclass, field
 import shlex
 from typing import Any
 
-from .engine import GameEngine, normalize_id
+from .engine import GameEngine
+from .normalize import normalize_id
 from .wild_magic import (
     DialogueProvider,
     DialogueResolution,

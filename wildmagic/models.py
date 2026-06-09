@@ -326,3 +326,35 @@ class WildMagicOutcome:
     consumed_turn: bool
     technical_failure: bool
     messages: list[str]
+
+
+@dataclass(frozen=True)
+class Room:
+    x: int
+    y: int
+    w: int
+    h: int
+
+    @property
+    def center(self) -> tuple[int, int]:
+        return (self.x + self.w // 2, self.y + self.h // 2)
+
+    def intersects(self, other: "Room") -> bool:
+        return not (
+            self.x + self.w + 1 < other.x
+            or other.x + other.w + 1 < self.x
+            or self.y + self.h + 1 < other.y
+            or other.y + other.h + 1 < self.y
+        )
+
+
+@dataclass
+class ZoneSnapshot:
+    """A cached, persisted record of a previously-visited frontier zone (sans player)."""
+
+    tiles: list[list[str]]
+    tile_tags: dict[str, list[str]]
+    tile_durations: dict[str, int]
+    entities: dict[str, Entity]
+    explored: set[str]
+    zone_type: str
