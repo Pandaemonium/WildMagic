@@ -225,7 +225,7 @@ class GameSession:
                 slot_name = command_argument(original_command, tokens)
                 success = self.engine.unequip_item(slot_name) if slot_name else False
                 if not slot_name:
-                    explicit_messages = ["Unequip what? Specify a slot (weapon, armor, charm) or item name."]
+                    explicit_messages = ["Unequip what? Specify a slot or item name."]
             elif verb in {"cast", "wild"}:
                 action = "cast"
                 spell = command_argument(original_command, tokens)
@@ -468,7 +468,7 @@ def command_help() -> list[str]:
         "Commands: move north/south/east/west, open, descend, ascend, wait, cast <spell>, talk <message>, use <item>, equip <item>, unequip <slot>, drop <item>, pickup, inspect (or inventory), wares (or browse), quit.",
         "Talking: stand next to an NPC and 'talk <what you want to say>' (or 'speak'/'say') to start a conversation - it costs a turn, just like any other action.",
         "Trading: some NPCs deal in goods and gold - 'wares' (or 'browse') lists what they have for trade, a free look. Haggle naturally through 'talk' - if a real offer comes together, you'll get a confirmation prompt to 'accept' (or 'yes') or 'reject' (or 'no') before anything changes hands.",
-        "Equipment: weapons, armor, and charms go in their own slots and add to your attack/defense while worn. Equip with 'equip <item>' (or 'wear'/'wield'); take gear off with 'unequip weapon/armor/charm' (or 'remove <item>').",
+        "Equipment: weapons, armor, clothing, and charms go in their own slots and add to your attack/defense while worn. Equip with 'equip <item>' (or 'wear'/'wield'); take gear off with 'unequip <slot_or_item>' (or 'remove <item>').",
         "Standard spells (deterministic, no wild magic risk): spark, frost, heal, ward, reveal. Type the name directly, e.g. 'frost' -- 'cast frost' instead asks wild magic to improvise one.",
         "Short movement aliases also work: n, s, e, w. Walk into an enemy to attack it.",
     ]

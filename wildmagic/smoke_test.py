@@ -356,6 +356,44 @@ def main() -> None:
     assert "test goblin hits You" in hit_msg2
     assert getattr(hit_msg2, "is_danger", False) is True
 
+    # Test equipment system additions
+    from .items import infer_equipment_slot
+    
+    # 1. Verify player starts with cloak and trousers equipped
+    assert p.equipment.get("chest") == "tattered cloak"
+    assert p.equipment.get("legs") == "woolen trousers"
+    
+    # 2. Verify keyword-based slot matching
+    assert infer_equipment_slot("cloak of constant darkness") == "chest"
+    assert infer_equipment_slot("helmet of iron") == "head"
+    assert infer_equipment_slot("leather trousers") == "legs"
+    assert infer_equipment_slot("glass slippers") == "feet"
+    assert infer_equipment_slot("gauntlets of power") == "hands"
+    assert infer_equipment_slot("lucky ring") == "charm"
+    assert infer_equipment_slot("golden shield") == "armor"
+    assert infer_equipment_slot("greatsword of flames") == "weapon"
+    assert infer_equipment_slot("some random junk") is None
+    
+    # 3. Verify equip/unequip commands
+    combat_session.engine.state.inventory["silk robe"] = 1
+    # Equipping silk robe should stow the tattered cloak in the inventory
+    equip_success = combat_session.engine.equip_item("silk robe")
+    assert equip_success is True
+    assert combat_session.engine.state.player.equipment["chest"] == "silk robe"
+    assert combat_session.engine.state.inventory.get("tattered cloak") == 1
+    
+    # Unequip by slot name
+    unequip_success = combat_session.engine.unequip_item("chest")
+    assert unequip_success is True
+    assert combat_session.engine.state.player.equipment["chest"] is None
+    assert combat_session.engine.state.inventory.get("silk robe") == 1
+    
+    # Equip and unequip by item name
+    combat_session.engine.equip_item("silk robe")
+    assert combat_session.engine.state.player.equipment["chest"] == "silk robe"
+    combat_session.engine.unequip_item("silk robe")
+    assert combat_session.engine.state.player.equipment["chest"] is None
+
     print(f"moved={moved.success}")
     print(f"turn={session.engine.state.turn}")
     print(f"player_hp={session.engine.state.player.hp}")

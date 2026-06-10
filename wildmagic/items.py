@@ -7,6 +7,52 @@ from .models import MIST, Entity
 from .normalize import clamp_int, coerce_list, normalize_id, optional_duration, status_duration
 
 
+def infer_equipment_slot(item_name: str) -> str | None:
+    name_lower = item_name.strip().lower()
+    
+    # Substring weapon checks
+    weapon_subs = ["sword", "blade", "dagger", "axe", "pick", "bow", "staff", "mace", "hammer", "whip", "spear", "rapier", "scythe", "club", "wand"]
+    if any(sub in name_lower for sub in weapon_subs):
+        return "weapon"
+        
+    # Substring head checks
+    head_subs = ["hat", "helmet", "cowl", "crown", "hood", "circlet", "mask", "visor", "helm", "coif"]
+    if any(sub in name_lower for sub in head_subs) or "cap" in name_lower.split():
+        return "head"
+        
+    # Substring feet checks
+    feet_subs = ["boot", "shoe", "slipper", "sabaton", "footwear"]
+    if any(sub in name_lower for sub in feet_subs):
+        return "feet"
+        
+    # Substring legs checks
+    legs_subs = ["trouser", "pant", "legging", "breeches", "greaves", "cuisses", "skirt", "kilt", "hosen"]
+    if any(sub in name_lower for sub in legs_subs):
+        return "legs"
+        
+    # Substring hands checks
+    hands_subs = ["glove", "gauntlet", "mitt", "bracer"]
+    if any(sub in name_lower for sub in hands_subs):
+        return "hands"
+        
+    # Substring chest checks
+    chest_subs = ["cloak", "robe", "tunic", "shirt", "coat", "jacket", "cape", "shroud", "doublet", "jerkin"]
+    if any(sub in name_lower for sub in chest_subs):
+        return "chest"
+        
+    # Substring charm checks
+    charm_subs = ["charm", "trinket", "amulet", "ring", "talisman", "necklace", "locket", "pendant"]
+    if any(sub in name_lower for sub in charm_subs):
+        return "charm"
+        
+    # Substring armor checks
+    armor_subs = ["shield", "buckler", "armor", "armour", "cuirass", "breastplate", "vest", "mail"]
+    if any(sub in name_lower for sub in armor_subs):
+        return "armor"
+        
+    return None
+
+
 class _ItemsMixin:
     """Item/inventory methods mixed into GameEngine."""
 
@@ -186,6 +232,11 @@ class _ItemsMixin:
         "weapon": "weapon", "wielded": "weapon", "hand": "weapon", "sword": "weapon", "blade": "weapon",
         "armor": "armor", "armour": "armor", "body": "armor", "vest": "armor", "shield": "armor",
         "charm": "charm", "trinket": "charm", "amulet": "charm", "ring": "charm",
+        "head": "head", "hat": "head", "helmet": "head", "cowl": "head", "crown": "head", "hood": "head", "circlet": "head", "cap": "head", "mask": "head", "helm": "head",
+        "chest": "chest", "cloak": "chest", "robe": "chest", "tunic": "chest", "shirt": "chest", "cape": "chest",
+        "legs": "legs", "trousers": "legs", "pants": "legs", "leggings": "legs", "breeches": "legs",
+        "feet": "feet", "boots": "feet", "shoes": "feet",
+        "hands": "hands", "gloves": "hands", "gauntlets": "hands",
     }
 
 
@@ -197,10 +248,13 @@ class _ItemsMixin:
             self.state.add_message(f"You don't have any {item_name.strip().lower()}.")
             return False
         spec = EQUIPMENT_SPECS.get(matched.strip().lower())
-        if not spec:
-            self.state.add_message(f"The {matched} isn't something you can wear or wield.")
-            return False
-        slot = str(spec["slot"])
+        if spec:
+            slot = str(spec["slot"])
+        else:
+            slot = infer_equipment_slot(matched)
+            if not slot:
+                self.state.add_message(f"The {matched} isn't something you can wear or wield.")
+                return False
         player = self.state.player
         previous = player.equipment.get(slot)
         self.consume_inventory_item(matched, 1)
@@ -221,6 +275,8 @@ class _ItemsMixin:
         if slot is None:
             matched = self.find_inventory_item(slot_name) or slot_name
             slot = next((s for s, item in player.equipment.items() if item and normalize_id(item) == normalize_id(matched)), None)
+        if slot is None:
+            slot = next((s for s, item in player.equipment.items() if item and normalize_id(slot_name) in normalize_id(item)), None)
         if slot is None or slot not in player.equipment:
             self.state.add_message("That isn't something you have equipped.")
             return False

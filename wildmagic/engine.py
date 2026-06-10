@@ -656,6 +656,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             "player": {
                 "name": player.name,
                 "inventory": dict(sorted(self.state.inventory.items())),
+                "equipment": {slot: item for slot, item in player.equipment.items() if item},
             },
             "scene": {"turn": self.state.turn, "depth": self.state.depth, "scenario": self.state.scenario},
             "exchange": {"player_said": message, "npc_replied": reply},

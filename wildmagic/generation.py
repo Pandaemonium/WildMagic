@@ -223,7 +223,17 @@ class _GenerationMixin:
                     self.set_tile(x, y, FLOOR, tags={trap_kind})
             if self.rng.random() < 0.2:
                 gear_name = self.rng.choice(list(EQUIPMENT_SPECS))
-                glyph = {"weapon": "/", "armor": "[", "charm": "*"}[EQUIPMENT_SPECS[gear_name]["slot"]]
+                slot_glyphs = {
+                    "weapon": "/",
+                    "charm": "*",
+                    "armor": "[",
+                    "head": "[",
+                    "chest": "[",
+                    "legs": "[",
+                    "feet": "[",
+                    "hands": "[",
+                }
+                glyph = slot_glyphs.get(EQUIPMENT_SPECS[gear_name]["slot"], "[")
                 x, y = self._random_open_tile_in_room(room)
                 self.spawn_item(gear_name, glyph, x, y, gear_name)
             self._spawn_props_in_room(room, self.state.depth)
@@ -451,7 +461,7 @@ class _GenerationMixin:
             ),
             traits=["chatty", "shrewd", "easily distracted by anything shiny"],
             tags={"human", "hollowmere_townsfolk"},
-            wares={"trinket": 3, "lockpick": 1, "smoke vial": 2, "gold": 25},
+            wares={"trinket": 3, "lockpick": 1, "smoke vial": 2, "silk robe": 1, "wizards hat": 1, "leather boots": 1, "gold": 25},
             wanted_item="Imperial Campaign Map",
             wanted_qty=1,
             reward_gold=25,

@@ -160,6 +160,13 @@ EQUIPMENT_SPECS: dict[str, dict[str, Any]] = {
     "wooden buckler": {"slot": "armor", "attack": 1, "defense": 1},
     "lucky coin charm": {"slot": "charm", "attack": 1},
     "warding locket": {"slot": "charm", "defense": 1},
+    "tattered cloak": {"slot": "chest", "defense": 0},
+    "woolen trousers": {"slot": "legs", "defense": 0},
+    "wizards hat": {"slot": "head", "defense": 0},
+    "gilded crown": {"slot": "head", "defense": 0},
+    "silk robe": {"slot": "chest", "defense": 0},
+    "leather boots": {"slot": "feet", "defense": 1},
+    "leather gloves": {"slot": "hands", "defense": 0},
 }
 for _gear_name in EQUIPMENT_SPECS:
     ITEM_USE_SPECS[_gear_name.replace(" ", "_")] = {

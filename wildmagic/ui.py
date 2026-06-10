@@ -11,7 +11,8 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame
 
 from .actions import ActionResult, GameSession
-from .game_data import _TOWN_GEN_TIMEOUT
+from .game_data import _TOWN_GEN_TIMEOUT, EQUIPMENT_SPECS
+from .items import infer_equipment_slot
 from .wild_magic import fetch_ollama_models, DEFAULT_MODEL
 from .wild_magic import SYSTEM_PROMPT, extract_thinking, strip_thinking
 from .models import (
@@ -204,6 +205,17 @@ class GameUI:
         self.menu_page: str = "main"       # "main" | "config" | "model"
         self.menu_cursor: int = 0
         self.menu_prev_page: str = "main"  # for back navigation
+
+        self.log_scroll_offset = 0
+        self.log_dragging_scrollbar = False
+        self.log_drag_grab_dy = 0
+        self.log_scrollbar_track_rect: pygame.Rect | None = None
+        self.log_scrollbar_thumb_rect: pygame.Rect | None = None
+        self._log_max_scroll = 0
+
+        self.inventory_pane = 0
+        self.inventory_left_cursor = 0
+        self.inventory_right_cursor = 0
         self.menu_models: list[str] = []   # populated when model page opens
 
         self._load_config()
@@ -293,9 +305,9 @@ class GameUI:
 
         if self.engine.state.pending_trade is not None:
             if event.key in (pygame.K_y, pygame.K_RETURN, pygame.K_KP_ENTER):
-                self.session.execute_command("accept")
+                self.execute_command("accept")
             elif event.key in (pygame.K_n, pygame.K_ESCAPE):
-                self.session.execute_command("reject")
+                self.execute_command("reject")
             return
 
         if event.key == pygame.K_ESCAPE:
@@ -333,27 +345,34 @@ class GameUI:
         _move_dir = _MOVE_KEY_MAP.get(event.key)
         if _move_dir is not None:
             _zone_before = (self.engine.state.zone_x, self.engine.state.zone_y)
-            self.session.execute_command(f"move {_move_dir}")
+            self.execute_command(f"move {_move_dir}")
             if (self.engine.state.zone_x, self.engine.state.zone_y) != _zone_before:
                 pygame.event.clear((pygame.KEYDOWN, pygame.KEYUP))
         elif event.key in {pygame.K_KP5}:
-            self.session.execute_command("wait")
+            self.execute_command("wait")
         elif event.key == pygame.K_GREATER or (event.key == pygame.K_PERIOD and event.mod & pygame.KMOD_SHIFT):
-            self.session.execute_command("descend")
+            self.execute_command("descend")
         elif event.key == pygame.K_LESS or (event.key == pygame.K_COMMA and event.mod & pygame.KMOD_SHIFT):
-            self.session.execute_command("ascend")
+            self.execute_command("ascend")
         elif event.key == pygame.K_PERIOD:
-            self.session.execute_command("wait")
+            self.execute_command("wait")
         elif event.key == pygame.K_o:
-            self.session.execute_command("open")
+            self.execute_command("open")
         elif event.key == pygame.K_g:
-            self.session.execute_command("pickup")
+            self.execute_command("pickup")
         elif event.key == pygame.K_f:
-            self.session.execute_command("spark")
+            self.execute_command("spark")
         elif event.key == pygame.K_q:
             self.menu_active = True
             self.menu_page = "quests"
             self.menu_cursor = 0
+        elif event.key == pygame.K_i:
+            self.menu_active = True
+            self.menu_page = "inventory"
+            self.menu_cursor = 0
+            self.inventory_pane = 0
+            self.inventory_left_cursor = 0
+            self.inventory_right_cursor = 0
         self.provider_label = self.session.provider_label
 
     def handle_mouse(self, event: pygame.event.Event) -> None:
@@ -369,6 +388,20 @@ class GameUI:
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
             self.inspect_tile = None
+            if self.log_scrollbar_thumb_rect and self.log_scrollbar_thumb_rect.collidepoint(event.pos):
+                self.log_dragging_scrollbar = True
+                self.log_drag_grab_dy = event.pos[1] - self.log_scrollbar_thumb_rect.y
+                return
+            if self.log_scrollbar_track_rect and self.log_scrollbar_track_rect.collidepoint(event.pos):
+                thumb = self.log_scrollbar_thumb_rect
+                self.log_drag_grab_dy = thumb.height // 2 if thumb else 0
+                track = self.log_scrollbar_track_rect
+                thumb_height = thumb.height if thumb else 0
+                usable = max(1, track.height - thumb_height)
+                fraction = (event.pos[1] - self.log_drag_grab_dy - track.y) / usable
+                self._log_scroll_to_fraction(fraction)
+                self.log_dragging_scrollbar = True
+                return
             if self.llm_scrollbar_thumb_rect and self.llm_scrollbar_thumb_rect.collidepoint(event.pos):
                 self.llm_dragging_scrollbar = True
                 self.llm_drag_grab_dy = event.pos[1] - self.llm_scrollbar_thumb_rect.y
@@ -425,6 +458,11 @@ class GameUI:
             else:
                 self.dragging_log_selection = False
             return
+        if event.type == pygame.MOUSEMOTION and self.log_dragging_scrollbar:
+            fraction = self._log_scrollbar_fraction_at(event.pos[1])
+            if fraction is not None:
+                self._log_scroll_to_fraction(fraction)
+            return
         if event.type == pygame.MOUSEMOTION and self.llm_dragging_scrollbar:
             fraction = self._llm_scrollbar_fraction_at(event.pos[1])
             if fraction is not None:
@@ -441,6 +479,9 @@ class GameUI:
                 self.log_selection_focus = index
             return
         if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            if self.log_dragging_scrollbar:
+                self.log_dragging_scrollbar = False
+                return
             if self.llm_dragging_scrollbar:
                 self.llm_dragging_scrollbar = False
                 return
@@ -483,6 +524,52 @@ class GameUI:
         return []
 
     def _handle_menu_key(self, event: pygame.event.Event) -> None:
+        if self.menu_page == "inventory":
+            inventory_items = sorted([item for item in self.engine.state.inventory.keys() if item != "gold"])
+            slots = ["weapon", "armor", "charm", "head", "chest", "legs", "feet", "hands"]
+            
+            if event.key == pygame.K_ESCAPE or event.key == pygame.K_i:
+                self._close_menu()
+                return
+            elif event.key in (pygame.K_LEFT, pygame.K_h, pygame.K_KP4):
+                self.inventory_pane = 0
+                return
+            elif event.key in (pygame.K_RIGHT, pygame.K_l, pygame.K_KP6):
+                self.inventory_pane = 1
+                return
+            elif event.key in (pygame.K_UP, pygame.K_k, pygame.K_KP8, pygame.K_w):
+                if self.inventory_pane == 0:
+                    self.inventory_left_cursor = (self.inventory_left_cursor - 1) % len(slots)
+                else:
+                    if inventory_items:
+                        self.inventory_right_cursor = (self.inventory_right_cursor - 1) % len(inventory_items)
+                return
+            elif event.key in (pygame.K_DOWN, pygame.K_j, pygame.K_KP2, pygame.K_s):
+                if self.inventory_pane == 0:
+                    self.inventory_left_cursor = (self.inventory_left_cursor + 1) % len(slots)
+                else:
+                    if inventory_items:
+                        self.inventory_right_cursor = (self.inventory_right_cursor + 1) % len(inventory_items)
+                return
+            elif event.key in (pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_e, pygame.K_u):
+                if self.inventory_pane == 0:
+                    slot = slots[self.inventory_left_cursor]
+                    if self.engine.state.player.equipment.get(slot):
+                        self.execute_command(f"unequip {slot}")
+                else:
+                    if inventory_items:
+                        item_name = inventory_items[self.inventory_right_cursor]
+                        if event.key == pygame.K_u:
+                            self.execute_command(f"unequip {item_name}")
+                        else:
+                            self.execute_command(f"equip {item_name}")
+                new_inventory_items = sorted([item for item in self.engine.state.inventory.keys() if item != "gold"])
+                if new_inventory_items:
+                    self.inventory_right_cursor = min(self.inventory_right_cursor, len(new_inventory_items) - 1)
+                else:
+                    self.inventory_right_cursor = 0
+                return
+
         if self.menu_page == "quests":
             n = len(self.engine.state.quests)
             if n == 0:
@@ -573,6 +660,9 @@ class GameUI:
             self._save_config()
             self.menu_page = "config"
             self.menu_cursor = 0
+    def execute_command(self, command: str) -> None:
+        self.log_scroll_offset = 0
+        self.session.execute_command(command)
 
     # ------------------------------------------------------------------
 
@@ -580,6 +670,7 @@ class GameUI:
         self.session = GameSession(scenario="town")
         self.engine = self.session.engine
         self.input_text = ""
+        self.log_scroll_offset = 0
         self.input_active = True
         self.input_mode = "spell"
         self.mode_label_rects = []
@@ -681,8 +772,9 @@ class GameUI:
             return
         self.input_text = ""
         self.input_active = True
+        self.log_scroll_offset = 0
         if self.input_mode == "talk":
-            self.session.execute_command(f"talk {text}")
+            self.execute_command(f"talk {text}")
             return
         result = self.session.cast_wild(text)
         if result.wild_magic:
@@ -842,6 +934,111 @@ class GameUI:
         overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
         overlay.fill((0, 0, 0, 170))
         self.screen.blit(overlay, (0, 0))
+
+        if self.menu_page == "inventory":
+            box_w = 700
+            box_h = 450
+            bx = (WINDOW_WIDTH - box_w) // 2
+            by = (WINDOW_HEIGHT - box_h) // 2
+            padding = 24
+
+            pygame.draw.rect(self.screen, (28, 30, 38), (bx, by, box_w, box_h), border_radius=6)
+            pygame.draw.rect(self.screen, PANEL_EDGE, (bx, by, box_w, box_h), 1, border_radius=6)
+
+            title_surf = self.ui_font.render("EQUIPMENT & INVENTORY", True, ACCENT)
+            self.screen.blit(title_surf, (bx + padding, by + padding))
+
+            gold_amount = self.engine.state.inventory.get("gold", 0)
+            gold_surf = self.ui_font.render(f"Gold: {gold_amount}", True, GOLD)
+            self.screen.blit(gold_surf, (bx + box_w - padding - gold_surf.get_width(), by + padding))
+
+            pygame.draw.line(self.screen, PANEL_EDGE,
+                             (bx + padding, by + padding + 22),
+                             (bx + box_w - padding, by + padding + 22), 1)
+
+            left_w = 300
+            pane_y = by + padding + 36
+            list_h = box_h - (padding * 2 + 36 + 24)
+            row_h = 28
+
+            player = self.engine.state.player
+            slots = ["weapon", "armor", "charm", "head", "chest", "legs", "feet", "hands"]
+
+            left_header = self.ui_font.render("Equipped Gear", True, MUTED)
+            self.screen.blit(left_header, (bx + padding, pane_y))
+            pane_y_list = pane_y + 24
+
+            for idx, slot in enumerate(slots):
+                qy = pane_y_list + idx * row_h
+                is_selected = (self.inventory_pane == 0) and (idx == self.inventory_left_cursor)
+
+                if is_selected:
+                    pygame.draw.rect(self.screen, (50, 55, 70),
+                                     (bx + padding - 4, qy - 2, left_w, row_h - 4), border_radius=4)
+
+                item = player.equipment.get(slot)
+                item_display = f"{item}" if item else "(empty)"
+                display_text = f"{slot:<7} : {item_display}"
+
+                if item:
+                    color = GOLD if is_selected else TEXT
+                else:
+                    color = ACCENT if is_selected else MUTED
+
+                q_surf = self.ui_font.render(display_text, True, color)
+                self.screen.blit(q_surf, (bx + padding, qy))
+
+            pygame.draw.line(self.screen, PANEL_EDGE,
+                             (bx + padding + left_w + 10, pane_y),
+                             (bx + padding + left_w + 10, pane_y + list_h), 1)
+
+            rx = bx + padding + left_w + 24
+            right_header = self.ui_font.render("Carried Items", True, MUTED)
+            self.screen.blit(right_header, (rx, pane_y))
+            pane_y_list = pane_y + 24
+
+            inventory_items = sorted([item for item in self.engine.state.inventory.keys() if item != "gold"])
+
+            if not inventory_items:
+                empty_surf = self.ui_font.render("No items carried.", True, MUTED)
+                self.screen.blit(empty_surf, (rx, pane_y_list))
+            else:
+                max_visible = (list_h - 24) // row_h
+                start_right_idx = 0
+                if len(inventory_items) > max_visible:
+                    if self.inventory_right_cursor >= max_visible:
+                        start_right_idx = self.inventory_right_cursor - max_visible + 1
+
+                for idx in range(min(len(inventory_items), max_visible)):
+                    item_idx = start_right_idx + idx
+                    if item_idx >= len(inventory_items):
+                        break
+                    item_name = inventory_items[item_idx]
+                    qty = self.engine.state.inventory.get(item_name, 0)
+                    qy = pane_y_list + idx * row_h
+                    is_selected = (self.inventory_pane == 1) and (item_idx == self.inventory_right_cursor)
+
+                    if is_selected:
+                        pygame.draw.rect(self.screen, (50, 55, 70),
+                                         (rx - 4, qy - 2, box_w - padding * 2 - left_w - 30, row_h - 4), border_radius=4)
+
+                    display_text = f"{item_name} x{qty}"
+                    spec = EQUIPMENT_SPECS.get(item_name.strip().lower())
+                    is_wearable = spec is not None or (infer_equipment_slot(item_name) is not None)
+
+                    if is_selected:
+                        color = GOLD
+                    elif is_wearable:
+                        color = (130, 220, 150)
+                    else:
+                        color = TEXT
+
+                    item_surf = self.ui_font.render(display_text, True, color)
+                    self.screen.blit(item_surf, (rx, qy))
+
+            hint_surf = self.small_font.render("◄► Switch Pane  •  ▲▼ Select  •  Enter/E Equip  •  Enter/U Unequip  •  Esc Close", True, MUTED)
+            self.screen.blit(hint_surf, (bx + padding, by + box_h - 22))
+            return
 
         if self.menu_page == "quests":
             # Draw Quest Log Layout
@@ -1236,27 +1433,41 @@ class GameUI:
 
     def draw_log(self, x: int, y: int, height: int) -> None:
         self.log_line_rects = []
-        self.log_area = pygame.Rect(x, y, PANEL_WIDTH - 40, height)
+        scrollbar_width = 10
+        self.log_area = pygame.Rect(x, y, PANEL_WIDTH - 40 - scrollbar_width - 2, height)
         pygame.draw.line(self.screen, PANEL_EDGE, (x, y - 8), (WINDOW_WIDTH - 20, y - 8), 1)
         line_y = y
         lines: list[tuple[str, bool, bool]] = []
         line_height = self.small_font.get_linesize() + 2
         max_lines = max(1, height // line_height)
-        for message in self.engine.state.messages[-40:]:
+        for message in self.engine.state.messages[-1000:]:
             is_prompt = message.startswith(">") or message.startswith("*>")
             is_danger = is_player_damage_message(message)
-            lines.extend((line, is_prompt, is_danger) for line in wrap_text(message, 45))
-        visible_lines = lines[-max_lines:]
+            lines.extend((line, is_prompt, is_danger) for line in wrap_text(message, 42))
+
+        total_lines = len(lines)
+        self._log_max_scroll = max(0, total_lines - max_lines)
+        self.log_scroll_offset = max(0, min(self.log_scroll_offset, self._log_max_scroll))
+
+        start_idx = max(0, total_lines - max_lines - self.log_scroll_offset)
+        end_idx = max(0, total_lines - self.log_scroll_offset)
+        if total_lines <= max_lines:
+            start_idx = 0
+            end_idx = total_lines
+
+        visible_lines = lines[start_idx:end_idx]
         selected_indexes = self.selected_log_indexes(len(visible_lines))
         for index, (line, is_prompt, is_danger) in enumerate(visible_lines):
             color = MUTED if is_prompt else (DANGER if is_danger else TEXT)
-            rect = pygame.Rect(x - 4, line_y - 1, PANEL_WIDTH - 32, line_height)
+            rect = pygame.Rect(x - 4, line_y - 1, PANEL_WIDTH - 32 - scrollbar_width - 2, line_height)
             if index in selected_indexes:
                 pygame.draw.rect(self.screen, SELECTED, rect, border_radius=3)
             line_y = self.draw_text(line, x, line_y, self.small_font, color)
             self.log_line_rects.append((rect, line))
             if line_y > y + height:
                 break
+
+        self.draw_log_scrollbar(x + PANEL_WIDTH - 40 - scrollbar_width, y, scrollbar_width, height, total_lines, max_lines)
 
     def selected_log_indexes(self, visible_line_count: int) -> set[int]:
         if self.log_selection_anchor is None or self.log_selection_focus is None:
@@ -1474,6 +1685,39 @@ class GameUI:
         self.llm_scrollbar_track_rect = track
         self.llm_scrollbar_thumb_rect = thumb
 
+    def draw_log_scrollbar(self, x: int, y: int, width: int, height: int, total_lines: int, visible_lines: int) -> None:
+        track = pygame.Rect(x, y, width, height)
+        pygame.draw.rect(self.screen, (20, 22, 27), track, border_radius=4)
+        if total_lines <= visible_lines or self._log_max_scroll <= 0:
+            self.log_scrollbar_track_rect = None
+            self.log_scrollbar_thumb_rect = None
+            return
+        thumb_height = max(28, int(height * (visible_lines / total_lines)))
+        usable = max(1, height - thumb_height)
+        thumb_y = y + usable - int(usable * (self.log_scroll_offset / self._log_max_scroll))
+        thumb = pygame.Rect(x, thumb_y, width, thumb_height)
+        thumb_color = ACCENT if self.log_dragging_scrollbar else PANEL_EDGE
+        pygame.draw.rect(self.screen, thumb_color, thumb, border_radius=4)
+        self.log_scrollbar_track_rect = track
+        self.log_scrollbar_thumb_rect = thumb
+
+    def _log_scroll_to_fraction(self, fraction: float) -> None:
+        if self._log_max_scroll <= 0:
+            return
+        fraction = max(0.0, min(1.0, fraction))
+        self.log_scroll_offset = int(round((1.0 - fraction) * self._log_max_scroll))
+
+    def _log_scrollbar_fraction_at(self, mouse_y: int) -> float | None:
+        track = self.log_scrollbar_track_rect
+        thumb = self.log_scrollbar_thumb_rect
+        if track is None or thumb is None:
+            return None
+        usable = track.height - thumb.height
+        if usable <= 0:
+            return None
+        target_thumb_y = mouse_y - self.log_drag_grab_dy
+        return (target_thumb_y - track.y) / usable
+
     def _build_llm_lines(self, wrap_chars: int) -> list[tuple[str, tuple[int, int, int]]]:
         lines: list[tuple[str, tuple[int, int, int]]] = []
 
@@ -1543,11 +1787,13 @@ class GameUI:
 
     def handle_mouse_wheel(self, event: pygame.event.Event) -> None:
         pos = pygame.mouse.get_pos()
-        if not self.llm_content_rect.collidepoint(pos):
-            return
-        self.llm_scroll_offset -= event.y * 3
-        self.llm_scroll_offset = max(0, min(self.llm_scroll_offset, self._llm_max_scroll))
-        self.llm_autoscroll = self._llm_max_scroll > 0 and self.llm_scroll_offset >= self._llm_max_scroll
+        if self.llm_content_rect.collidepoint(pos):
+            self.llm_scroll_offset -= event.y * 3
+            self.llm_scroll_offset = max(0, min(self.llm_scroll_offset, self._llm_max_scroll))
+            self.llm_autoscroll = self._llm_max_scroll > 0 and self.llm_scroll_offset >= self._llm_max_scroll
+        elif self.log_area.collidepoint(pos):
+            self.log_scroll_offset += event.y * 3
+            self.log_scroll_offset = max(0, min(self.log_scroll_offset, self._log_max_scroll))
 
     def _llm_scroll_to_fraction(self, fraction: float) -> None:
         if self._llm_max_scroll <= 0:
