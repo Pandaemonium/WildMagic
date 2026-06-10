@@ -321,7 +321,10 @@ class GameSession:
             return False, True, wild_magic_record, context
 
         outcome = self.engine.apply_wild_magic_resolution(resolution.data)
-        return outcome.consumed_turn, False, wild_magic_record, context
+        if outcome.technical_failure:
+            wild_magic_record["technical_failure"] = True
+            wild_magic_record["error"] = "; ".join(outcome.messages)
+        return outcome.consumed_turn, outcome.technical_failure, wild_magic_record, context
 
     def _talk(self, message: str) -> tuple[bool, bool, dict[str, Any] | None]:
         message = message.strip()

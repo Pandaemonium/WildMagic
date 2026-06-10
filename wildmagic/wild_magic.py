@@ -33,46 +33,37 @@ from .llm_client import (
 from .llm_resolver import _write_jsonl_audit, should_retry_resolution, retry_context
 from .models import MECHANICAL_STATUSES, TILE_ALIASES
 from .prompts import SYSTEM_PROMPT, DIALOGUE_SYSTEM_PROMPT, TRADE_SYSTEM_PROMPT, TOWN_SYSTEM_PROMPT
+from .spell_contract import (
+    SPELL_RESPONSE_JSON_SCHEMA,
+    STATUS_FLAVOR_ALIASES as _STATUS_FLAVOR_ALIASES,
+    SUPPORTED_COSTS,
+    SUPPORTED_EFFECTS,
+    validate_resolution,
+)
 
 
+DEFAULT_MODEL = "qwen3.5:9b-q4_K_M"
 
 
-
-SUPPORTED_EFFECTS = {
-    "damage",
-    "area_damage",
-    "area_status",
-    "heal",
-    "restore_mana",
-    "teleport",
-    "push",
-    "pull",
-    "create_tile",
-    "set_tile",
-    "create_tiles",
-    "add_status",
-    "remove_status",
-    "summon",
-    "spawn_item",
-    "conjure_item",
-    "conjure_creature",
-    "transform_item",
-    "modify_inventory",
-    "transform_entity",
-    "change_faction",
-    "add_tag",
-    "remove_tag",
-    "add_resistance",
-    "add_weakness",
-    "set_flag",
-    "schedule_event",
-    "create_trigger",
-    "add_curse",
-    "message",
-}
+def get_wild_magic_model() -> str:
+    return os.environ.get("WILDMAGIC_MODEL") or DEFAULT_MODEL
 
 
-SUPPORTED_COSTS = {"mana", "health", "hp", "max_health", "max_mana", "item", "status", "curse"}
+def get_dialogue_model() -> str:
+    return os.environ.get("WILDMAGIC_DIALOGUE_MODEL") or os.environ.get("WILDMAGIC_MODEL") or DEFAULT_MODEL
+
+
+def get_trade_model() -> str:
+    return (
+        os.environ.get("WILDMAGIC_TRADE_MODEL")
+        or os.environ.get("WILDMAGIC_DIALOGUE_MODEL")
+        or os.environ.get("WILDMAGIC_MODEL")
+        or DEFAULT_MODEL
+    )
+
+
+def get_town_model() -> str:
+    return os.environ.get("WILDMAGIC_TOWN_MODEL") or os.environ.get("WILDMAGIC_MODEL") or DEFAULT_MODEL
 
 
 @dataclass
@@ -101,7 +92,7 @@ class OllamaWildMagicProvider:
         base_url: str | None = None,
         timeout_seconds: float | None = None,
     ) -> None:
-        self.model = model or os.environ.get("WILDMAGIC_MODEL", "qwen3.5:9b-q4_K_M")
+        self.model = model or get_wild_magic_model()
         self.base_url = normalize_ollama_url(base_url or os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
         self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds()
 
@@ -582,11 +573,7 @@ class OllamaDialogueProvider:
         base_url: str | None = None,
         timeout_seconds: float | None = None,
     ) -> None:
-        self.model = (
-            model
-            or os.environ.get("WILDMAGIC_DIALOGUE_MODEL")
-            or os.environ.get("WILDMAGIC_MODEL", "qwen3.5:9b-q4_K_M")
-        )
+        self.model = model or get_dialogue_model()
         self.base_url = normalize_ollama_url(base_url or os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
         self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds()
 
@@ -842,18 +829,13 @@ class OllamaTradeProvider:
         base_url: str | None = None,
         timeout_seconds: float | None = None,
     ) -> None:
-        self.model = (
-            model
-            or os.environ.get("WILDMAGIC_TRADE_MODEL")
-            or os.environ.get("WILDMAGIC_DIALOGUE_MODEL")
-            or os.environ.get("WILDMAGIC_MODEL", "qwen3.5:9b-q4_K_M")
-        )
+        self.model = model or get_trade_model()
         self.base_url = normalize_ollama_url(base_url or os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
         self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds()
 
     def propose(self, context: dict[str, Any]) -> str:
         payload = {
-            "model": os.environ.get("WILDMAGIC_TRADE_MODEL") or os.environ.get("WILDMAGIC_MODEL") or self.model,
+            "model": os.environ.get("WILDMAGIC_TRADE_MODEL") or os.environ.get("WILDMAGIC_DIALOGUE_MODEL") or os.environ.get("WILDMAGIC_MODEL") or self.model,
             "stream": False,
             "think": ollama_thinking_enabled(),
             "messages": [
@@ -1180,80 +1162,6 @@ def parse_resolution_json(raw: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise TypeError("wild magic response was not a JSON object")
     return _normalize_resolution(parsed)
-
-
-_STATUS_FLAVOR_ALIASES: dict[str, str] = {
-    # frozen synonyms
-    "petrified": "frozen", "stone": "frozen", "crystallized": "frozen",
-    "paralyzed": "frozen", "paralysed": "frozen", "iced": "frozen",
-    "glaciated": "frozen", "encased": "frozen",
-    # stunned synonyms
-    "dazed": "stunned", "staggered": "stunned", "concussed": "stunned",
-    "knocked_out": "stunned", "knocked_back": "stunned", "disoriented": "stunned",
-    "dazzled": "stunned",
-    # rooted synonyms
-    "immobilized": "rooted", "pinned": "rooted", "anchored": "rooted",
-    "grounded": "rooted", "earthbound": "rooted", "trapped": "rooted",
-    # webbed synonyms
-    "entangled": "webbed", "snared": "webbed", "ensnared": "webbed",
-    "bound": "webbed", "cocooned": "webbed", "wrapped": "webbed",
-    "tangled": "webbed",
-    # burning synonyms
-    "aflame": "burning", "alight": "burning", "on_fire": "burning",
-    "ignited": "burning", "flaming": "burning", "ablaze": "burning",
-    "smoldering": "burning",
-    # poisoned synonyms
-    "diseased": "poisoned", "infected": "poisoned", "plagued": "poisoned",
-    "venomous": "poisoned", "toxic": "poisoned", "envenomed": "poisoned",
-    "tainted": "poisoned", "corrupted": "poisoned", "corroded": "poisoned",
-    "rusted": "poisoned", "rusting": "poisoned", "decaying": "poisoned",
-    "rotting": "poisoned", "withering": "poisoned",
-    # bleeding synonyms
-    "lacerated": "bleeding", "wounded": "bleeding", "cut": "bleeding",
-    "hemorrhaging": "bleeding", "bloodied": "bleeding",
-    # slowed synonyms
-    "sluggish": "slowed", "lethargic": "slowed", "lagging": "slowed",
-    "encumbered": "slowed", "weighed_down": "slowed", "dragging": "slowed",
-    # hasted synonyms
-    "hastened": "hasted", "swift": "hasted", "quickened": "hasted",
-    "accelerated": "hasted", "blurred": "hasted",
-    # invisible synonyms
-    "cloaked": "invisible", "hidden": "invisible", "shrouded": "invisible",
-    "shadowed": "invisible", "veiled": "invisible", "ethereal": "invisible",
-    "ghostly": "invisible", "transparent": "invisible",
-    # confused synonyms
-    "deluded": "confused", "disoriented": "confused", "maddened": "confused",
-    "crazed": "confused", "muddled": "confused", "lost": "confused",
-    "bewildered": "confused", "blind": "confused", "blinded": "confused",
-    "sightless": "confused", "unseeing": "confused",
-    # frightened synonyms
-    "panicked": "frightened", "terrified": "frightened", "afraid": "frightened",
-    "scared": "frightened", "fleeing": "frightened", "cowering": "frightened",
-    "horrified": "frightened",
-    # marked synonyms
-    "doomed": "marked", "condemned": "marked", "targeted": "marked",
-    "branded": "marked", "cursed_mark": "marked", "hexed": "marked",
-    # cursed synonyms
-    "hexed_deep": "cursed", "afflicted": "cursed", "jinxed_deep": "cursed",
-    "damned": "cursed",
-    # berserk synonyms
-    "enraged": "berserk", "frenzied": "berserk", "frantic": "berserk",
-    "wrathful": "berserk", "bloodlusted": "berserk", "feral": "berserk",
-    # empowered synonyms
-    "strengthened": "empowered", "supercharged": "empowered", "buffed": "empowered",
-    "fortified": "empowered", "charged": "empowered", "bolstered": "empowered",
-    # warded synonyms
-    "protected": "warded", "shielded": "warded", "guarded": "warded",
-    "defended": "warded",
-    # regenerating synonyms
-    "healing": "regenerating", "mending": "regenerating", "recovering": "regenerating",
-    "recuperating": "regenerating", "restored": "regenerating",
-    # silenced synonyms
-    "muted": "silenced", "gagged": "silenced", "voiceless": "silenced",
-    # revealed synonyms
-    "exposed": "revealed", "uncloaked": "revealed", "illuminated": "revealed",
-    "highlighted": "revealed",
-}
 
 
 _ELEMENT_DAMAGE_ALIASES: dict[str, str] = {
@@ -1981,62 +1889,6 @@ def _flatten_nested_effect(effect: dict[str, Any]) -> dict[str, Any]:
     return effect
 
 
-def validate_resolution(data: dict[str, Any]) -> str | None:
-    if "accepted" in data and not isinstance(data["accepted"], bool):
-        return "accepted must be a boolean"
-    if data.get("accepted", True) is False:
-        if not str(data.get("rejected_reason") or "").strip():
-            return "rejected spells need a rejected_reason"
-        return None
-    effects = data.get("effects", [])
-    costs = data.get("costs", [])
-    if not isinstance(effects, list):
-        return "effects must be a list"
-    if not isinstance(costs, list):
-        return "costs must be a list"
-    if not effects:
-        return "accepted spells must have at least one effect"
-    if len(effects) > 12:
-        return "effects must contain at most 12 entries"
-    if len(costs) > 8:
-        return "costs must contain at most 8 entries"
-    for index, effect in enumerate(effects):
-        if not isinstance(effect, dict):
-            return f"effect {index} must be an object"
-        effect_type = str(effect.get("type") or "").lower()
-        if effect_type not in SUPPORTED_EFFECTS:
-            return f"unsupported effect type: {effect_type or '(missing)'}"
-        if effect_type in {"create_tiles", "area_damage", "area_status"} and "radius" in effect:
-            try:
-                int(effect["radius"])
-            except (TypeError, ValueError):
-                return f"{effect_type} radius must be an integer"
-        if effect_type == "conjure_creature" and "count" in effect:
-            try:
-                count = int(effect["count"])
-            except (TypeError, ValueError):
-                return "conjure_creature count must be an integer"
-            if count < 1 or count > 12:
-                return "conjure_creature count must be between 1 and 12"
-        if effect_type == "conjure_item" and "count" in effect:
-            try:
-                count = int(effect["count"])
-            except (TypeError, ValueError):
-                return "conjure_item count must be an integer"
-            if count < 1 or count > 20:
-                return "conjure_item count must be between 1 and 20"
-        if effect_type == "create_trigger":
-            trigger_effects = effect.get("effects")
-            if not isinstance(trigger_effects, list) or not trigger_effects:
-                return "create_trigger effects must be a non-empty list"
-    for index, cost in enumerate(costs):
-        if not isinstance(cost, dict):
-            return f"cost {index} must be an object"
-        cost_type = str(cost.get("type") or "").lower()
-        if cost_type not in SUPPORTED_COSTS:
-            return f"unsupported cost type: {cost_type or '(missing)'}"
-    return None
-
 
 def _nearest_enemy_id(context: dict[str, Any]) -> str | None:
     player_position = context["player"]["position"]
@@ -2173,11 +2025,7 @@ class OllamaTownProvider:
         base_url: str | None = None,
         timeout_seconds: float | None = None,
     ) -> None:
-        self.model = (
-            model
-            or os.environ.get("WILDMAGIC_TOWN_MODEL")
-            or os.environ.get("WILDMAGIC_MODEL", "qwen3.5:9b-q4_K_M")
-        )
+        self.model = model or get_town_model()
         self.base_url = normalize_ollama_url(base_url or os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
         self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds()
 

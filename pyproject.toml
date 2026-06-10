@@ -1,0 +1,14 @@
+[project]
+name = "wildmagic"
+version = "0.1.0"
+description = "A graphical ASCII roguelike about wild magic"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pygame>=2.6.1",
+    "python-dotenv>=1.0.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"

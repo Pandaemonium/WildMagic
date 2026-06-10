@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import math
 from typing import Any
 
@@ -29,6 +30,7 @@ from .normalize import (
     sanitize_name,
     tile_from_name,
 )
+from .spell_contract import STATUS_FLAVOR_ALIASES, validate_resolution
 from .templates import creature_template, item_template
 
 
@@ -40,6 +42,12 @@ class _EffectsMixin:
         if self.state.game_over:
             return WildMagicOutcome(False, False, ["The dead do not cast."])
 
+        validation_error = validate_resolution(resolution)
+        if validation_error:
+            message = f"Wild magic failed validation: {validation_error}"
+            self.state.add_message(message)
+            return WildMagicOutcome(False, True, [message])
+
         accepted = bool(resolution.get("accepted", True))
         outcome_text = str(resolution.get("outcome_text") or resolution.get("outcome") or resolution.get("message") or "").strip()
         if not accepted:
@@ -49,32 +57,45 @@ class _EffectsMixin:
             self.finish_player_turn()
             return WildMagicOutcome(True, False, [reason])
 
-        if outcome_text:
-            self.state.add_message(outcome_text)
-            messages.append(outcome_text)
+        snapshot = copy.deepcopy(self.state)
+        try:
+            if outcome_text:
+                self.state.add_message(outcome_text)
+                messages.append(outcome_text)
 
-        for message in self._fire_triggers("on_next_spell", {"target": self.state.player, "source": self.state.player}):
-            messages.append(message)
+            for message in self._fire_triggers("on_next_spell", {"target": self.state.player, "source": self.state.player}):
+                messages.append(message)
 
-        for effect in coerce_list(resolution.get("effects")):
-            for message in self._apply_effect(effect):
+            for effect in coerce_list(resolution.get("effects")):
+                for message in self._apply_effect(effect):
+                    self.state.add_message(message)
+                    messages.append(message)
+
+            for cost in coerce_list(resolution.get("costs")):
+                message = self._apply_cost(cost)
+                if message:
+                    self.state.add_message(message)
+                    messages.append(message)
+
+            if not messages:
+                message = "The spell answers with a small, embarrassed pop."
                 self.state.add_message(message)
                 messages.append(message)
 
-        for cost in coerce_list(resolution.get("costs")):
-            message = self._apply_cost(cost)
-            if message:
+            self.state.stats.spells_cast += 1
+            self.finish_player_turn()
+            state_errors = self.validate_state()
+            if state_errors:
+                self.state = snapshot
+                message = f"Wild magic failed state validation: {state_errors[0]}"
                 self.state.add_message(message)
-                messages.append(message)
-
-        if not messages:
-            message = "The spell answers with a small, embarrassed pop."
+                return WildMagicOutcome(False, True, [message])
+            return WildMagicOutcome(True, False, messages)
+        except Exception as exc:
+            self.state = snapshot
+            message = f"Wild magic failed during application: {exc}"
             self.state.add_message(message)
-            messages.append(message)
-
-        self.state.stats.spells_cast += 1
-        self.finish_player_turn()
-        return WildMagicOutcome(True, False, messages)
+            return WildMagicOutcome(False, True, [message])
 
     def _apply_cost(self, cost: dict[str, Any]) -> str | None:
         if not isinstance(cost, dict):
@@ -126,11 +147,9 @@ class _EffectsMixin:
         if cost_type == "status":
             raw_status = str(cost.get("status") or cost.get("id") or "strained")
             status = normalize_id(raw_status)
-            # Alias flavor names to canonical
-            from .wild_magic import _STATUS_FLAVOR_ALIASES
             display_name = str(cost.get("display_name") or "").strip()
             if status not in MECHANICAL_STATUSES:
-                canonical = _STATUS_FLAVOR_ALIASES.get(status)
+                canonical = STATUS_FLAVOR_ALIASES.get(status)
                 if canonical:
                     if not display_name:
                         display_name = status.replace("_", " ")
@@ -202,8 +221,7 @@ class _EffectsMixin:
             affects = normalize_id(str(effect.get("affects") or "enemies"))
             include_player = bool(effect.get("include_player", False))
             if status not in MECHANICAL_STATUSES:
-                from .wild_magic import _STATUS_FLAVOR_ALIASES
-                canonical = _STATUS_FLAVOR_ALIASES.get(status)
+                canonical = STATUS_FLAVOR_ALIASES.get(status)
                 if not canonical:
                     return []
                 status = canonical
@@ -333,8 +351,7 @@ class _EffectsMixin:
             duration = effect.get("duration", 3)
             dur_val: int | str = "permanent" if duration == "permanent" else clamp_int(duration, 1, 99)
             if status not in MECHANICAL_STATUSES:
-                from .wild_magic import _STATUS_FLAVOR_ALIASES
-                canonical = _STATUS_FLAVOR_ALIASES.get(status)
+                canonical = STATUS_FLAVOR_ALIASES.get(status)
                 if not canonical:
                     return []
                 status = canonical

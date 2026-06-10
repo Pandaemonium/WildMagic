@@ -47,6 +47,7 @@ engine.py contains only the infrastructure that everything else depends on:
 - `GameState` — the serialisable game world (tiles, entities, inventory, turn counter, flags, etc.)
 - `GameEngine.__init__` — seeds RNG, builds initial state, dispatches to scenario generators
 - Utility queries: `in_bounds`, `tile_at`, `tile_key`, `is_visible`, `can_occupy`, `distance`, `entities_at`, `blocking_entity_at`, `living_enemies`, `is_hostile_to`
+- State validation: `validate_state`
 - FOV: `update_fov`, `has_line_of_sight`, `tile_blocks_sight`
 - Tile mutation: `set_tile`, `tile_tags_at`, `_reacting_tile`
 - Spawning: `spawn_actor`, `spawn_npc`, `next_entity_id`
@@ -104,8 +105,9 @@ All map and world generation (41 methods):
 ### `wildmagic/effects.py` — `_EffectsMixin`
 Wild magic resolution and every effect/cost handler:
 
-- `apply_wild_magic_resolution` — top-level entry point; fires `on_next_spell` triggers then
-  iterates the resolution's `effects` and `costs` arrays
+- `apply_wild_magic_resolution` — top-level entry point; validates the spell contract,
+  snapshots state transactionally, fires `on_next_spell` triggers, iterates the resolution's
+  `effects` and `costs` arrays, and rolls back on validation/application failure
 - `_apply_effect` — dispatches on `effect["type"]` for 25+ effect types: `damage`,
   `area_damage`, `area_status`, `heal`, `restore_mana`, `teleport`, `push/pull`,
   `create_tile/set_tile`, `add_status`, `remove_status`, `summon`, `spawn_item`,
@@ -137,8 +139,9 @@ Factory functions `make_provider`, `make_dialogue_provider`, `make_trade_provide
 `WILDMAGIC_DIALOGUE_PROVIDER`, etc.) to select the active backend.
 
 Also contains `resolve_spell`, `resolve_dialogue`, `resolve_trade_proposal`,
-`_effect_from_text` (regex-based fallback parser), the audit log writers, and the
-`_STATUS_FLAVOR_ALIASES` map used by effect/cost handlers.
+`_effect_from_text` (regex-based fallback parser), and the audit log writers.
+Spell operation constants, status flavor aliases, structural validation, and the
+JSON Schema used for constrained spell decoding live in `spell_contract.py`.
 
 ### `wildmagic/llm_client.py`
 Raw Ollama HTTP transport, completely decoupled from game logic:
@@ -150,6 +153,11 @@ that pull values from environment variables.
 Shared retry and audit utilities:
 `_write_jsonl_audit` (JSONL append helper shared by all three audit log writers),
 `should_retry_resolution`, `retry_context`.
+
+### `wildmagic/spell_contract.py`
+Wild-magic contract data that is shared by resolver and engine code:
+`SUPPORTED_EFFECTS`, `SUPPORTED_COSTS`, `STATUS_FLAVOR_ALIASES`,
+`SPELL_RESPONSE_JSON_SCHEMA`, and `validate_resolution`.
 
 ### `wildmagic/prompts.py`
 System prompt strings only — `SYSTEM_PROMPT`, `DIALOGUE_SYSTEM_PROMPT`,
@@ -216,6 +224,11 @@ Pure coordinate math with no imports outside stdlib:
 `sign`, `bresenham_line`, `unique_points`, `_on_bresenham` (point-on-line test used by the
 road network in `generation.py`).
 
+### `wildmagic/determinism.py`
+Stable deterministic helpers. `stable_seed()` derives process-stable integer seeds from
+arbitrary seed parts so procedural zones/towns do not depend on Python's randomized
+process-local `hash()` implementation.
+
 ---
 
 ## Dev / test
@@ -227,7 +240,7 @@ then asserts the turn counter, HP, mana, and log contents. Run with
 `python -m wildmagic.smoke_test`.
 
 ### `wildmagic/__init__.py`
-Empty; makes `wildmagic` a package.
+Loads the `.env` configuration automatically at package import time using `python-dotenv`; makes `wildmagic` a package.
 
 ---
 
@@ -246,11 +259,13 @@ main.py / cli.py
                     ├── llm_client.py   (Ollama HTTP)
                     ├── llm_resolver.py (audit + retry)
                     ├── prompts.py      (system prompts)
+                    ├── spell_contract.py (spell schema + validation)
                     └── fallbacks.py    (regex fallback)
 
 Shared leaves (imported by many, import nothing above them):
     models.py  ←  game_data.py  ←  templates.py
                                 ←  props.py
     geometry.py
+    determinism.py
     normalize.py
 ```

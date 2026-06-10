@@ -224,6 +224,52 @@ def main() -> None:
     )
     assert terrain_alias_resolution["effects"][0]["tile"] == "mist"
 
+    invalid_apply_session = GameSession(seed=7, scenario="test_chamber", provider=MockWildMagicProvider())
+    invalid_apply_engine = invalid_apply_session.engine
+    invalid_turn = invalid_apply_engine.state.turn
+    invalid_outcome = invalid_apply_engine.apply_wild_magic_resolution(
+        {
+            "accepted": True,
+            "severity": "minor",
+            "outcome_text": "This should not stick.",
+            "effects": [{"type": "unsupported_magic", "target": "player"}],
+            "costs": [],
+            "rejected_reason": None,
+        }
+    )
+    assert invalid_outcome.technical_failure
+    assert invalid_apply_engine.state.turn == invalid_turn
+    assert not invalid_apply_engine.validate_state()
+
+    trade_session = GameSession(seed=7, scenario="test_chamber", provider=MockWildMagicProvider())
+    trade_engine = trade_session.engine
+    tx, ty = trade_engine.find_open_tile_near(trade_engine.state.player.x, trade_engine.state.player.y)
+    trader = trade_engine.spawn_npc(
+        "test trader",
+        "@",
+        tx,
+        ty,
+        role="peddler",
+        backstory="Trades only what is in the pack.",
+        wares={"smoke vial": 1},
+    )
+    trade_engine.apply_dialogue_exchange(
+        trader,
+        "Can I have a special drink?",
+        "I might have something.",
+        {
+            "trade_proposed": True,
+            "initiator": "npc",
+            "npc_gives": [{"item": "special drink", "quantity": 1}],
+            "npc_wants": [],
+            "proposal_text": "Here is a special drink.",
+            "rejected_reason": None,
+        },
+    )
+    assert trade_engine.state.pending_trade is None
+    assert "special drink" not in trade_engine.state.inventory
+    assert trade_engine.state.turn == 1
+
     with tempfile.TemporaryDirectory() as temp_dir:
         replay_path = Path(temp_dir) / "smoke_replay.json"
         save_replay(conjure_session, replay_path)

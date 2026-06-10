@@ -11,7 +11,7 @@ from .replay import save_replay
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Play Wild Magic from the terminal.")
     parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--scenario", default="dungeon", choices=["dungeon", "test_chamber", "empire_compound", "frontier"])
+    parser.add_argument("--scenario", default="dungeon", choices=["dungeon", "test_chamber", "empire_compound", "frontier", "town"])
     parser.add_argument("--provider", default=None, choices=["auto", "mock", "ollama"])
     parser.add_argument("--record", type=Path, default=None, help="Write a replay JSON file at exit.")
     parser.add_argument("--script", type=Path, default=None, help="Read commands from a text file.")

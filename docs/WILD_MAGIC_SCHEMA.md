@@ -2,6 +2,8 @@
 
 Wild magic is resolved as a structured JSON object. The LLM proposes effects and costs; the engine validates and applies them. Rejected spells consume a turn. Technical failures, such as invalid JSON or unsupported operation types, do not consume a turn.
 
+The resolver and engine share the same structural contract. Accepted resolutions are applied transactionally: if validation or application fails, the engine rolls back the attempted spell and does not advance the turn.
+
 ## Top-Level Shape
 
 ```json

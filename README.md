@@ -2,13 +2,32 @@
 
 A tiny graphical ASCII roguelike prototype where normal actions are deterministic and wild spells are resolved through a structured local-LLM JSON contract.
 
-## Run
+## Setup & Run
 
+### 1. Install Ollama & Pull the Model
+First, install [Ollama](https://ollama.com/) on your machine. Then, pull the recommended default model:
 ```powershell
-python main.py
+ollama pull qwen3.5:9b-q4_K_M
 ```
 
-The default resolver is `ollama`, so the game uses the local LLM path unless you explicitly choose another provider.
+### 2. Configure Environment Variables
+Copy the example environment configuration to create a `.env` file:
+```powershell
+cp .env.example .env
+```
+If you wish to use a different local model, edit the `.env` file to point to your desired model (e.g., `WILDMAGIC_MODEL=qwen3.5:9b`). Existing shell environment variables will override `.env` values.
+
+### 3. Run with uv
+We use [uv](https://github.com/astral-sh/uv) to manage dependencies and virtual environments. Sync dependencies and run the game:
+```powershell
+# Install/sync dependencies
+uv sync
+
+# Run the graphical game
+uv run python main.py
+```
+
+The default resolver is `ollama`, so the game uses the local LLM path unless you explicitly choose another provider (such as `mock` for testing):
 
 ```powershell
 $env:WILDMAGIC_PROVIDER='ollama'
@@ -113,7 +132,7 @@ Use `ollama ps` after a spell cast. The `PROCESSOR` column should show `100% GPU
 - The map uses field of view: unseen tiles are hidden, explored tiles outside sight are dimmed.
 - The right panel shows HP/MP bars, active statuses (color-coded), visible enemies (health color changes), floor items, inventory, and curses.
 
-Commands also work in the CLI and `cast` prefix is optional for spells when playing headless:
+Commands also work in the CLI. Use `cast <spell>` for wild magic when playing headless:
 - `inspect` / `look` / `status` — show full game state
 - `use <item>` — use a consumable from inventory
 - `drop <item>` — drop an item
@@ -123,7 +142,7 @@ Commands also work in the CLI and `cast` prefix is optional for spells when play
 ## Smoke Test
 
 ```powershell
-python -m wildmagic.smoke_test
+uv run python -m wildmagic.smoke_test
 ```
 
 ## Headless Play And Replays
@@ -132,14 +151,14 @@ Play from the terminal:
 
 ```powershell
 $env:WILDMAGIC_PROVIDER='mock'
-python -m wildmagic.cli --scenario test_chamber --seed 7
+uv run python -m wildmagic.cli --scenario test_chamber --seed 7
 ```
 
 Run scripted commands and save a replay:
 
 ```powershell
-python -m wildmagic.cli --provider mock --scenario test_chamber --seed 7 --record runs/test.json --command "move east" --command "cast ignite the goblin"
-python -m wildmagic.replay runs/test.json
+uv run python -m wildmagic.cli --provider mock --scenario test_chamber --seed 7 --record runs/test.json --command "move east" --command "cast ignite the goblin"
+uv run python -m wildmagic.replay runs/test.json
 ```
 
 ## Project Plan

@@ -23,6 +23,7 @@ from .game_data import (
     _TOWN_SETTLEMENT_TYPES,
     _TOWN_SITUATIONS,
 )
+from .determinism import stable_seed
 from .geometry import _on_bresenham
 from .models import (
     BLOCKING_TILES,
@@ -376,7 +377,7 @@ class _GenerationMixin:
         state.entities = {}
         state.npc_profiles = {}
 
-        zone_rng = random.Random(hash((state.rng_seed, "hollowmere")))
+        zone_rng = random.Random(stable_seed(state.rng_seed, "hollowmere"))
         self._scatter_terrain_features(zone_rng)
 
         inn = Room(3, 10, 8, 6)
@@ -576,7 +577,7 @@ class _GenerationMixin:
         state.tile_tags.clear()
         state.tile_durations.clear()
 
-        zone_rng = random.Random(hash((state.rng_seed, "frontier_zone", zx, zy)))
+        zone_rng = random.Random(stable_seed(state.rng_seed, "frontier_zone", zx, zy))
         imperial_density = self._imperial_density(zx, zy)
 
         self._scatter_terrain_features(zone_rng)
@@ -790,7 +791,7 @@ class _GenerationMixin:
         state.tile_tags.clear()
         state.tile_durations.clear()
 
-        zone_rng = random.Random(hash((state.rng_seed, "llm_town", zx, zy)))
+        zone_rng = random.Random(stable_seed(state.rng_seed, "llm_town", zx, zy))
         self._scatter_terrain_features(zone_rng)
         # Draw road before placing buildings so buildings can overwrite road tiles where they sit.
         self._draw_road_through_zone(zx, zy)

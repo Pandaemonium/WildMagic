@@ -12,7 +12,7 @@ import pygame
 
 from .actions import ActionResult, GameSession
 from .game_data import _TOWN_GEN_TIMEOUT
-from .wild_magic import fetch_ollama_models
+from .wild_magic import fetch_ollama_models, DEFAULT_MODEL
 from .wild_magic import SYSTEM_PROMPT, extract_thinking, strip_thinking
 from .models import (
     DOOR,
@@ -83,7 +83,7 @@ _CONFIG_SPEC: list[dict] = [
         "key": "WILDMAGIC_MODEL",
         "label": "Model",
         "type": "model",          # special: opens model-list submenu
-        "default": "qwen3.5:9b-q4_K_M",
+        "default": DEFAULT_MODEL,
     },
     {
         "key": "WILDMAGIC_OLLAMA_THINK",
@@ -545,7 +545,7 @@ class GameUI:
                 self.menu_cursor = 0
                 self.menu_models = fetch_ollama_models()
                 # pre-select current model
-                current = os.environ.get("WILDMAGIC_MODEL", "qwen3.5:9b-q4_K_M")
+                current = os.environ.get("WILDMAGIC_MODEL", DEFAULT_MODEL)
                 try:
                     self.menu_cursor = self.menu_models.index(current)
                 except ValueError:

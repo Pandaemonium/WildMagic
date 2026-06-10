@@ -388,6 +388,69 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             return False
         return self.blocking_entity_at(x, y) is None
 
+    def validate_state(self) -> list[str]:
+        errors: list[str] = []
+        state = self.state
+        if state.player_id not in state.entities:
+            errors.append("player entity is missing")
+            return errors
+        if len(state.tiles) != state.height:
+            errors.append("tile row count does not match map height")
+        for y, row in enumerate(state.tiles):
+            if len(row) != state.width:
+                errors.append(f"tile row {y} does not match map width")
+                break
+            for x, tile in enumerate(row):
+                if tile not in TILE_NAMES:
+                    errors.append(f"unknown tile at {x},{y}: {tile!r}")
+                    break
+        blocking_positions: dict[tuple[int, int], str] = {}
+        for entity_id, entity in state.entities.items():
+            if entity.id != entity_id:
+                errors.append(f"entity key/id mismatch for {entity_id}")
+            if not self.in_bounds(entity.x, entity.y):
+                errors.append(f"{entity.id} is out of bounds at {entity.x},{entity.y}")
+            if entity.max_hp < 1 and entity.kind not in {"item", "prop"}:
+                errors.append(f"{entity.id} has invalid max_hp {entity.max_hp}")
+            if entity.hp < 0 or entity.hp > max(entity.max_hp, 0):
+                errors.append(f"{entity.id} has invalid hp {entity.hp}/{entity.max_hp}")
+            if entity.max_mana < 0 or entity.mana < 0 or entity.mana > entity.max_mana:
+                errors.append(f"{entity.id} has invalid mana {entity.mana}/{entity.max_mana}")
+            if entity.quantity < 0:
+                errors.append(f"{entity.id} has negative quantity")
+            if entity.blocks and entity.alive:
+                position = (entity.x, entity.y)
+                other = blocking_positions.get(position)
+                if other is not None:
+                    errors.append(f"blocking entities overlap at {entity.x},{entity.y}: {other}, {entity.id}")
+                else:
+                    blocking_positions[position] = entity.id
+        for item, amount in state.inventory.items():
+            if not isinstance(amount, int) or amount < 0:
+                errors.append(f"inventory item {item!r} has invalid amount {amount!r}")
+        for curse_id, curse in state.curses.items():
+            if curse.id != curse_id or curse.stacks < 1:
+                errors.append(f"curse {curse_id!r} is invalid")
+        for table_name, table in (("tile_tags", state.tile_tags), ("tile_durations", state.tile_durations)):
+            for key in table:
+                try:
+                    x, y = parse_tile_key(key)
+                except (ValueError, TypeError):
+                    errors.append(f"{table_name} has invalid key {key!r}")
+                    continue
+                if not self.in_bounds(x, y):
+                    errors.append(f"{table_name} key {key!r} is out of bounds")
+        for key, duration in state.tile_durations.items():
+            if not isinstance(duration, int) or duration < 1:
+                errors.append(f"tile duration {key!r} is invalid: {duration!r}")
+        for index, event in enumerate(state.event_timers):
+            if not isinstance(event, dict):
+                errors.append(f"event timer {index} is not an object")
+        for index, trigger in enumerate(state.triggers):
+            if not isinstance(trigger, dict):
+                errors.append(f"trigger {index} is not an object")
+        return errors
+
     def entities_at(self, x: int, y: int) -> list[Entity]:
         return [entity for entity in self.state.entities.values() if entity.x == x and entity.y == y and entity.alive]
 
@@ -564,6 +627,31 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             "exchange": {"player_said": message, "npc_replied": reply},
         }
 
+    def _validate_trade_payload(self, npc: Entity, trade_data: dict[str, Any]) -> str | None:
+        profile = self.state.npc_profiles.get(npc.id)
+        if profile is None:
+            return "trader no longer exists"
+        for label, entries, source in (
+            ("npc_gives", coerce_list(trade_data.get("npc_gives")), profile.wares),
+            ("npc_wants", coerce_list(trade_data.get("npc_wants")), self.state.inventory),
+        ):
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    return f"{label} contains a malformed entry"
+                item = str(entry.get("item") or "").strip()
+                try:
+                    quantity = int(entry.get("quantity") or 0)
+                except (TypeError, ValueError):
+                    return f"{label} has an invalid quantity for {item or '(missing item)'}"
+                key = self.find_item_in(source, item) if item else None
+                if key is None:
+                    owner = "the trader's wares" if label == "npc_gives" else "your inventory"
+                    return f"{item or '(missing item)'} is not in {owner}"
+                available = source.get(key, 0)
+                if quantity < 1 or quantity > available:
+                    return f"{key} quantity is unavailable ({quantity} requested, {available} available)"
+        return None
+
     def apply_dialogue_exchange(
         self, npc: Entity, message: str, reply: str, trade_data: dict[str, Any] | None = None
     ) -> None:
@@ -581,6 +669,11 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         self.state.add_message(f'{npc.name} says: "{reply}"')
 
         if trade_data is not None and trade_data.get("trade_proposed"):
+            trade_error = self._validate_trade_payload(npc, trade_data)
+            if trade_error:
+                self.state.add_message(f"The proposed trade cannot be settled: {trade_error}.")
+                self.finish_player_turn()
+                return
             proposal_text = str(trade_data.get("proposal_text") or "").strip()
             self.state.pending_trade = {
                 "npc_id": npc.id,
@@ -612,6 +705,12 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
 
         if not accept or npc is None or profile is None:
             self.state.add_message(f"You step back from the deal with {npc_name}.")
+            self.finish_player_turn()
+            return
+
+        trade_error = self._validate_trade_payload(npc, trade)
+        if trade_error:
+            self.state.add_message(f"The deal with {npc_name} falls apart: {trade_error}.")
             self.finish_player_turn()
             return
 
