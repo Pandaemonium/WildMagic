@@ -2,13 +2,14 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 import json
-import os
 from pathlib import Path
 from typing import Any
 
+from .config import audit_log_enabled
+
 
 def _write_jsonl_audit(audit_path: Path, record: dict[str, Any]) -> str | None:
-    if os.environ.get("WILDMAGIC_AUDIT_LOG", "1").lower().strip() in {"0", "false", "no", "off"}:
+    if not audit_log_enabled():
         return None
     try:
         audit_path.parent.mkdir(parents=True, exist_ok=True)

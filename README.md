@@ -15,7 +15,7 @@ Copy the example environment configuration to create a `.env` file:
 ```powershell
 cp .env.example .env
 ```
-If you wish to use a different local model, edit the `.env` file to point to your desired model (e.g., `WILDMAGIC_MODEL=qwen3.5:9b`). Existing shell environment variables will override `.env` values.
+The `.env` file is the persisted local configuration. The in-game configuration menu writes changes back to it, and existing shell environment variables override `.env` values when the process starts.
 
 ### 3. Run with uv
 We use [uv](https://github.com/astral-sh/uv) to manage dependencies and virtual environments. Sync dependencies and run the game:

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import os
 import textwrap
 import time
@@ -11,9 +10,10 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame
 
 from .actions import ActionResult, GameSession
+from .config import DEFAULT_MODEL, get_config_value, set_config_value
 from .game_data import _TOWN_GEN_TIMEOUT, EQUIPMENT_SPECS
 from .items import infer_equipment_slot
-from .wild_magic import fetch_ollama_models, DEFAULT_MODEL
+from .wild_magic import fetch_ollama_models
 from .wild_magic import SYSTEM_PROMPT, extract_thinking, strip_thinking
 from .models import (
     DOOR,
@@ -78,7 +78,6 @@ CONTROLS_HINT_WRAP = 48
 # ---------------------------------------------------------------------------
 # Config menu spec — each entry drives the menu display and env-var mutation
 # ---------------------------------------------------------------------------
-_CONFIG_FILE = os.path.join(os.path.dirname(__file__), "..", "wildmagic_config.json")
 _CONFIG_SPEC: list[dict] = [
     {
         "key": "WILDMAGIC_MODEL",
@@ -218,36 +217,9 @@ class GameUI:
         self.inventory_right_cursor = 0
         self.menu_models: list[str] = []   # populated when model page opens
 
-        self._load_config()
-
-    def _load_config(self) -> None:
-        """Load persisted config from JSON and apply to os.environ."""
-        try:
-            with open(_CONFIG_FILE, "r", encoding="utf-8") as f:
-                saved = json.load(f)
-            for key, value in saved.items():
-                if isinstance(value, str):
-                    os.environ[key] = value
-        except (FileNotFoundError, json.JSONDecodeError):
-            pass
-
-    def _save_config(self) -> None:
-        """Persist current config env vars to JSON."""
-        data = {}
-        for spec in _CONFIG_SPEC:
-            key = spec["key"]
-            val = os.environ.get(key)
-            if val is not None:
-                data[key] = val
-        try:
-            with open(_CONFIG_FILE, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-        except OSError:
-            pass
-
     def _config_value(self, spec: dict) -> str:
         """Current display value for a config spec entry."""
-        raw = os.environ.get(spec["key"], spec["default"])
+        raw = get_config_value(spec["key"], spec["default"]) or spec["default"]
         if spec["type"] == "toggle":
             return spec["display"].get(raw, raw)
         return raw
@@ -610,14 +582,13 @@ class GameUI:
         if spec["type"] not in ("cycle", "toggle"):
             return
         values = spec["values"]
-        current = os.environ.get(spec["key"], spec["default"])
+        current = get_config_value(spec["key"], spec["default"]) or spec["default"]
         try:
             idx = values.index(current)
         except ValueError:
             idx = 0
         new_idx = (idx + direction) % len(values)
-        os.environ[spec["key"]] = values[new_idx]
-        self._save_config()
+        set_config_value(spec["key"], values[new_idx])
 
     def _menu_select(self, items: list[dict]) -> None:
         if self.menu_cursor >= len(items):
@@ -650,14 +621,13 @@ class GameUI:
                 self.menu_cursor = 0
                 self.menu_models = fetch_ollama_models()
                 # pre-select current model
-                current = os.environ.get("WILDMAGIC_MODEL", DEFAULT_MODEL)
+                current = get_config_value("WILDMAGIC_MODEL", DEFAULT_MODEL) or DEFAULT_MODEL
                 try:
                     self.menu_cursor = self.menu_models.index(current)
                 except ValueError:
                     self.menu_cursor = 0
         elif action == "set_model":
-            os.environ["WILDMAGIC_MODEL"] = item["model"]
-            self._save_config()
+            set_config_value("WILDMAGIC_MODEL", item["model"])
             self.menu_page = "config"
             self.menu_cursor = 0
     def execute_command(self, command: str) -> None:

@@ -1,7 +1,7 @@
 """Wild Magic, a tile roguelike prototype."""
 
-from dotenv import load_dotenv
+from . import config as config
 
-load_dotenv()  # Loads .env but does NOT override existing shell environment variables.
+config.load_environment()
 
-__all__ = ["engine", "wild_magic", "ui"]
+__all__ = ["config", "engine", "wild_magic", "ui"]

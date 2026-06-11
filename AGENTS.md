@@ -49,6 +49,7 @@ Examples to avoid:
 - `docs/WILD_MAGIC_SCHEMA.md`: current wild-magic operation surface.
 - `docs/AGENT_PLAYTESTING.md`: practical playtesting guide.
 - `docs/EXECUTION_PLAN.md`: staged project plan.
+- `docs/AESTHETICS_AND_TONE.md`: North star document for content creation aesthetics.
 
 ## How To Run
 

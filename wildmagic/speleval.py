@@ -30,6 +30,7 @@ from typing import Any
 # Keep eval traffic out of the main audit log unless the caller overrides.
 os.environ.setdefault("WILDMAGIC_AUDIT_DIR", os.path.join("logs", "speleval"))
 
+from .config import get_config_value  # noqa: E402
 from .speleval_corpus import CORPUS  # noqa: E402
 
 SYMBOLIC_TARGETS = {
@@ -245,7 +246,7 @@ def run_audit_replay(path: str) -> dict[str, Any]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--provider", default=os.environ.get("WILDMAGIC_PROVIDER", "mock"))
+    parser.add_argument("--provider", default=get_config_value("WILDMAGIC_PROVIDER", "mock"))
     parser.add_argument("--kinds", default="common,creative,exploit",
                         help="comma-separated subset of: common,creative,exploit")
     parser.add_argument("--limit", type=int, default=None)

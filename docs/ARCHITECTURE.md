@@ -135,10 +135,9 @@ provider kinds, each returning a typed resolution object:
 - `TownProvider` / `OllamaTownProvider` / `MockTownProvider` → `TownSpec`
 
 Factory functions `make_provider`, `make_dialogue_provider`, `make_trade_provider`,
-`make_town_provider` read environment variables (`WILDMAGIC_PROVIDER`,
-`WILDMAGIC_DIALOGUE_PROVIDER`, etc.) to select the active backend. Ollama-backed
-providers also carry a purpose label (`wild`, `dialogue`, `trade`, `town`) so
-`llm_client.py` can route urgent and background requests to different Ollama hosts.
+`make_town_provider` use `wildmagic.config` to select the active backend. Ollama-backed
+providers carry a purpose label (`wild`, `dialogue`, `trade`, `town`) so config can
+route urgent and background requests to different Ollama hosts.
 
 Also contains `resolve_spell`, `resolve_dialogue`, `resolve_trade_proposal`,
 `_effect_from_text` (regex-based fallback parser), and the audit log writers.
@@ -148,11 +147,18 @@ JSON Schema used for constrained spell decoding live in `spell_contract.py`.
 ### `wildmagic/llm_client.py`
 Raw Ollama HTTP transport, completely decoupled from game logic:
 `_post_ollama_chat`, `parse_ollama_error_body`, `strip_thinking`, `extract_thinking`,
-`normalize_ollama_url`, `ollama_host`, `fetch_ollama_models`, and the `ollama_*()`
-config readers that pull values from environment variables. It owns the purpose-scoped
+`normalize_ollama_url`, and `fetch_ollama_models`. Configuration helpers are imported
+from `wildmagic.config` and re-exported here for compatibility with existing provider
+imports.
+
+### `wildmagic/config.py`
+The single configuration boundary. Loads the project `.env` without overriding shell
+values, owns defaults and typed parsing, resolves provider/model fallback chains,
+persists in-game configuration changes back to `.env`, and owns purpose-scoped Ollama
 routing precedence for `WILDMAGIC_WILD_OLLAMA_HOST`, `WILDMAGIC_URGENT_OLLAMA_HOST`,
 `WILDMAGIC_BACKGROUND_OLLAMA_HOST`, and matching scoped request options such as
-`OLLAMA_NUM_CTX`, `OLLAMA_TIMEOUT`, `OLLAMA_NUM_GPU`, and `OLLAMA_KEEP_ALIVE`.
+`OLLAMA_NUM_CTX`, `OLLAMA_TIMEOUT`, `OLLAMA_NUM_GPU`, `OLLAMA_THINK`,
+`OLLAMA_FORMAT`, and `OLLAMA_KEEP_ALIVE`.
 
 ### `wildmagic/llm_resolver.py`
 Shared retry and audit utilities:
@@ -270,7 +276,8 @@ then asserts the turn counter, HP, mana, and log contents. Run with
 `python -m wildmagic.smoke_test`.
 
 ### `wildmagic/__init__.py`
-Loads the `.env` configuration automatically at package import time using `python-dotenv`; makes `wildmagic` a package.
+Imports the configuration boundary so `.env` is loaded at package import time;
+makes `wildmagic` a package.
 
 ---
 

@@ -3,12 +3,22 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
-import os
-from pathlib import Path
 import re
 import urllib.error
 from typing import Any, Protocol
 
+from .config import (
+    DEFAULT_MODEL,
+    audit_dir,
+    get_dialogue_model,
+    get_dialogue_provider,
+    get_town_model,
+    get_town_provider,
+    get_trade_model,
+    get_trade_provider,
+    get_wild_magic_model,
+    get_wild_magic_provider,
+)
 from .fallbacks import fallback_resolution_from_spell, fallbacks_enabled
 from .llm_client import (
     _post_ollama_chat,
@@ -57,30 +67,6 @@ from .spell_contract import (
 )
 
 
-DEFAULT_MODEL = "qwen3.5:9b-q4_K_M"
-
-
-def get_wild_magic_model() -> str:
-    return os.environ.get("WILDMAGIC_WILD_MODEL") or os.environ.get("WILDMAGIC_MODEL") or DEFAULT_MODEL
-
-
-def get_dialogue_model() -> str:
-    return os.environ.get("WILDMAGIC_DIALOGUE_MODEL") or os.environ.get("WILDMAGIC_MODEL") or DEFAULT_MODEL
-
-
-def get_trade_model() -> str:
-    return (
-        os.environ.get("WILDMAGIC_TRADE_MODEL")
-        or os.environ.get("WILDMAGIC_DIALOGUE_MODEL")
-        or os.environ.get("WILDMAGIC_MODEL")
-        or DEFAULT_MODEL
-    )
-
-
-def get_town_model() -> str:
-    return os.environ.get("WILDMAGIC_TOWN_MODEL") or os.environ.get("WILDMAGIC_MODEL") or DEFAULT_MODEL
-
-
 @dataclass
 class MagicResolution:
     data: dict[str, Any] | None
@@ -114,7 +100,7 @@ class OllamaWildMagicProvider:
 
     def resolve(self, spell: str, context: dict[str, Any]) -> str:
         payload = {
-            "model": os.environ.get("WILDMAGIC_WILD_MODEL") or os.environ.get("WILDMAGIC_MODEL") or self.model,
+            "model": self.model,
             "stream": False,
             "think": ollama_thinking_enabled(self.purpose),
             "messages": _wild_prompt_messages(context),
@@ -542,7 +528,7 @@ class AutoWildMagicProvider:
 
 
 def make_provider(provider_name: str | None = None) -> WildMagicProvider:
-    provider = (provider_name or os.environ.get("WILDMAGIC_PROVIDER", "ollama")).lower().strip()
+    provider = (provider_name or get_wild_magic_provider()).lower().strip()
     if provider == "mock":
         return MockWildMagicProvider()
     if provider == "ollama":
@@ -593,7 +579,7 @@ class OllamaDialogueProvider:
 
     def reply(self, message: str, context: dict[str, Any]) -> str:
         payload = {
-            "model": os.environ.get("WILDMAGIC_DIALOGUE_MODEL") or os.environ.get("WILDMAGIC_MODEL") or self.model,
+            "model": self.model,
             "stream": False,
             "think": ollama_thinking_enabled(self.purpose),
             "messages": [
@@ -654,11 +640,7 @@ class AutoDialogueProvider:
 
 
 def make_dialogue_provider(provider_name: str | None = None) -> DialogueProvider:
-    provider = (
-        provider_name
-        or os.environ.get("WILDMAGIC_DIALOGUE_PROVIDER")
-        or os.environ.get("WILDMAGIC_PROVIDER", "ollama")
-    ).lower().strip()
+    provider = (provider_name or get_dialogue_provider()).lower().strip()
     if provider == "mock":
         return MockDialogueProvider()
     if provider == "ollama":
@@ -779,7 +761,7 @@ def write_dialogue_audit_log(
     error: str | None,
     resolved_provider_name: str,
 ) -> str | None:
-    audit_path = Path(os.environ.get("WILDMAGIC_AUDIT_DIR", "logs")) / "dialogue_audit.jsonl"
+    audit_path = audit_dir() / "dialogue_audit.jsonl"
     prompt_messages = [
         {"role": "system", "content": DIALOGUE_SYSTEM_PROMPT},
         {"role": "user", "content": json.dumps(context, ensure_ascii=True)},
@@ -850,12 +832,7 @@ class OllamaTradeProvider:
 
     def propose(self, context: dict[str, Any]) -> str:
         payload = {
-            "model": (
-                os.environ.get("WILDMAGIC_TRADE_MODEL")
-                or os.environ.get("WILDMAGIC_DIALOGUE_MODEL")
-                or os.environ.get("WILDMAGIC_MODEL")
-                or self.model
-            ),
+            "model": self.model,
             "stream": False,
             "think": ollama_thinking_enabled(self.purpose),
             "messages": [
@@ -923,12 +900,7 @@ class AutoTradeProvider:
 
 
 def make_trade_provider(provider_name: str | None = None) -> TradeProvider:
-    provider = (
-        provider_name
-        or os.environ.get("WILDMAGIC_TRADE_PROVIDER")
-        or os.environ.get("WILDMAGIC_DIALOGUE_PROVIDER")
-        or os.environ.get("WILDMAGIC_PROVIDER", "ollama")
-    ).lower().strip()
+    provider = (provider_name or get_trade_provider()).lower().strip()
     if provider == "mock":
         return MockTradeProvider()
     if provider == "ollama":
@@ -1067,7 +1039,7 @@ def write_trade_audit_log(
     error: str | None,
     resolved_provider_name: str,
 ) -> str | None:
-    audit_path = Path(os.environ.get("WILDMAGIC_AUDIT_DIR", "logs")) / "trade_audit.jsonl"
+    audit_path = audit_dir() / "trade_audit.jsonl"
     prompt_messages = [
         {"role": "system", "content": TRADE_SYSTEM_PROMPT},
         {"role": "user", "content": json.dumps(context, ensure_ascii=True)},
@@ -1960,7 +1932,7 @@ def write_audit_log(
     error: str | None,
     resolved_provider_name: str,
 ) -> str | None:
-    audit_path = Path(os.environ.get("WILDMAGIC_AUDIT_DIR", "logs")) / "wild_magic_audit.jsonl"
+    audit_path = audit_dir() / "wild_magic_audit.jsonl"
     prompt_messages = _wild_prompt_messages(context)
     record = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -2068,7 +2040,7 @@ class OllamaTownProvider:
 
     def generate(self, zx: int, zy: int, context: dict[str, Any]) -> TownSpec:
         payload = {
-            "model": os.environ.get("WILDMAGIC_TOWN_MODEL") or os.environ.get("WILDMAGIC_MODEL") or self.model,
+            "model": self.model,
             "stream": False,
             "think": ollama_thinking_enabled(self.purpose),
             "messages": [
@@ -2163,11 +2135,7 @@ class AutoTownProvider:
 
 
 def make_town_provider(provider_name: str | None = None) -> TownProvider:
-    provider = (
-        provider_name
-        or os.environ.get("WILDMAGIC_TOWN_PROVIDER")
-        or os.environ.get("WILDMAGIC_PROVIDER", "ollama")
-    ).lower().strip()
+    provider = (provider_name or get_town_provider()).lower().strip()
     if provider == "mock":
         return MockTownProvider()
     if provider == "ollama":
