@@ -1280,13 +1280,19 @@ class GameUI:
             if state.victory:
                 message = "YOU ESCAPED"
                 color = ACCENT
-            else:
-                message = "YOU DIED"
+                sub_text = "Press R to restart"
+            elif state.death_cause == "empire":
+                message = "CASE CLOSED"
                 color = DANGER
+                sub_text = "Incident filed, ref. 7-112 — press R to reopen the file"
+            else:
+                message = "THE WILD TAKES YOU BACK"
+                color = DANGER
+                sub_text = "Press R — another sorcerer takes up the thread"
             surface = big_font.render(message, True, color)
             rect = surface.get_rect(center=(MAP_OFFSET_X + MAP_PIXEL_WIDTH // 2, MAP_PIXEL_HEIGHT // 2))
             self.screen.blit(surface, rect)
-            sub = pygame.font.SysFont("consolas", 18).render("Press R to restart", True, MUTED)
+            sub = pygame.font.SysFont("consolas", 18).render(sub_text, True, MUTED)
             sub_rect = sub.get_rect(center=(MAP_OFFSET_X + MAP_PIXEL_WIDTH // 2, MAP_PIXEL_HEIGHT // 2 + 50))
             self.screen.blit(sub, sub_rect)
 

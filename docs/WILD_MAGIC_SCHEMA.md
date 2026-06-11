@@ -4,6 +4,19 @@ Wild magic is resolved as a structured JSON object. The LLM proposes effects and
 
 The resolver and engine share the same structural contract. Accepted resolutions are applied transactionally: if validation or application fails, the engine rolls back the attempted spell and does not advance the turn.
 
+## Context Hints
+
+The LLM receives visible entities, terrain, inventory, and a compact `spell_anchors` list. `spell_anchors` contains nearby visible props such as braziers, mirrors, pools, notices, webs, altars, cages, books, bells, and crystals. Each anchor includes:
+
+- `id`: use this actual prop id as a target, center, origin, or placement anchor.
+- `name`, `position`, `distance`, `tags`, and `description`.
+- `affordances`: plain-language hints mapping the prop's tags to reusable mechanics.
+- `suggested_mechanics`: reminders that props should be expressed through ordinary effects.
+- `nearest_visible_enemy` and optional `range_hint`: distance guidance so small area effects centered on a prop do not accidentally miss the intended creature.
+- `recommended_effect_patterns`: copyable effect skeletons chosen from the prop's tags and local geometry; the model should fill in balanced amounts, durations, and costs.
+
+Props do not add a separate spell system. They are environmental prompts for normal mechanics: center an `area_damage` on a brazier, create mist from a pool, reveal through a mirror, summon from a ritual circle, web/root from ropes or vines, curse through a notice or tablet, and so on. For attacks, prefer targeting creatures while using a prop as the center/origin; only target a prop directly when the spell explicitly destroys, animates, repairs, or transforms that object.
+
 ## Top-Level Shape
 
 ```json

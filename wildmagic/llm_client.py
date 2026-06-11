@@ -8,6 +8,76 @@ import urllib.request
 from typing import Any
 
 
+DEFAULT_OLLAMA_HOST = "http://localhost:11434"
+
+
+def _first_env(names: list[str], default: str) -> str:
+    for name in names:
+        value = os.environ.get(name)
+        if value is not None and value.strip():
+            return value.strip()
+    return default
+
+
+def _purpose_key(purpose: str | None) -> str | None:
+    if not purpose:
+        return None
+    normalized = re.sub(r"[^A-Z0-9]+", "_", purpose.upper()).strip("_")
+    aliases = {
+        "SPELL": "WILD",
+        "WILD_MAGIC": "WILD",
+        "MAGIC": "WILD",
+        "NPC_DIALOGUE": "DIALOGUE",
+        "BACKGROUND_TOWN": "TOWN",
+        "TOWN_GENERATION": "TOWN",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _route_key(purpose: str | None) -> str | None:
+    key = _purpose_key(purpose)
+    if key in {"WILD", "DIALOGUE", "TRADE"}:
+        return "URGENT"
+    if key == "TOWN":
+        return "BACKGROUND"
+    return None
+
+
+def _scoped_env_names(purpose: str | None, suffix: str) -> list[str]:
+    names: list[str] = []
+    key = _purpose_key(purpose)
+    route = _route_key(purpose)
+    if key:
+        names.append(f"WILDMAGIC_{key}_{suffix}")
+    if route:
+        names.append(f"WILDMAGIC_{route}_{suffix}")
+    names.append(f"WILDMAGIC_{suffix}")
+    return names
+
+
+def _int_env(names: list[str], default: int, minimum: int, maximum: int) -> int:
+    value = _first_env(names, str(default))
+    try:
+        parsed = int(value)
+    except ValueError:
+        return default
+    return max(minimum, min(maximum, parsed))
+
+
+def _float_env(names: list[str], default: float, minimum: float, maximum: float) -> float:
+    value = _first_env(names, str(default))
+    try:
+        parsed = float(value)
+    except ValueError:
+        return default
+    return max(minimum, min(maximum, parsed))
+
+
+def _bool_env(names: list[str], default: str) -> bool:
+    value = _first_env(names, default).lower().strip()
+    return value in {"1", "true", "yes", "on", "json"}
+
+
 def parse_ollama_error_body(body: str) -> str:
     stripped = body.strip()
     if not stripped:
@@ -41,18 +111,26 @@ def ensure_ollama_running(base_url: str) -> bool:
     except (OSError, ConnectionRefusedError):
         pass
         
+    auto_start = os.environ.get("WILDMAGIC_OLLAMA_AUTOSTART", "1").lower().strip()
+    if auto_start in {"0", "false", "no", "off"}:
+        print(f"Ollama server not detected at {base_url}. Autostart is disabled.")
+        return False
+
     print(f"Ollama server not detected at {base_url}. Attempting to start 'ollama serve' in the background...")
     try:
         creationflags = 0
         if os.name == "nt":
             creationflags = 0x08000000  # CREATE_NO_WINDOW
+        child_env = os.environ.copy()
+        child_env["OLLAMA_HOST"] = base_url
             
         subprocess.Popen(
             ["ollama", "serve"],
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             creationflags=creationflags,
-            close_fds=True
+            close_fds=True,
+            env=child_env,
         )
     except FileNotFoundError:
         print("Ollama command-line tool not found on PATH. Cannot auto-start server.")
@@ -116,13 +194,19 @@ def normalize_ollama_url(value: str) -> str:
     return url
 
 
-def ollama_timeout_seconds() -> float:
-    value = os.environ.get("WILDMAGIC_OLLAMA_TIMEOUT", "180")
-    try:
-        timeout = float(value)
-    except ValueError:
-        return 180.0
-    return max(5.0, timeout)
+def ollama_host(purpose: str | None = None) -> str:
+    """Return the Ollama endpoint for a provider purpose.
+
+    For a town request, precedence is:
+    WILDMAGIC_TOWN_OLLAMA_HOST -> WILDMAGIC_BACKGROUND_OLLAMA_HOST ->
+    WILDMAGIC_OLLAMA_HOST -> OLLAMA_HOST -> localhost:11434.
+    """
+    names = _scoped_env_names(purpose, "OLLAMA_HOST") + ["OLLAMA_HOST"]
+    return normalize_ollama_url(_first_env(names, DEFAULT_OLLAMA_HOST))
+
+
+def ollama_timeout_seconds(purpose: str | None = None) -> float:
+    return _float_env(_scoped_env_names(purpose, "OLLAMA_TIMEOUT"), 180.0, 5.0, 1800.0)
 
 
 def ollama_num_predict() -> int:
@@ -134,7 +218,7 @@ def ollama_num_predict() -> int:
     return max(128, min(4096, parsed))
 
 
-def ollama_num_ctx() -> int:
+def ollama_num_ctx(purpose: str | None = None) -> int:
     """Context window size (prompt + response, in tokens).
 
     Ollama defaults to 2048 when a model's Modelfile doesn't set num_ctx, and
@@ -143,12 +227,7 @@ def ollama_num_ctx() -> int:
     JSON blob with no instructions and echoes it back instead of resolving the
     spell. Default high enough to comfortably fit prompt + context + response.
     """
-    value = os.environ.get("WILDMAGIC_OLLAMA_NUM_CTX", "8192")
-    try:
-        parsed = int(value)
-    except ValueError:
-        return 8192
-    return max(2048, min(32768, parsed))
+    return _int_env(_scoped_env_names(purpose, "OLLAMA_NUM_CTX"), 16384, 2048, 32768)
 
 
 def ollama_temperature() -> float:
@@ -202,14 +281,12 @@ def ollama_trade_num_predict() -> int:
     return max(32, min(1024, parsed))
 
 
-def ollama_thinking_enabled() -> bool:
-    value = os.environ.get("WILDMAGIC_OLLAMA_THINK", "0").lower().strip()
-    return value in {"1", "true", "yes", "on"}
+def ollama_thinking_enabled(purpose: str | None = None) -> bool:
+    return _bool_env(_scoped_env_names(purpose, "OLLAMA_THINK"), "0")
 
 
-def ollama_json_format_enabled() -> bool:
-    value = os.environ.get("WILDMAGIC_OLLAMA_FORMAT", "json").lower().strip()
-    return value in {"1", "true", "yes", "on", "json"}
+def ollama_json_format_enabled(purpose: str | None = None) -> bool:
+    return _bool_env(_scoped_env_names(purpose, "OLLAMA_FORMAT"), "json")
 
 
 def ollama_town_num_predict() -> int:
@@ -221,13 +298,12 @@ def ollama_town_num_predict() -> int:
     return max(256, min(8192, parsed))
 
 
-def ollama_num_gpu() -> int:
-    value = os.environ.get("WILDMAGIC_OLLAMA_NUM_GPU", "999")
-    try:
-        parsed = int(value)
-    except ValueError:
-        return 999
-    return max(0, min(999, parsed))
+def ollama_num_gpu(purpose: str | None = None) -> int:
+    return _int_env(_scoped_env_names(purpose, "OLLAMA_NUM_GPU"), 999, 0, 999)
+
+
+def ollama_keep_alive(purpose: str | None = None) -> str:
+    return _first_env(_scoped_env_names(purpose, "OLLAMA_KEEP_ALIVE"), "10m")
 
 
 def ollama_resolution_attempts() -> int:
@@ -239,9 +315,9 @@ def ollama_resolution_attempts() -> int:
     return max(1, min(4, parsed))
 
 
-def fetch_ollama_models(base_url: str | None = None) -> list[str]:
+def fetch_ollama_models(base_url: str | None = None, purpose: str | None = "wild") -> list[str]:
     """Return sorted list of model names available from Ollama. Empty list on failure."""
-    url = normalize_ollama_url(base_url or os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
+    url = normalize_ollama_url(base_url) if base_url else ollama_host(purpose)
     ensure_ollama_running(url)
     try:
         req = urllib.request.Request(f"{url}/api/tags")

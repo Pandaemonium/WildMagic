@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import re
+import urllib.error
 from typing import Any, Protocol
 
 from .fallbacks import fallback_resolution_from_spell, fallbacks_enabled
@@ -15,6 +16,7 @@ from .llm_client import (
     extract_thinking,
     parse_ollama_error_body,
     normalize_ollama_url,
+    ollama_host,
     fetch_ollama_models,
     ollama_timeout_seconds,
     ollama_num_predict,
@@ -28,11 +30,24 @@ from .llm_client import (
     ollama_json_format_enabled,
     ollama_town_num_predict,
     ollama_num_gpu,
+    ollama_keep_alive,
     ollama_resolution_attempts,
 )
 from .llm_resolver import _write_jsonl_audit, should_retry_resolution, retry_context
 from .models import MECHANICAL_STATUSES, TILE_ALIASES
-from .prompts import SYSTEM_PROMPT, DIALOGUE_SYSTEM_PROMPT, TRADE_SYSTEM_PROMPT, TOWN_SYSTEM_PROMPT
+from .prompts import SYSTEM_PROMPT, DIALOGUE_SYSTEM_PROMPT, TRADE_SYSTEM_PROMPT, TOWN_SYSTEM_PROMPT, region_prompt_block
+
+
+def _wild_prompt_messages(context: dict[str, Any]) -> list[dict[str, str]]:
+    """Assemble the wild-magic chat messages. The engine rides the region's
+    voice along in context["region_style"]; it belongs in the system prompt,
+    not the user-message JSON, so it is split out here."""
+    region_style = context.get("region_style")
+    payload_context = {k: v for k, v in context.items() if k != "region_style"}
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT + region_prompt_block(region_style)},
+        {"role": "user", "content": json.dumps(payload_context, ensure_ascii=True)},
+    ]
 from .spell_contract import (
     SPELL_RESPONSE_JSON_SCHEMA,
     STATUS_FLAVOR_ALIASES as _STATUS_FLAVOR_ALIASES,
@@ -46,7 +61,7 @@ DEFAULT_MODEL = "qwen3.5:9b-q4_K_M"
 
 
 def get_wild_magic_model() -> str:
-    return os.environ.get("WILDMAGIC_MODEL") or DEFAULT_MODEL
+    return os.environ.get("WILDMAGIC_WILD_MODEL") or os.environ.get("WILDMAGIC_MODEL") or DEFAULT_MODEL
 
 
 def get_dialogue_model() -> str:
@@ -85,6 +100,7 @@ class WildMagicProvider(Protocol):
 
 class OllamaWildMagicProvider:
     name = "ollama"
+    purpose = "wild"
 
     def __init__(
         self,
@@ -93,28 +109,25 @@ class OllamaWildMagicProvider:
         timeout_seconds: float | None = None,
     ) -> None:
         self.model = model or get_wild_magic_model()
-        self.base_url = normalize_ollama_url(base_url or os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
-        self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds()
+        self.base_url = normalize_ollama_url(base_url) if base_url else ollama_host(self.purpose)
+        self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds(self.purpose)
 
     def resolve(self, spell: str, context: dict[str, Any]) -> str:
         payload = {
-            "model": os.environ.get("WILDMAGIC_MODEL") or self.model,
+            "model": os.environ.get("WILDMAGIC_WILD_MODEL") or os.environ.get("WILDMAGIC_MODEL") or self.model,
             "stream": False,
-            "think": ollama_thinking_enabled(),
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps(context, ensure_ascii=True)},
-            ],
+            "think": ollama_thinking_enabled(self.purpose),
+            "messages": _wild_prompt_messages(context),
             "options": {
                 "temperature": ollama_temperature(),
                 "top_p": 0.9,
                 "num_predict": ollama_num_predict(),
-                "num_ctx": ollama_num_ctx(),
-                "num_gpu": ollama_num_gpu(),
+                "num_ctx": ollama_num_ctx(self.purpose),
+                "num_gpu": ollama_num_gpu(self.purpose),
             },
-            "keep_alive": "10m",
+            "keep_alive": ollama_keep_alive(self.purpose),
         }
-        if ollama_json_format_enabled():
+        if ollama_json_format_enabled(self.purpose):
             payload["format"] = "json"
         try:
             data = self._post_chat(payload)
@@ -566,6 +579,7 @@ class DialogueProvider(Protocol):
 
 class OllamaDialogueProvider:
     name = "ollama"
+    purpose = "dialogue"
 
     def __init__(
         self,
@@ -574,14 +588,14 @@ class OllamaDialogueProvider:
         timeout_seconds: float | None = None,
     ) -> None:
         self.model = model or get_dialogue_model()
-        self.base_url = normalize_ollama_url(base_url or os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
-        self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds()
+        self.base_url = normalize_ollama_url(base_url) if base_url else ollama_host(self.purpose)
+        self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds(self.purpose)
 
     def reply(self, message: str, context: dict[str, Any]) -> str:
         payload = {
             "model": os.environ.get("WILDMAGIC_DIALOGUE_MODEL") or os.environ.get("WILDMAGIC_MODEL") or self.model,
             "stream": False,
-            "think": ollama_thinking_enabled(),
+            "think": ollama_thinking_enabled(self.purpose),
             "messages": [
                 {"role": "system", "content": DIALOGUE_SYSTEM_PROMPT},
                 {"role": "user", "content": json.dumps(context, ensure_ascii=True)},
@@ -590,10 +604,10 @@ class OllamaDialogueProvider:
                 "temperature": ollama_dialogue_temperature(),
                 "top_p": 0.9,
                 "num_predict": ollama_dialogue_num_predict(),
-                "num_ctx": ollama_num_ctx(),
-                "num_gpu": ollama_num_gpu(),
+                "num_ctx": ollama_num_ctx(self.purpose),
+                "num_gpu": ollama_num_gpu(self.purpose),
             },
-            "keep_alive": "10m",
+            "keep_alive": ollama_keep_alive(self.purpose),
         }
         data = _post_ollama_chat(self.base_url, payload, self.timeout_seconds)
         content = data.get("message", {}).get("content")
@@ -822,6 +836,7 @@ class TradeProvider(Protocol):
 
 class OllamaTradeProvider:
     name = "ollama"
+    purpose = "trade"
 
     def __init__(
         self,
@@ -830,14 +845,19 @@ class OllamaTradeProvider:
         timeout_seconds: float | None = None,
     ) -> None:
         self.model = model or get_trade_model()
-        self.base_url = normalize_ollama_url(base_url or os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
-        self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds()
+        self.base_url = normalize_ollama_url(base_url) if base_url else ollama_host(self.purpose)
+        self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds(self.purpose)
 
     def propose(self, context: dict[str, Any]) -> str:
         payload = {
-            "model": os.environ.get("WILDMAGIC_TRADE_MODEL") or os.environ.get("WILDMAGIC_DIALOGUE_MODEL") or os.environ.get("WILDMAGIC_MODEL") or self.model,
+            "model": (
+                os.environ.get("WILDMAGIC_TRADE_MODEL")
+                or os.environ.get("WILDMAGIC_DIALOGUE_MODEL")
+                or os.environ.get("WILDMAGIC_MODEL")
+                or self.model
+            ),
             "stream": False,
-            "think": ollama_thinking_enabled(),
+            "think": ollama_thinking_enabled(self.purpose),
             "messages": [
                 {"role": "system", "content": TRADE_SYSTEM_PROMPT},
                 {"role": "user", "content": json.dumps(context, ensure_ascii=True)},
@@ -846,12 +866,12 @@ class OllamaTradeProvider:
                 "temperature": ollama_trade_temperature(),
                 "top_p": 0.9,
                 "num_predict": ollama_trade_num_predict(),
-                "num_ctx": ollama_num_ctx(),
-                "num_gpu": ollama_num_gpu(),
+                "num_ctx": ollama_num_ctx(self.purpose),
+                "num_gpu": ollama_num_gpu(self.purpose),
             },
-            "keep_alive": "10m",
+            "keep_alive": ollama_keep_alive(self.purpose),
         }
-        if ollama_json_format_enabled():
+        if ollama_json_format_enabled(self.purpose):
             payload["format"] = "json"
         try:
             data = _post_ollama_chat(self.base_url, payload, self.timeout_seconds)
@@ -1321,6 +1341,20 @@ def _infer_effect_from_fields(e: dict[str, Any]) -> dict[str, Any] | None:
     return None
 
 
+def _trigger_is_once(obj: dict[str, Any]) -> bool:
+    """Models express single-use triggers many ways: "once": true, condition/
+    conditions dicts whose type is "once" / "once_per_combat" / etc."""
+    if obj.get("once") is True:
+        return True
+    for key in ("condition", "conditions"):
+        cond = obj.get(key)
+        if isinstance(cond, dict) and str(cond.get("type") or "").lower().startswith("once"):
+            return True
+        if isinstance(cond, str) and cond.lower().startswith("once"):
+            return True
+    return False
+
+
 def _infer_trigger_action(text: str) -> dict[str, Any] | None:
     """Convert a natural-language trigger action string to a structured effect dict."""
     t = text.lower()
@@ -1650,12 +1684,15 @@ def _normalize_resolution(data: dict[str, Any]) -> dict[str, Any]:
                 # Normalize create_trigger: handle many LLM structural variations.
                 if et == "create_trigger":
                     e = dict(e)
-                    # LLM sometimes nests the whole trigger config under "trigger" as a dict.
+                    # LLM sometimes nests the whole trigger config under "trigger"
+                    # (or "on") as a dict.
+                    if isinstance(e.get("on"), dict) and not isinstance(e.get("trigger"), dict):
+                        e["trigger"] = e.pop("on")
                     if isinstance(e.get("trigger"), dict):
                         trigger_obj = e.pop("trigger")
                         trigger_str = str(
                             trigger_obj.get("type") or trigger_obj.get("trigger")
-                            or trigger_obj.get("on") or "on_next_spell"
+                            or trigger_obj.get("on") or trigger_obj.get("event") or "on_next_spell"
                         )
                         e["trigger"] = trigger_str
                         if not e.get("effects"):
@@ -1671,9 +1708,11 @@ def _normalize_resolution(data: dict[str, Any]) -> dict[str, Any]:
                                 inferred = _infer_trigger_action(action)
                                 if inferred:
                                     e["effects"] = [inferred]
-                        if not e.get("charges") and isinstance(trigger_obj.get("condition"), dict):
-                            if trigger_obj["condition"].get("type") == "once":
-                                e["charges"] = 1
+                        if not e.get("charges") and _trigger_is_once(trigger_obj):
+                            e["charges"] = 1
+                    if not e.get("charges") and _trigger_is_once(e):
+                        e["charges"] = 1
+                    e.pop("once", None)
                     # LLM uses "action" (singular dict/string) instead of "effects" (list).
                     if not e.get("effects"):
                         single = e.pop("action", None) or e.pop("effect", None)
@@ -1922,10 +1961,7 @@ def write_audit_log(
     resolved_provider_name: str,
 ) -> str | None:
     audit_path = Path(os.environ.get("WILDMAGIC_AUDIT_DIR", "logs")) / "wild_magic_audit.jsonl"
-    prompt_messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": json.dumps(context, ensure_ascii=True)},
-    ]
+    prompt_messages = _wild_prompt_messages(context)
     record = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "spell": spell,
@@ -2018,6 +2054,7 @@ class TownProvider(Protocol):
 
 class OllamaTownProvider:
     name = "ollama"
+    purpose = "town"
 
     def __init__(
         self,
@@ -2026,14 +2063,14 @@ class OllamaTownProvider:
         timeout_seconds: float | None = None,
     ) -> None:
         self.model = model or get_town_model()
-        self.base_url = normalize_ollama_url(base_url or os.environ.get("OLLAMA_HOST", "http://localhost:11434"))
-        self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds()
+        self.base_url = normalize_ollama_url(base_url) if base_url else ollama_host(self.purpose)
+        self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds(self.purpose)
 
     def generate(self, zx: int, zy: int, context: dict[str, Any]) -> TownSpec:
         payload = {
             "model": os.environ.get("WILDMAGIC_TOWN_MODEL") or os.environ.get("WILDMAGIC_MODEL") or self.model,
             "stream": False,
-            "think": ollama_thinking_enabled(),
+            "think": ollama_thinking_enabled(self.purpose),
             "messages": [
                 {"role": "system", "content": TOWN_SYSTEM_PROMPT},
                 {"role": "user", "content": json.dumps(context, ensure_ascii=True)},
@@ -2042,12 +2079,12 @@ class OllamaTownProvider:
                 "temperature": ollama_temperature(),
                 "top_p": 0.9,
                 "num_predict": ollama_town_num_predict(),
-                "num_ctx": ollama_num_ctx(),
-                "num_gpu": ollama_num_gpu(),
+                "num_ctx": ollama_num_ctx(self.purpose),
+                "num_gpu": ollama_num_gpu(self.purpose),
             },
-            "keep_alive": "10m",
+            "keep_alive": ollama_keep_alive(self.purpose),
         }
-        if ollama_json_format_enabled():
+        if ollama_json_format_enabled(self.purpose):
             payload["format"] = "json"
         try:
             data = _post_ollama_chat(self.base_url, payload, self.timeout_seconds)
@@ -2067,7 +2104,7 @@ class MockTownProvider:
     name = "mock"
 
     def generate(self, zx: int, zy: int, context: dict[str, Any]) -> TownSpec:
-        names = ["Ashford Crossing", "Grimholt", "Cinder Vale", "The Waypost", "Brackenmere"]
+        names = ["Ashford Crossing", "Saltmarket", "Cinder Vale", "The Waypost", "Brackenmere"]
         idx = abs(hash((zx, zy))) % len(names)
         return TownSpec(
             town_name=names[idx],

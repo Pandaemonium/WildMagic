@@ -16,6 +16,12 @@ Use "effects" (array) and "costs" (array) — never "effect" (singular) or "cost
 Required top-level shape:
 {"accepted": true, "severity": "minor|moderate|major|catastrophic", "outcome_text": "short log message", "effects": [], "costs": [], "rejected_reason": null}
 
+outcome_text voice: 1-2 short sentences, present tense, sensory and concrete. Wild magic is
+ecstatic, alluring, and a little feral -- joy with teeth, never generic gloom or grimdark.
+Prefer color, sound, motion, and texture over menace. When the spell's wording leans on an old
+magical tradition (blood, bone, crystal, song and sound, and others like them), borrow that
+tradition's idiom in the text. Backfires and costs should read as strange beauty, not punishment.
+
 Use only the effects and costs needed for this one spell. Do not copy every available option.
 Typical minor/moderate spell: 1-3 effects and 1-2 costs.
 Typical major spell: 2-5 effects and 2-4 costs.
@@ -51,7 +57,11 @@ Balance rules:
 - Big damage, big area, big effects are fine — they need commensurate costs (mana, health, curses, items).
 - Use affects "enemies" for spells that should only harm foes.
 - Keep effects local and concrete. Prefer entity ids from context.
-- The environment contains 'props' (e.g. altars, braziers, blood pools) visible in nearby_entities. You can use these as targets or thematic anchors for spells (e.g. targeting an iron brazier to cause an explosion, or using a blood pool to power a curse).
+- The user JSON includes spell_anchors: visible environmental props sorted toward relevance. When the spell mentions surroundings, materials, objects, altars, braziers, mirrors, water, blood, bone, machinery, notices, cages, plants, webs, crystals, lights, books, bells, shrines, or other scenery, scan spell_anchors before choosing a generic resolution.
+- Use actual prop ids from spell_anchors as target/center/origin/placement anchors for create_tiles, area_damage, area_status, summon, conjure_item, conjure_creature, create_trigger, push, or pull. Use a prop's tags/affordances to flavor the mechanics.
+- recommended_effect_patterns inside a spell_anchor are copyable skeletons; fill in balanced amount/radius/duration/costs as needed, and prefer those patterns when they match the spell.
+- For attacks, usually target creatures and use the prop as the blast center/origin. If an anchor has range_hint, a small blast centered there may miss; use direct damage/status on the creature, or a line/beam from the prop toward nearest_enemy. Example: an iron brazier can center fire area_damage with affects:"enemies"; a mirror can center reveal/confusion; a pool can create mist/ice/water; vines/webs/ropes can add webbed/rooted; a notice/book/tablet can reveal or curse.
+- Do not target a prop with damage/status unless the spell explicitly destroys, animates, repairs, or transforms that object. Mention a prop by name in outcome_text when you use it.
 - For permanent terrain, omit duration or use "permanent"; otherwise duration must be 1 or more.
 - For body-part changes, use damage/status/conjure_item instead of transform_entity unless the whole creature changes.
 - For tracking, glowing shadow, locate, or reveal spells, use add_status with status "revealed" on the target.
@@ -98,7 +108,7 @@ Good examples:
 {"accepted": true, "severity": "moderate", "outcome_text": "The goblin spits out a brittle little treasure.", "effects": [{"type": "damage", "target": "nearest_enemy", "amount": 3, "damage_type": "physical"}, {"type": "add_status", "target": "nearest_enemy", "status": "bleeding", "duration": 3}, {"type": "conjure_item", "template": "body_part", "name": "glass teeth", "material": "glass", "tags": ["fragile", "tooth"], "target": "nearest_enemy", "placement": "target_tile"}], "costs": [{"type": "mana", "amount": 3}], "rejected_reason": null}
 {"accepted": true, "severity": "minor", "outcome_text": "Blue webbing pins the target in place.", "effects": [{"type": "add_status", "target": "nearest_enemy", "status": "webbed", "duration": 3}, {"type": "conjure_item", "template": "generic_object", "name": "sticky blue webbing", "material": "silk", "target": "nearest_enemy", "placement": "target_tile"}], "costs": [{"type": "item", "item": "chalk", "amount": 1}], "rejected_reason": null}
 {"accepted": true, "severity": "moderate", "outcome_text": "Time thickens around your enemies.", "effects": [{"type": "area_status", "target": "player", "radius": 4, "status": "slowed", "duration": 4, "affects": "enemies"}], "costs": [{"type": "mana", "amount": 4}], "rejected_reason": null}
-{"accepted": true, "severity": "moderate", "outcome_text": "Two wolves lope out of a dark corner.", "effects": [{"type": "conjure_creature", "template": "small_beast", "name": "shadow wolf", "count": 2, "faction": "ally", "tags": ["wolf", "predator"], "placement": "near_player"}], "costs": [{"type": "mana", "amount": 5}, {"type": "curse", "id": "wild_debt", "name": "Wild Debt", "description": "The wild expects repayment."}], "rejected_reason": null}
+{"accepted": true, "severity": "moderate", "outcome_text": "Two wolves pour out of the spell like spilled ink, tongues lolling, delighted.", "effects": [{"type": "conjure_creature", "template": "small_beast", "name": "shadow wolf", "count": 2, "faction": "ally", "tags": ["wolf", "predator"], "placement": "near_player"}], "costs": [{"type": "mana", "amount": 5}, {"type": "curse", "id": "wild_debt", "name": "Wild Debt", "description": "The wild expects repayment."}], "rejected_reason": null}
 {"accepted": true, "severity": "major", "outcome_text": "Wounds close. In five turns, something hostile will arrive to collect.", "effects": [{"type": "heal", "target": "player", "amount": 8}, {"type": "schedule_event", "turns": 5, "event_type": "summon", "name": "wrath echo", "char": "W", "hp": 10, "attack": 4, "faction": "enemy"}], "costs": [{"type": "mana", "amount": 3}], "rejected_reason": null}
 {"accepted": true, "severity": "moderate", "outcome_text": "Your bones remember fire.", "effects": [{"type": "add_resistance", "target": "player", "damage_type": "fire", "amount": 50}], "costs": [{"type": "mana", "amount": 6}, {"type": "curse", "id": "fire_debt", "name": "Fire Debt", "description": "Something hot is owed."}], "rejected_reason": null}
 {"accepted": true, "severity": "minor", "outcome_text": "Your bones lock like limestone.", "effects": [{"type": "add_status", "target": "nearest_enemy", "status": "frozen", "display_name": "petrified", "expiry_text": "The stone cracks. You can move.", "duration": 3}], "costs": [{"type": "mana", "amount": 2}], "rejected_reason": null}
@@ -106,16 +116,42 @@ Good examples:
 {"accepted": true, "severity": "moderate", "outcome_text": "A spectral archer materialises, nocking an arrow of shadow.", "effects": [{"type": "conjure_creature", "template": "spirit", "name": "shadow archer", "faction": "ally", "tags": ["ranged", "undead"], "placement": "near_player", "count": 1}], "costs": [{"type": "mana", "amount": 6}], "rejected_reason": null}
 {"accepted": true, "severity": "major", "outcome_text": "Something volatile and eager answers the call. It will not last long.", "effects": [{"type": "conjure_creature", "template": "construct", "name": "bomb golem", "faction": "ally", "hp": 4, "tags": ["explode_on_death", "bomb"], "placement": "near_player", "count": 1}], "costs": [{"type": "mana", "amount": 8}], "rejected_reason": null}
 {"accepted": true, "severity": "moderate", "outcome_text": "A healing font pulses softly. Stand near it to recover.", "effects": [{"type": "summon", "name": "healing font", "faction": "ally", "hp": 6, "attack": 0, "defense": 2, "char": "+", "tags": ["aura_heal_3", "stationary"]}], "costs": [{"type": "mana", "amount": 7}], "rejected_reason": null}
-{"accepted": true, "severity": "moderate", "outcome_text": "A ring of fire erupts around you.", "effects": [{"type": "create_tiles", "tile": "fire", "target": "player", "radius": 3, "hollow": true, "duration": 5}], "costs": [{"type": "mana", "amount": 5}], "rejected_reason": null}
-{"accepted": true, "severity": "minor", "outcome_text": "Ice draws a straight path to your enemy.", "effects": [{"type": "create_tiles", "shape": "line", "origin": "player", "target": "nearest_enemy", "tile": "slick_ice", "duration": 4}], "costs": [{"type": "mana", "amount": 3}], "rejected_reason": null}
+{"accepted": true, "severity": "moderate", "outcome_text": "Fire leaps up around you in a bright, eager ring.", "effects": [{"type": "create_tiles", "tile": "fire", "target": "player", "radius": 3, "hollow": true, "duration": 5}], "costs": [{"type": "mana", "amount": 5}], "rejected_reason": null}
+{"accepted": true, "severity": "minor", "outcome_text": "Ice unrolls toward your enemy like a silver carpet.", "effects": [{"type": "create_tiles", "shape": "line", "origin": "player", "target": "nearest_enemy", "tile": "slick_ice", "duration": 4}], "costs": [{"type": "mana", "amount": 3}], "rejected_reason": null}
 {"accepted": true, "severity": "moderate", "outcome_text": "Your wound learns to answer.", "effects": [{"type": "create_trigger", "name": "thorn-blood answer", "trigger": "on_player_hit", "target": "player", "charges": 1, "duration": 6, "effects": [{"type": "damage", "target": "trigger_source", "amount": 5, "damage_type": "physical"}, {"type": "add_status", "target": "trigger_source", "status": "bleeding", "duration": 3}]}], "costs": [{"type": "mana", "amount": 4}], "rejected_reason": null}
 {"accepted": false, "severity": "catastrophic", "outcome_text": "", "effects": [], "costs": [], "rejected_reason": "Reality refuses to become that convenient."}
 """.replace("{supported_statuses}", SUPPORTED_STATUS_TEXT)
 
 
+def region_prompt_block(region_style: dict | None) -> str:
+    """Per-region addendum appended to SYSTEM_PROMPT: a style line plus a few
+    region-voiced outcome_text samples (examples steer small models harder than
+    instructions, at modest token cost)."""
+    if not region_style:
+        return ""
+    lines = ["", f"Region: the player is in {region_style.get('name', 'unknown country')}."]
+    voice = (region_style.get("voice") or "").strip()
+    if voice:
+        lines.append(f"Region voice for outcome_text: {voice}")
+    examples = region_style.get("examples") or []
+    if examples:
+        lines.append("outcome_text samples in this region's voice:")
+        for example in examples[:3]:
+            lines.append(f'- "{example}"')
+    return "\n".join(lines) + "\n"
+
+
 DIALOGUE_SYSTEM_PROMPT = """You are voicing a single non-player character (NPC) in a turn-based tile roguelike.
 You will receive a JSON object describing who you are, what you have personally witnessed
 recently, your conversation so far, and what the player just said to you.
+
+The world: a vibrant, eclectic patchwork of peoples and surviving old magical traditions
+(blood, bone, crystal, song, and more), most of it under the Grand Empire -- an orderly,
+courteous, genuinely-not-evil power that outlaws wild sorcery and licenses only "charter
+magic" through its initiated charter mages. Ordinary folk hold every shade of opinion:
+gratitude for imperial peace and safe roads, quiet nostalgia for the old ways, fear of wild
+magic, fear of imperial paperwork. Your character has their own stance, shaped by their
+backstory -- but the world they live in is colorful and alive, not grim.
 
 Reply with ONLY the words your character speaks aloud - plain spoken text and nothing else.
 Do not include narration, stage directions, action descriptions, asterisks, quotation marks
@@ -188,8 +224,11 @@ haggle - not a vending machine.
 """
 
 
-TOWN_SYSTEM_PROMPT = """You are a world-builder for a dark fantasy roguelike. Generate a small frontier settlement.
-The settlement should feel lived-in, rough around the edges, and distinct from generic fantasy towns.
+TOWN_SYSTEM_PROMPT = """You are a world-builder for a vibrant, eclectic fantasy roguelike. The world is a colorful
+patchwork of old magical traditions (blood, bone, crystal, song) living under the Grand Empire -- a polite,
+orderly power that licenses "charter magic" and outlaws wild sorcery. Generate a small frontier settlement.
+The settlement should feel lived-in, particular, and alive -- local color, local customs, local trouble --
+never generic grimdark. Strangeness is welcome as long as the locals treat it as ordinary.
 Respond with ONLY a JSON object in this exact format — no prose, no explanation, no markdown:
 {
   "town_name": "2-4 word evocative name",
@@ -211,6 +250,7 @@ Respond with ONLY a JSON object in this exact format — no prose, no explanatio
 Building types (use only these): tavern, inn, shrine, temple, market, smithy, home, barracks, stable
 The user message will include four seeds: location, defining_trait, current_situation, and settlement_type. Use all of them. They should shape the town's name, its description, which NPCs live here, their personalities, what they carry, and what they'll say. The seeds are constraints, not suggestions — a town "at a worked-out mine" should feel like it; a town whose defining trait is "people come here to disappear" should have residents who act like it.
 NPCs: number of NPCs is given by npc_count_range in the user message. Include a varied mix of occupations suited to the seeds.
+Naming rule: folk and wild things favor earthy compounds (Saltmarket, Hollowmere, the Glasswild); anything imperial — offices, taxes, edicts, official roles — sounds cold and Latinate (the Censorate, Provincial Edict 44).
 Names: invent distinctive, culturally varied names — not generic fantasy. Mix naming styles: short rough names (Dav, Fen, Rust), foreign-sounding names, names with epithets (One-Eye, the Mute), names that hint at history. Avoid names ending in -ius, -iel, -yn, or starting with El-, Al-, Thal-.
 Wares: most NPCs should have 1-3 items they can trade (include "gold" as one, quantity 5-30). Merchants and traders should have more (4-7 items). Invent creative, specific items suited to each NPC's role and backstory — e.g. a tanner might sell "cured hide strips" and "tallow candles"; a disgraced soldier might sell "a dented Imperial buckle" and "faded campaign maps"; a hedge witch might sell "dried crow feet" and "a stoppered vial of bad dreams". Do not limit yourself to any fixed list. "gold" is always acceptable as a trade currency.
 The building field for each NPC should match one of the building types you listed, or null if they are outdoors."""

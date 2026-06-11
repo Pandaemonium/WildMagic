@@ -552,6 +552,31 @@ class _EffectsMixin:
         if effect_type == "set_flag":
             flag = normalize_id(str(effect.get("flag") or effect.get("id") or "unnamed_flag"))
             self.state.flags[flag] = effect.get("value", True)
+            # The model reaches for debt-flavored flags constantly (audit mining
+            # 2026-06: 148 of 152 set_flag uses were "future_debt") — a flag is
+            # mechanically inert, so make the debt real: a visible stacking
+            # curse now, and a collector already on its way.
+            if any(word in flag for word in ("debt", "owed", "owe", "price", "payment", "reckoning", "collector")):
+                curse_message = self._apply_cost({
+                    "type": "curse",
+                    "id": "wild_debt",
+                    "name": "Wild Debt",
+                    "description": "The wild expects repayment. Something is already on its way.",
+                })
+                stacks = self.state.curses["wild_debt"].stacks if "wild_debt" in self.state.curses else 1
+                self.state.event_timers.append({
+                    "turns": self.rng.randint(8, 15),
+                    "event_type": "summon",
+                    "name": "debt collector",
+                    "char": "D",
+                    "hp": 8 + 2 * stacks,
+                    "attack": 3 + stacks,
+                    "faction": "enemy",
+                })
+                messages = ["The debt is real. Somewhere, something turns toward you."]
+                if curse_message:
+                    messages.insert(0, curse_message)
+                return messages
             return [f"World flag set: {flag}."]
         if effect_type == "schedule_event":
             event = dict(effect.get("event") if isinstance(effect.get("event"), dict) else effect)

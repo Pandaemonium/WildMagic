@@ -8,11 +8,11 @@ from collections import deque
 from typing import Any
 
 from .game_data import (
+    CLERK_NOTICES,
     EQUIPMENT_SPECS,
     LEGION_ENEMY_TEMPLATES,
     LOCKED_DOOR_KEYS,
     TRAP_SPECS,
-    WILD_ENEMY_TEMPLATES,
     _BUILDING_SIZES,
     _DEFAULT_BUILDING_SIZE,
     _DEFAULT_NPC_STATS,
@@ -42,16 +42,12 @@ from .models import (
 )
 from .normalize import normalize_id
 from .props import PROP_CATEGORIES, get_all_prop_ids, get_nonblocking_prop_ids, get_prop_template
+from .regions import region_for_zone
 
 
-# Each entry: (max_depth_inclusive, {category: weight}).
-# First matching threshold (depth <= max_depth) wins.
-_FLOOR_THEMES: list[tuple[int, dict[str, int]]] = [
-    (2,  {"ruined": 5, "infrastructure": 3, "natural": 2}),
-    (4,  {"macabre": 4, "ruined": 3, "natural": 2, "infrastructure": 1}),
-    (6,  {"arcane": 3, "macabre": 3, "alchemical": 2, "furniture": 1, "ruined": 1}),
-    (999, {"arcane": 4, "alchemical": 3, "religious": 2, "macabre": 2, "natural": 1}),
-]
+# Floor themes (max_depth -> prop category weights) now live on each Region
+# (regions.py) — the gradient is per-region, and effective wildness is
+# region.wildness_base + depth. See _floor_theme_weights below.
 
 # Thematically paired prop IDs placed together as a 2-prop "scene".
 _PROP_SCENES: list[tuple[str, str]] = [
@@ -70,18 +66,21 @@ _PROP_SCENES: list[tuple[str, str]] = [
     ("reagent_cabinet", "mortar_and_pestle"),
     ("specimen_jars", "failed_homunculus"),
     ("electrostatic_coil", "alchemical_still"),
-    ("dissection_table", "embalming_station"),
-    ("dissection_table", "specimen_jars"),
-    ("dissection_table", "fresh_blood_pool"),
-    ("blood_stained_torture_rack", "iron_chains"),
-    ("blood_stained_torture_rack", "wall_manacles"),
-    ("torture_wheel", "blood_stained_torture_rack"),
-    ("hanging_cage", "noose"),
-    ("gibbet_chain", "hanging_cage"),
     ("open_sarcophagus", "mummified_remains"),
     ("pile_of_skulls", "bone_throne"),
     ("ossuary_niche", "pile_of_skulls"),
     ("funeral_pyre_remnants", "sealed_burial_urn"),
+    ("bone_chime", "wind_organ"),
+    ("singing_stones", "ancestor_drum"),
+    ("crystal_garden", "crystal_formation"),
+    ("crystal_garden", "leaking_mana_crystal"),
+    ("blood_tide_basin", "painted_prayer_stones"),
+    ("festival_mask", "broken_puppet_stage"),
+    ("echo_jar", "sealed_burial_urn"),
+    ("posted_notice", "charter_waystone"),
+    ("posted_notice", "regulation_lantern"),
+    ("survey_marker", "requisition_ledger"),
+    ("confiscation_crate", "regulation_lantern"),
     ("shattered_altar", "votive_candles"),
     ("saint_statue", "offering_bowl"),
     ("altar_of_thorns", "burned_effigy"),
@@ -146,7 +145,7 @@ class _GenerationMixin:
 
         px, py = rooms[0].center
         # Non-blocking themed prop in the starting room for immediate atmosphere.
-        _theme_weights = next(w for (d, w) in _FLOOR_THEMES if self.state.depth <= d)
+        _theme_weights = self._floor_theme_weights(self.state.depth)
         _themed_ids = [pid for cat in _theme_weights for pid in PROP_CATEGORIES.get(cat, [])]
         _nb_pool = [pid for pid in _themed_ids if not get_prop_template(pid).blocks]
         if not _nb_pool:
@@ -183,10 +182,14 @@ class _GenerationMixin:
         if state.depth > 1:
             state.tiles[py][px] = STAIRS_UP
 
-        enemy_templates = WILD_ENEMY_TEMPLATES + LEGION_ENEMY_TEMPLATES
+        region = self.region
         for room in rooms[1:]:
             if self.rng.random() < 0.85:
-                name, char, hp, attack, defense, ai, tags, resistances, weaknesses = self.rng.choice(enemy_templates)
+                if self.rng.random() < region.imperial_presence:
+                    template = self.rng.choice(LEGION_ENEMY_TEMPLATES)
+                else:
+                    template = self.rng.choice(list(region.enemy_templates))
+                name, char, hp, attack, defense, ai, tags, resistances, weaknesses = template
                 x, y = self._random_open_tile_in_room(room)
                 self.spawn_actor(
                     name,
@@ -242,6 +245,20 @@ class _GenerationMixin:
         state.tiles[down_y][down_x] = STAIRS_DOWN
         self._place_doors()
         self._place_locked_door(rooms)
+
+        # The Censorate's paperwork follows the player down, signed by the same
+        # increasingly weary official — reliably wherever the Empire reaches,
+        # only rarely out in the deep wild.
+        notice_chance = 1.0 if region.imperial_presence >= 0.2 else 0.25
+        if self.rng.random() < notice_chance:
+            notice_text = CLERK_NOTICES[min(state.depth - 1, len(CLERK_NOTICES) - 1)]
+            for _ in range(20):
+                nx, ny = self._random_open_tile_in_room(self.rng.choice(rooms))
+                if (nx, ny) != (px, py):
+                    notice = self.spawn_prop("posted_notice", nx, ny)
+                    if notice:
+                        notice.description = notice_text
+                    break
 
         from .npc_quests import maybe_spawn_quest_item
         avoid = {(e.x, e.y) for e in state.entities.values()} | {(px, py)}
@@ -732,14 +749,14 @@ class _GenerationMixin:
             elif zone_rng.random() < 0.5:
                 spot = self._random_open_tile_in_room(room)
                 if spot not in occupied:
-                    self._spawn_from_template(zone_rng.choice(WILD_ENEMY_TEMPLATES), spot[0], spot[1])
+                    self._spawn_from_template(zone_rng.choice(list(self.region.enemy_templates)), spot[0], spot[1])
                     occupied.add(spot)
 
         for _ in range(zone_rng.randint(1, 3)):
             spot = self._random_open_ground_tile(zone_rng, occupied)
             if spot is None:
                 break
-            roster = LEGION_ENEMY_TEMPLATES if zone_rng.random() < imperial_density else WILD_ENEMY_TEMPLATES
+            roster = LEGION_ENEMY_TEMPLATES if zone_rng.random() < imperial_density else list(self.region.enemy_templates)
             self._spawn_from_template(zone_rng.choice(roster), spot[0], spot[1])
             occupied.add(spot)
 
@@ -929,8 +946,14 @@ class _GenerationMixin:
 
         self._save_current_zone()
         state.zone_x, state.zone_y = new_zx, new_zy
+        new_region_id = region_for_zone(new_zx, new_zy)
+        region_changed = new_region_id != state.region_id
+        state.region_id = new_region_id
         self._load_or_generate_zone(new_zx, new_zy, entry_x, entry_y)
-        state.add_message(f"You cross into new territory - the {state.zone_type} of zone ({new_zx}, {new_zy}).")
+        if region_changed:
+            state.add_message(f"You cross into {self.region.name}. The air is different here.")
+        else:
+            state.add_message(f"You cross into new territory - the {state.zone_type} of zone ({new_zx}, {new_zy}).")
         return True
 
     def _save_current_zone(self) -> None:
@@ -1239,8 +1262,15 @@ class _GenerationMixin:
                 return x, y
         return room.center
 
+    def _floor_theme_weights(self, depth: int) -> dict[str, int]:
+        themes = self.region.floor_themes
+        for max_depth, weights in themes:
+            if depth <= max_depth:
+                return weights
+        return themes[-1][1]
+
     def _pick_themed_prop_id(self, depth: int) -> str:
-        weights = next(w for (d, w) in _FLOOR_THEMES if depth <= d)
+        weights = self._floor_theme_weights(depth)
         total = sum(weights.values())
         roll = self.rng.randint(1, total)
         cumulative = 0
@@ -1255,7 +1285,13 @@ class _GenerationMixin:
 
     def _spawn_props_in_room(self, room: Room, depth: int, allow_scene: bool = True) -> None:
         if allow_scene and self.rng.random() < 0.20:
-            scene = self.rng.choice(_PROP_SCENES)
+            # Scenes follow the region's theme gradient too: imperial pairings
+            # where the Empire reaches, tradition pairings in the wild. Fall
+            # back to any scene if the current themes have no complete pairing.
+            weights = self._floor_theme_weights(depth)
+            themed_ids = {pid for cat in weights for pid in PROP_CATEGORIES.get(cat, [])}
+            themed_scenes = [s for s in _PROP_SCENES if all(pid in themed_ids for pid in s)]
+            scene = self.rng.choice(themed_scenes or _PROP_SCENES)
             for pid in scene:
                 template = get_prop_template(pid)
                 if template:

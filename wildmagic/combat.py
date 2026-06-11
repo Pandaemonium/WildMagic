@@ -116,7 +116,15 @@ class _CombatMixin:
                 if entity.id == self.state.player_id:
                     self.state.game_over = True
                     self.state.victory = False
-                    self.state.add_message("You die. The dungeon keeps your echo.")
+                    # The two tones of the game, even in dying: the Empire closes
+                    # a file; the wild takes you back.
+                    if source is not None and "empire" in source.tags:
+                        self.state.death_cause = "empire"
+                        self.state.add_message("You die. The squad re-forms and moves on without comment.")
+                        self.state.add_message("Somewhere, a file is stamped CLOSED.")
+                    else:
+                        self.state.death_cause = "wild"
+                        self.state.add_message("You die. The wild takes its color back, and keeps your echo.")
                 elif entity.kind == "npc":
                     # NPCs have no kill stat, loot table, or victory check of their own --
                     # this is the one piece of feedback the whole "you can lose them, and

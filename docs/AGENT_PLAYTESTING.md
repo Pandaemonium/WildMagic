@@ -71,6 +71,22 @@ ollama ps
 
 For `qwen3:8b`, `PROCESSOR` should ideally show `100% GPU`.
 
+### Split Ollama Routing
+
+Wild magic, dialogue, trade, and background town generation can use different Ollama endpoints. By default they all fall through to `WILDMAGIC_OLLAMA_HOST`, then `OLLAMA_HOST`, then `http://localhost:11434`.
+
+For a two-server playtest, route urgent calls to the GPU server and background town generation to a CPU server:
+
+```powershell
+$env:WILDMAGIC_URGENT_OLLAMA_HOST='http://127.0.0.1:11434'
+$env:WILDMAGIC_BACKGROUND_OLLAMA_HOST='http://127.0.0.1:11435'
+$env:WILDMAGIC_BACKGROUND_OLLAMA_NUM_GPU='0'
+```
+
+Per-purpose overrides are also supported: `WILDMAGIC_WILD_OLLAMA_HOST`, `WILDMAGIC_DIALOGUE_OLLAMA_HOST`, `WILDMAGIC_TRADE_OLLAMA_HOST`, and `WILDMAGIC_TOWN_OLLAMA_HOST`. The same scoped pattern works for `OLLAMA_NUM_CTX`, `OLLAMA_TIMEOUT`, `OLLAMA_NUM_GPU`, `OLLAMA_THINK`, `OLLAMA_FORMAT`, and `OLLAMA_KEEP_ALIVE`.
+
+When you want strict control over manually started servers, set `WILDMAGIC_OLLAMA_AUTOSTART=0`.
+
 ## Command Surface
 
 Useful CLI commands:

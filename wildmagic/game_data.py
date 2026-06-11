@@ -42,6 +42,31 @@ FACTION_HOSTILITIES: list[tuple[set[str], set[str]]] = [
 ]
 
 
+# Found documents: every notice the player encounters is signed by the same
+# weary provincial official, whose patience erodes as the player gets further.
+# Indexed by dungeon depth (clamped to the last entry).
+CLERK_NOTICES: list[str] = [
+    "NOTICE: Unlicensed thaumic activity has been reported in this district. Citizens are "
+    "reminded that charter magic is the only lawful magic, and that assistance rendered to "
+    "the Censorate is compensated at the standard schedule. — Provincial Office of the "
+    "Censorate, ref. 7-112.",
+    "NOTICE, SECOND POSTING: The individual styling themselves a sorcerer remains at large. "
+    "The bounty is revised upward to forty crowns. Citizens are asked to stop submitting "
+    "claims for wild-magic incidents that are clearly weather. — Provincial Office of the "
+    "Censorate, ref. 7-112.",
+    "MEMORANDUM: Containment Squad Six is reassigned to this sector. Squad Four is "
+    "reassigned to convalescence. My objection to the phrase 'routine apprehension' has "
+    "been filed in triplicate, like everything else. — Censor's Office, ref. 7-112-F.",
+    "MEMORANDUM: Requisitioning a second squadron, against my own earlier advice, since my "
+    "earlier advice is apparently being ignored by reality. The subject is to be considered "
+    "armed with anything they can see. — Censor's Office, ref. 7-112-K.",
+    "INTERNAL, DO NOT CIRCULATE: To whoever keeps filing these incident reports under "
+    "'miscellaneous': there is nothing miscellaneous left in this district. The file now "
+    "has its own shelf. I have requisitioned the shelf a reinforcement. — Censor's Office, "
+    "unnumbered.",
+]
+
+
 ITEM_USE_SPECS: dict[str, dict[str, Any]] = {
     "mana_crystal": {
         "effects": [{"kind": "restore_mana", "amount": 6}],
@@ -251,9 +276,9 @@ _TOWN_LOCATIONS: list[str] = [
     "beside a spring that never runs dry even in drought",
     "in the shadow of a long-dead volcano",
     "at the edge of a near-impassable marsh",
-    "along a stretch of road known for ambushes",
+    "beneath a cliff face painted with old murals that never fade, though no one repaints them",
     "near a stone circle that the locals won't discuss",
-    "at a crossroads with a history of violence",
+    "around a crossroads market that exists only on Thursdays",
     "on a bluff above a wide, slow-moving river",
     "where the forest thins and the plain begins",
     "sheltered in a natural hollow that traps fog",
@@ -267,7 +292,7 @@ _TOWN_DEFINING_TRAITS: list[str] = [
     "The locals have survived three changes of ruler in ten years",
     "Something was found here once; people still come looking",
     "No one asks where you came from or what you left behind",
-    "Every family here has someone buried under the foundations",
+    "Every family here keeps a different old tradition, and each insists theirs is the politest",
     "The town exists because of one trade, and it is slowly dying",
     "There is one person here that everyone else defers to, for reasons no one states openly",
     "The town had a different name before; no one uses it anymore",
@@ -276,7 +301,7 @@ _TOWN_DEFINING_TRAITS: list[str] = [
     "The young leave as soon as they can; those who stay have their reasons",
     "The Empire ignores this place, which is precisely why it survives",
     "Strange things happen here at certain times of year; the locals call it ordinary",
-    "Everyone here is running from something, and everyone knows it",
+    "The town is musical — work songs, door chimes, gossip half-sung; silence here means something is wrong",
     "The town has a good reputation in the region, built on one lie told consistently for years",
     "The founding family still runs everything, though the last of them is very old",
 ]
@@ -287,7 +312,7 @@ _TOWN_SITUATIONS: list[str] = [
     "A new Imperial tax collector arrived and shows no sign of leaving",
     "A rumor is spreading about something valuable hidden in the hills nearby",
     "Winter came early and the stores are already running low",
-    "A sickness passed through recently — most recovered, a few didn't, and no one knows why",
+    "A wild-magic surge two valleys over has the local charter mage demanding everyone re-register their charms",
     "An old grudge between two families has resurfaced over something trivial",
     "A merchant passed through last week with strange news from further east",
     "Someone has been leaving offerings at the edge of town each night",
@@ -296,7 +321,7 @@ _TOWN_SITUATIONS: list[str] = [
     "Imperial patrols have been passing through more frequently than usual",
     "A traveling performer arrived six days ago and has not moved on",
     "The well started tasting wrong and no one will say anything definitive about it",
-    "Two residents vanished last month; one body was found, the other wasn't",
+    "A birdfolk courier has been waiting six days for a reply that no one in town admits to owing",
     "An unexpected early thaw has flooded the lower roads; people are stuck here",
     "A large debt came due recently and everyone is feeling the pressure",
     "Someone new arrived claiming to own something here, and the paperwork looks real",

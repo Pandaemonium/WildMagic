@@ -47,6 +47,7 @@ from .effects import _EffectsMixin
 from .items import _ItemsMixin
 from .templates import creature_template, creature_template_ids, item_template, item_template_ids
 from .props import get_prop_template, get_all_prop_ids
+from .regions import Region, get_region
 from .game_data import (
     MAP_WIDTH,
     MAP_HEIGHT,
@@ -99,6 +100,61 @@ class LogMessage(str):
         return obj
 
 
+_PROP_TAG_AFFORDANCES: dict[str, list[str]] = {
+    "acid": ["corrode armor or stone", "make poison cloud", "burn a path"],
+    "alien": ["summon strange life", "confuse or frighten", "mutate nearby matter"],
+    "antimagic": ["silence magic", "drain mana", "ward an area"],
+    "ash": ["raise smoke or mist", "summon embers", "mark with old fire"],
+    "blood": ["curse", "bleed", "call a debt"],
+    "bone": ["summon spirits", "root or bind", "make brittle shards"],
+    "broken": ["shatter outward", "scatter rubble", "turn failure into force"],
+    "cold": ["freeze", "slow", "make slick ice"],
+    "crystal": ["refract light", "shatter", "amplify magic"],
+    "cursed": ["curse", "frighten", "mark a target"],
+    "death": ["summon spirits", "drain life", "delay a consequence"],
+    "debris": ["make rubble", "scatter shrapnel", "block movement"],
+    "dry": ["ignite", "make ash", "spread dust"],
+    "empire": ["bind with regulation", "mark or reveal", "summon hostile attention"],
+    "fire": ["ignite", "explode", "make smoke or light"],
+    "flammable": ["ignite", "spread fire", "make smoke"],
+    "fragile": ["shatter", "make shards", "release stored magic"],
+    "fungus": ["poison", "confuse", "spread spores"],
+    "glass": ["shatter", "refract light", "make cutting fragments"],
+    "heavy": ["drop weight", "anchor a pull", "block movement"],
+    "holy": ["ward", "reveal", "burn undead or cursed things"],
+    "hot": ["ignite", "burn", "melt ice"],
+    "insect": ["summon swarm", "crawl over enemies", "spread panic"],
+    "light": ["reveal", "blind or mark", "project a beam"],
+    "lightning": ["shock", "stun", "conduct through metal or water"],
+    "liquid": ["flood", "splash", "turn to mist or ice"],
+    "lore": ["reveal", "set a delayed omen", "name a curse"],
+    "magic": ["amplify the spell", "summon", "create a ward"],
+    "mechanical": ["trigger a mechanism", "spin time or force", "launch or pull"],
+    "metal": ["conduct lightning", "magnetize", "make shrapnel"],
+    "music": ["charm or confuse", "push as sound", "summon echoes"],
+    "paper": ["burn into sigils", "reveal writing", "scatter pages"],
+    "plant": ["grow vines", "snare", "release spores or pollen"],
+    "powder": ["make a circle", "blind with dust", "ignite a flash"],
+    "prison": ["bind", "root", "lock a target in place"],
+    "ritual": ["summon", "curse", "ward"],
+    "rope": ["bind", "pull", "snare"],
+    "sharp": ["bleed", "make caltrops", "shred armor"],
+    "silk": ["web", "snare", "muffle sound"],
+    "smelly": ["poison", "frighten", "make a choking cloud"],
+    "snaring": ["root", "web", "slow movement"],
+    "stone": ["make rubble", "petrify", "raise a barrier"],
+    "toxic": ["poison", "make poison cloud", "sicken"],
+    "trap": ["trigger", "create ward", "delay an effect"],
+    "water": ["flood", "mist", "freeze or conduct lightning"],
+    "weapons": ["launch blades", "arm a summon", "make shrapnel"],
+    "wet": ["mist", "freeze", "conduct lightning"],
+    "wood": ["ignite", "grow thorns", "splinter"],
+}
+
+
+_PROP_GENERIC_AFFORDANCES = ["use as a spell center", "flavor the outcome", "anchor a summon or terrain change"]
+
+
 @dataclass
 class GameState:
     width: int = MAP_WIDTH
@@ -135,6 +191,8 @@ class GameState:
     triggers: list[dict[str, Any]] = field(default_factory=list)
     game_over: bool = False
     victory: bool = False
+    death_cause: str | None = None  # "empire" | "wild" | None — set when the player dies
+    region_id: str = "frontier"  # which Region (regions.py) the player is currently in
     rng_seed: int | None = None
     scenario: str = "dungeon"
     fov_radius: int = 9
@@ -334,6 +392,10 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         self.state.entities[entity.id] = entity
         return entity
 
+
+    @property
+    def region(self) -> Region:
+        return get_region(self.state.region_id)
 
     def in_bounds(self, x: int, y: int) -> bool:
         return 0 <= x < self.state.width and 0 <= y < self.state.height
@@ -632,7 +694,8 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                 "statuses": sorted(player.statuses),
                 "equipment": {slot: item for slot, item in player.equipment.items() if item},
             },
-            "scene": {"turn": self.state.turn, "depth": self.state.depth, "scenario": self.state.scenario},
+            "scene": {"turn": self.state.turn, "depth": self.state.depth, "scenario": self.state.scenario,
+                      "region": self.region.name},
             "message": message,
         }
 
@@ -1039,27 +1102,22 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
     def _ambient_sounds(self) -> None:
         if self.rng.random() > 0.12:
             return
-        player = self.state.player
+        region = self.region
         unseen_enemies = [
             e for e in self.living_enemies()
             if not self.is_visible(e.x, e.y)
         ]
         if not unseen_enemies:
+            # No threat nearby: the place itself speaks. Strangeness scales
+            # with effective wildness (region base + depth) — surveyed and
+            # sensible near imperial reach, dreamlike in the deep wild.
+            self.state.add_message(self.rng.choice(list(region.wonder_lines(self.state.depth))))
             return
         enemy = self.rng.choice(unseen_enemies)
-        sounds_by_tag = {
-            "undead": ["Something rattles in the dark.", "You hear hollow footsteps.", "A cold draft passes through the wall."],
-            "beast": ["Claws scrape stone somewhere nearby.", "You hear labored breathing.", "Something heavy shifts in the shadows."],
-            "slime": ["A wet sound gurgles in the distance.", "Something drips that isn't water.", "You hear a slow, wet pulse."],
-            "spider": ["Silk scrapes against stone.", "You hear many legs on the ceiling.", "A faint clicking echoes past."],
-            "construct": ["Metal grinds against stone.", "A low hum resonates from the walls.", "Gears turn somewhere unseen."],
-            "shadow": ["The shadows pool and shift.", "Something cold watches from the dark.", "Your torch dims for a moment."],
-            "empire": ["You hear the rhythmic stamp of boots in unison.", "A horn sounds three precise notes, then falls silent.", "Iron scrapes against iron in perfect time."],
-        }
-        messages = ["Something moves in the dark.", "You sense you are not alone.", "The dungeon breathes."]
-        for tag, tag_messages in sounds_by_tag.items():
+        messages = list(region.ambient_default)
+        for tag, tag_messages in region.ambient_by_tag.items():
             if tag in enemy.tags:
-                messages = tag_messages
+                messages = list(tag_messages)
                 break
         self.state.add_message(self.rng.choice(messages))
 
@@ -1533,6 +1591,148 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         """
         return second_person if entity.id == self.state.player_id else third_person
 
+    def nearby_spell_anchors(self, spell: str, limit: int = 8) -> list[dict[str, Any]]:
+        """Visible props distilled for the spell resolver.
+
+        Props already appear in nearby_entities, but that list has many entity kinds.
+        This compact view tells the model which environmental objects are good spell
+        anchors and what normal engine mechanics they suggest.
+        """
+        player = self.state.player
+        spell_terms = {
+            normalize_id(part)
+            for part in re.findall(r"[A-Za-z0-9_'-]+", spell.lower())
+            if len(part) >= 3
+        }
+        visible_enemies = [
+            enemy
+            for enemy in self.living_enemies()
+            if self.is_visible(enemy.x, enemy.y)
+            and abs(enemy.x - player.x) <= self.state.fov_radius
+            and abs(enemy.y - player.y) <= self.state.fov_radius
+        ]
+        anchors: list[tuple[int, dict[str, Any]]] = []
+        for entity in self.state.entities.values():
+            if entity.kind != "prop" or not entity.alive or not self.is_visible(entity.x, entity.y):
+                continue
+            if abs(entity.x - player.x) > self.state.fov_radius or abs(entity.y - player.y) > self.state.fov_radius:
+                continue
+            tags = sorted(entity.tags)
+            name_terms = set(normalize_id(entity.name).split("_"))
+            tag_terms = {normalize_id(tag) for tag in tags}
+            desc_terms = {
+                normalize_id(part)
+                for part in re.findall(r"[A-Za-z0-9_'-]+", entity.description or "")
+                if len(part) >= 4
+            }
+            matched_terms = sorted(spell_terms & (name_terms | tag_terms | desc_terms))
+            affordances: list[str] = []
+            for tag in tags:
+                for affordance in _PROP_TAG_AFFORDANCES.get(tag, []):
+                    if affordance not in affordances:
+                        affordances.append(affordance)
+            if not affordances:
+                affordances = list(_PROP_GENERIC_AFFORDANCES)
+            distance = abs(entity.x - player.x) + abs(entity.y - player.y)
+            reactive_tags = {
+                "magic", "ritual", "fire", "hot", "water", "liquid", "lightning", "toxic",
+                "acid", "cursed", "death", "blood", "bone", "crystal", "glass", "fragile",
+                "mechanical", "snaring", "trap", "empire", "holy", "music",
+            }
+            priority = distance
+            if matched_terms:
+                priority -= 20
+            if reactive_tags & entity.tags:
+                priority -= 6
+            anchor = {
+                "id": entity.id,
+                "name": entity.name,
+                "position": {"x": entity.x, "y": entity.y},
+                "distance": distance,
+                "tags": tags,
+                "description": entity.description,
+                "affordances": affordances[:5],
+                "suggested_mechanics": [
+                    f'use "{entity.id}" as target/center/origin for local effects',
+                    'damage/status should usually target creatures; use affects:"enemies" for blasts',
+                    "use create_tiles, area_damage, area_status, summon, conjure_item, or create_trigger to express the prop",
+                ],
+            }
+            if matched_terms:
+                anchor["matches_spell_terms"] = matched_terms[:6]
+            damage_type = "arcane"
+            if {"fire", "hot", "flammable"} & entity.tags:
+                damage_type = "fire"
+            elif {"toxic", "acid", "fungus"} & entity.tags:
+                damage_type = "poison"
+            elif "lightning" in entity.tags:
+                damage_type = "lightning"
+            elif "cold" in entity.tags:
+                damage_type = "frost"
+            elif {"sharp", "heavy", "metal", "stone", "glass", "broken"} & entity.tags:
+                damage_type = "physical"
+            elif {"holy", "light"} & entity.tags:
+                damage_type = "radiant"
+            elif {"cursed", "death"} & entity.tags:
+                damage_type = "shadow"
+
+            terrain_tile = "mist"
+            if {"fire", "hot", "flammable"} & entity.tags:
+                terrain_tile = "fire"
+            elif {"toxic", "acid", "fungus"} & entity.tags:
+                terrain_tile = "poison_cloud"
+            elif {"water", "wet", "liquid"} & entity.tags:
+                terrain_tile = "water"
+            elif "cold" in entity.tags:
+                terrain_tile = "slick_ice"
+            elif {"plant", "snaring", "rope", "silk"} & entity.tags:
+                terrain_tile = "vines"
+            elif {"stone", "debris", "broken", "heavy"} & entity.tags:
+                terrain_tile = "rubble"
+
+            if visible_enemies:
+                nearest_enemy = min(visible_enemies, key=lambda enemy: abs(enemy.x - entity.x) + abs(enemy.y - entity.y))
+                enemy_distance = abs(nearest_enemy.x - entity.x) + abs(nearest_enemy.y - entity.y)
+                anchor["nearest_visible_enemy"] = {
+                    "id": nearest_enemy.id,
+                    "name": nearest_enemy.name,
+                    "distance": enemy_distance,
+                }
+                if enemy_distance > 4:
+                    anchor["range_hint"] = (
+                        "small area_damage centered here may miss that enemy; consider direct damage "
+                        "on the enemy, or a create_tiles line/beam from this prop toward nearest_enemy"
+                    )
+                    anchor["recommended_effect_patterns"] = [
+                        {"type": "damage", "target": nearest_enemy.id, "damage_type": damage_type},
+                        {
+                            "type": "create_tiles",
+                            "shape": "line",
+                            "origin": entity.id,
+                            "target": nearest_enemy.id,
+                            "tile": terrain_tile,
+                            "duration": 3,
+                        },
+                    ]
+                else:
+                    anchor["recommended_effect_patterns"] = [
+                        {
+                            "type": "area_damage",
+                            "target": entity.id,
+                            "radius": max(1, enemy_distance),
+                            "damage_type": damage_type,
+                            "include_player": False,
+                            "affects": "enemies",
+                        }
+                    ]
+            else:
+                anchor["recommended_effect_patterns"] = [
+                    {"type": "create_tiles", "target": entity.id, "radius": 1, "tile": terrain_tile, "duration": 4}
+                ]
+            anchors.append((priority, anchor))
+        anchors.sort(key=lambda item: (item[0], item[1]["distance"], item[1]["name"]))
+        return [anchor for _, anchor in anchors[:limit]]
+
     def context_for_llm(self, spell: str) -> dict[str, Any]:
         player = self.state.player
         nearby_entities = [
@@ -1554,6 +1754,9 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         ]
         return {
             "spell": spell,
+            # Consumed by the prompt builder (spliced into the system prompt),
+            # stripped from the user-message JSON. See _wild_prompt_messages.
+            "region_style": self.region.prompt_style(),
             "turn": self.state.turn,
             "depth": self.state.depth,
             "max_depth": self.state.max_depth,
@@ -1566,6 +1769,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             "visible_tile_count": len(self.state.visible),
             "explored_tile_count": len(self.state.explored),
             "nearby_entities": nearby_entities,
+            "spell_anchors": self.nearby_spell_anchors(spell),
             "floor_items": floor_items,
             "nearby_map": self.nearby_map_strings(radius=9),
             "nearby_tile_details": self.nearby_tile_details(radius=5),

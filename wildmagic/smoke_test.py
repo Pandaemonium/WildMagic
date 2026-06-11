@@ -102,7 +102,11 @@ def main() -> None:
     rich_session.execute_command("wait")
     rich_session.execute_command("wait")
     assert rich_session.engine.state.flags.get("future_debt") is True
-    assert not rich_session.engine.state.event_timers
+    # Debt-flavored flags are no longer inert: they leave a stacking Wild Debt
+    # curse and schedule a collector 8-15 turns out (effects.py set_flag), so
+    # exactly that one timer should still be pending after three waits.
+    assert "wild_debt" in rich_session.engine.state.curses
+    assert [timer["name"] for timer in rich_session.engine.state.event_timers] == ["debt collector"]
     assert rich_session.engine.state.player.resistances.get("poison", 0) >= 25
     assert any(
         e.name in ("wild echo", "debt collector", "summoned creature")
@@ -125,6 +129,21 @@ def main() -> None:
         if enemy.name == "ant swarm" and "ant" in enemy.tags
     ]
     assert len(ant_swarms) >= 1
+
+    anchor_session = GameSession(seed=7, scenario="test_chamber", provider=MockWildMagicProvider())
+    anchor_engine = anchor_session.engine
+    brazier = anchor_engine.spawn_prop("iron_brazier", anchor_engine.state.player.x - 1, anchor_engine.state.player.y)
+    assert brazier is not None
+    anchor_session.execute_command("move east")
+    anchor_context = anchor_engine.context_for_llm("ignite the brazier and blast the goblin")
+    anchors = anchor_context.get("spell_anchors") or []
+    brazier_anchor = next(anchor for anchor in anchors if anchor["id"] == brazier.id)
+    assert brazier_anchor["name"] == "iron brazier"
+    assert "matches_spell_terms" in brazier_anchor
+    assert any("ignite" in affordance or "explode" in affordance for affordance in brazier_anchor["affordances"])
+    assert brazier_anchor["nearest_visible_enemy"]["name"] == "test goblin"
+    assert "range_hint" in brazier_anchor
+    assert brazier_anchor["recommended_effect_patterns"][0]["target"] == brazier_anchor["nearest_visible_enemy"]["id"]
 
     behavior_session = GameSession(seed=7, scenario="test_chamber", provider=MockWildMagicProvider())
     behavior_engine = behavior_session.engine

@@ -54,7 +54,7 @@ engine.py contains only the infrastructure that everything else depends on:
 - Player actions: `attempt_player_move`, `wait_turn`, `open_door`, `open_adjacent_door`, `descend_stairs`, `ascend_stairs`, `teleport_entity`, `_move_to_nearest_open_tile`
 - Standard spells (deterministic, no LLM): `cast_standard_bolt`, `cast_standard_frost`, `cast_standard_heal`, `cast_standard_ward`, `cast_standard_reveal`
 - NPC dialogue/trade: `find_talk_target`, `dialogue_context_for_llm`, `apply_dialogue_exchange`, `resolve_pending_trade`, `should_consider_trade`, `trade_context_for_llm`
-- LLM context building: `context_for_llm`, `nearby_map_strings`, `nearby_tile_details`
+- LLM context building: `context_for_llm`, `nearby_spell_anchors`, `nearby_map_strings`, `nearby_tile_details`
 - Turn bookkeeping: `finish_player_turn`, `_regenerate_player`, `resolve_target`, `resolve_target_group`, `nearest_enemy`, `_verb`
 - Environment tick: `_tick_environment`, `_tick_fire_spread`, `_tick_poison_spread`, `_apply_tile_entry`, `_ambient_sounds`, `_tick_simple_statuses`, `_tick_tile_durations`, `_tick_event_timers`
 - Trigger system: `_trigger_event`, `_tick_triggers`, `_fire_triggers`, `_fire_damage_triggers`, `_fire_death_triggers`, `_trigger_matches_target`, `_fill_trigger_effect_defaults`
@@ -136,7 +136,9 @@ provider kinds, each returning a typed resolution object:
 
 Factory functions `make_provider`, `make_dialogue_provider`, `make_trade_provider`,
 `make_town_provider` read environment variables (`WILDMAGIC_PROVIDER`,
-`WILDMAGIC_DIALOGUE_PROVIDER`, etc.) to select the active backend.
+`WILDMAGIC_DIALOGUE_PROVIDER`, etc.) to select the active backend. Ollama-backed
+providers also carry a purpose label (`wild`, `dialogue`, `trade`, `town`) so
+`llm_client.py` can route urgent and background requests to different Ollama hosts.
 
 Also contains `resolve_spell`, `resolve_dialogue`, `resolve_trade_proposal`,
 `_effect_from_text` (regex-based fallback parser), and the audit log writers.
@@ -146,8 +148,11 @@ JSON Schema used for constrained spell decoding live in `spell_contract.py`.
 ### `wildmagic/llm_client.py`
 Raw Ollama HTTP transport, completely decoupled from game logic:
 `_post_ollama_chat`, `parse_ollama_error_body`, `strip_thinking`, `extract_thinking`,
-`normalize_ollama_url`, `fetch_ollama_models`, and all 13 `ollama_*()` config readers
-that pull values from environment variables.
+`normalize_ollama_url`, `ollama_host`, `fetch_ollama_models`, and the `ollama_*()`
+config readers that pull values from environment variables. It owns the purpose-scoped
+routing precedence for `WILDMAGIC_WILD_OLLAMA_HOST`, `WILDMAGIC_URGENT_OLLAMA_HOST`,
+`WILDMAGIC_BACKGROUND_OLLAMA_HOST`, and matching scoped request options such as
+`OLLAMA_NUM_CTX`, `OLLAMA_TIMEOUT`, `OLLAMA_NUM_GPU`, and `OLLAMA_KEEP_ALIVE`.
 
 ### `wildmagic/llm_resolver.py`
 Shared retry and audit utilities:
@@ -206,11 +211,25 @@ and `_conjure_creature` in `effects.py` and by `_spawn_from_template` in `genera
 ### `wildmagic/props.py`
 Static environmental scenery that the LLM can target as spell anchors. Frozen dataclass
 `PropTemplate` (`id`, `char`, `name`, `description`, `blocks`, `tags`). `PROP_TEMPLATES`
-dict of 30 props across five thematic categories: Arcane & Ritual, Ruined & Abandoned,
-Macabre & Somber, Natural & Overgrown, Dungeon Infrastructure. Look-up functions
+dict of ~120 props across eight thematic categories: Arcane & Ritual, Ruined & Abandoned,
+Old Traditions (buried strata of pre-charter magic), Imperial, Natural & Overgrown,
+Dungeon Infrastructure, Alchemical, Religious, Furniture. Look-up functions
 `get_prop_template` and `get_all_prop_ids`. Props are spawned via `engine.spawn_prop()`,
 stored as `Entity(kind="prop")`, and appear in the LLM context's `nearby_entities` list
-with their description and tags once visible.
+with their description and tags once visible. `GameEngine.nearby_spell_anchors()` also
+distills visible props into a compact `spell_anchors` context list with tag-derived
+affordances so the resolver is more likely to use scenery as a center, origin, or
+thematic anchor for normal effects.
+
+### `wildmagic/regions.py`
+Regions as first-class data (see `EXECUTION_PLAN.md` Phase 13). Frozen dataclass `Region`
+bundling everything about "where you are": LLM voice spec + example outcome lines,
+enemy template pool, `imperial_presence`, floor theme weights, ambient message tables,
+wildness-banded wonder lines, and `wildness_base` (effective wildness = base + depth).
+`REGIONS` registry, `get_region`, and `region_for_zone(zx, zy)` mapping overworld zones to
+regions. Consumed by `engine.region` (a property over `state.region_id`), generation,
+ambience, and the wild-magic prompt builder (`region_style` in the LLM context, spliced
+into the system prompt by `_wild_prompt_messages` in `wild_magic.py`).
 
 ### `wildmagic/npc_quests.py`
 Quest system logic and data. Defines the `QUEST_ITEMS` dictionary mapping special unique quest items to their visual/materials/tags specs. Handles the automatic quest assignment when talking to NPCs, the probability checks for quest item spawning when entering zones (`maybe_spawn_quest_item`), and procedural quest generation (`generate_npc_quest`) for generated NPCs.
@@ -235,6 +254,14 @@ process-local `hash()` implementation.
 ---
 
 ## Dev / test
+
+### `wildmagic/speleval.py` + `wildmagic/speleval_corpus.py`
+Spell-resolution eval harness (`python -m wildmagic.speleval`): runs a 107-spell
+intent-tagged corpus (common / creative / exploit) through the full cast pipeline on a
+fresh deterministic session per spell and scores resolution/rejection/technical rates,
+hallucinated targets, exploit leakage, and latency. `--from-audit` re-validates recorded
+raw responses from an audit JSONL under the current contract code (offline regression
+check). Eval traffic is audited to `logs/speleval/` instead of the main audit log.
 
 ### `wildmagic/smoke_test.py`
 Headless integration test. Creates a `test_chamber` session with `MockWildMagicProvider`,
