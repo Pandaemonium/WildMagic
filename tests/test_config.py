@@ -40,7 +40,9 @@ OLLAMA_ROUTE_KEYS = (
 )
 
 
-def test_shell_environment_takes_precedence_over_dotenv(monkeypatch, tmp_path: Path) -> None:
+def test_shell_environment_takes_precedence_over_dotenv(
+    monkeypatch, tmp_path: Path
+) -> None:
     env_path = tmp_path / ".env"
     env_path.write_text("WILDMAGIC_MODEL=dotenv-model\n", encoding="utf-8")
     monkeypatch.setattr(config, "ENV_PATH", env_path)
@@ -162,7 +164,9 @@ def test_scoped_ollama_routing_precedence(monkeypatch) -> None:
     assert config.ollama_num_gpu("lore") == 0
 
 
-def test_scoped_ollama_settings_follow_purpose_and_route_precedence(monkeypatch) -> None:
+def test_scoped_ollama_settings_follow_purpose_and_route_precedence(
+    monkeypatch,
+) -> None:
     monkeypatch.setenv("WILDMAGIC_OLLAMA_TIMEOUT", "100")
     monkeypatch.setenv("WILDMAGIC_URGENT_OLLAMA_TIMEOUT", "200")
     monkeypatch.setenv("WILDMAGIC_WILD_OLLAMA_TIMEOUT", "300")
@@ -174,7 +178,9 @@ def test_scoped_ollama_settings_follow_purpose_and_route_precedence(monkeypatch)
     assert config.ollama_num_gpu("lore") == 0
 
 
-def test_set_config_value_updates_process_and_dotenv(monkeypatch, tmp_path: Path) -> None:
+def test_set_config_value_updates_process_and_dotenv(
+    monkeypatch, tmp_path: Path
+) -> None:
     env_path = tmp_path / ".env"
     monkeypatch.setattr(config, "ENV_PATH", env_path)
     monkeypatch.delenv("WILDMAGIC_MODEL", raising=False)

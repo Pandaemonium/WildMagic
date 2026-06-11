@@ -17,7 +17,11 @@ class FixedDialogueProvider:
 
 def _stand_next_to_first_npc(session: GameSession) -> None:
     npc = min(
-        (entity for entity in session.engine.state.entities.values() if entity.kind == "npc"),
+        (
+            entity
+            for entity in session.engine.state.entities.values()
+            if entity.kind == "npc"
+        ),
         key=lambda entity: entity.id,
     )
     player = session.engine.state.player

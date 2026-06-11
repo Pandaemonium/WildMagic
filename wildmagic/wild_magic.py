@@ -1864,6 +1864,8 @@ def _normalize_target_text(value: Any) -> Any:
     if not isinstance(value, str):
         return value
     normalized = value.lower().strip().replace("-", "_").replace(" ", "_")
+    if normalized.startswith("the_"):
+        normalized = normalized[4:]
     target_aliases = {
         "self": "player",
         "you": "player",

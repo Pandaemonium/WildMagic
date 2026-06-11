@@ -12,10 +12,17 @@ dependencies = [
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    "ruff>=0.14",
 ]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff.lint]
+ignore = [
+    "E402",  # Existing module layout includes imports after provider helpers.
+    "F401",  # Some imports intentionally preserve compatibility and mixin APIs.
+]
 
 [build-system]
 requires = ["hatchling"]
