@@ -1,13 +1,9 @@
 from __future__ import annotations
 
-import os
 import re
 from typing import Any
 
-
-def fallbacks_enabled() -> bool:
-    value = os.environ.get("WILDMAGIC_ENABLE_FALLBACKS", "1").lower().strip()
-    return value not in {"0", "false", "no", "off"}
+from .config import fallbacks_enabled
 
 
 def fallback_resolution_from_spell(spell: str) -> dict[str, Any] | None:

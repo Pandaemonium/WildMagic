@@ -52,6 +52,7 @@ Examples to avoid:
 - `wildmagic/engine.py`: authoritative game rules and state mutation.
 - `wildmagic/models.py`: shared data classes (`Entity`, `NPCProfile`, etc.) used by engine and state.
 - `wildmagic/actions.py`: shared action/session layer used by UI, CLI, tests, and replays.
+- `wildmagic/config.py`: `.env` loading, defaults, typed settings, provider/model fallback chains, and persisted configuration updates.
 - `wildmagic/wild_magic.py`: LLM prompt, provider calls, JSON parsing, normalization, validation, audit logging.
 - `wildmagic/fallbacks.py`: quarantined replacement-resolution fallbacks. Keep this isolated and optional.
 - `wildmagic/templates.py`: template-backed arbitrary item and creature creation.
@@ -98,7 +99,7 @@ Local LLM play:
 
 ```powershell
 $env:WILDMAGIC_PROVIDER='ollama'
-$env:WILDMAGIC_MODEL='qwen3:8b'
+$env:WILDMAGIC_MODEL='qwen3.5:9b'
 $env:WILDMAGIC_OLLAMA_TIMEOUT='240'
 python -m wildmagic.cli --provider ollama --scenario test_chamber --seed 7
 ```
