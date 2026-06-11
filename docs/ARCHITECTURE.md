@@ -269,6 +269,12 @@ hallucinated targets, exploit leakage, and latency. `--from-audit` re-validates 
 raw responses from an audit JSONL under the current contract code (offline regression
 check). Eval traffic is audited to `logs/speleval/` instead of the main audit log.
 
+### `wildmagic/dialogue_eval.py`
+Dialogue-model comparison harness (`python -m wildmagic.dialogue_eval`): runs fixed
+Hollowmere NPC prompts through the real Ollama dialogue provider path, scores simple
+failure/genericness/grounding heuristics, prints a comparison table, and writes a JSON
+report under `logs/dialogue_eval/`.
+
 ### `wildmagic/smoke_test.py`
 Headless integration test. Creates a `test_chamber` session with `MockWildMagicProvider`,
 fires a movement, a well-formed spell, a malformed response, and a rejection scenario,
