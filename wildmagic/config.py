@@ -8,7 +8,7 @@ from dotenv import load_dotenv, set_key
 
 
 ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
-DEFAULT_MODEL = "qwen3.5:9b"
+DEFAULT_MODEL = "qwen3.5:9b-q4_K_M"
 DEFAULT_PROVIDER = "ollama"
 DEFAULT_OLLAMA_HOST = "http://localhost:11434"
 

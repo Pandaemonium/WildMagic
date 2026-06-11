@@ -99,7 +99,7 @@ Local LLM play:
 
 ```powershell
 $env:WILDMAGIC_PROVIDER='ollama'
-$env:WILDMAGIC_MODEL='qwen3.5:9b'
+$env:WILDMAGIC_MODEL='qwen3:8b'
 $env:WILDMAGIC_OLLAMA_TIMEOUT='240'
 python -m wildmagic.cli --provider ollama --scenario test_chamber --seed 7
 ```

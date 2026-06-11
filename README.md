@@ -7,7 +7,7 @@ A graphical ASCII roguelike where normal actions are deterministic and wild spel
 ### 1. Install Ollama & Pull the Model
 First, install [Ollama](https://ollama.com/) on your machine. Then, pull the recommended default model:
 ```powershell
-ollama pull qwen3.5:9b
+ollama pull qwen3.5:9b-q4_K_M
 ```
 
 ### 2. Configure Environment Variables
@@ -31,7 +31,7 @@ The default resolver is `ollama`, so the game uses the local LLM path unless you
 
 ```powershell
 $env:WILDMAGIC_PROVIDER='ollama'
-$env:WILDMAGIC_MODEL='qwen3.5:9b'
+$env:WILDMAGIC_MODEL='qwen3:8b'
 python main.py
 ```
 
@@ -74,10 +74,10 @@ If Ollama returns a 404, check the installed model name:
 
 ```powershell
 ollama list
-$env:WILDMAGIC_MODEL='qwen3.5:9b'
+$env:WILDMAGIC_MODEL='qwen3:8b'
 ```
 
-The model name must match an installed Ollama tag. Model names are configuration values and are not hardcoded into provider implementations.
+The model name must match an installed Ollama tag, such as `qwen3:8b`, `qwen3.6`, or another local model from your list.
 
 ## Ollama Routing
 
@@ -135,23 +135,23 @@ By default dialogue uses the same provider family as wild magic, but you can poi
 
 ```powershell
 $env:WILDMAGIC_DIALOGUE_PROVIDER='ollama'
-$env:WILDMAGIC_DIALOGUE_MODEL='qwen3.5:9b'
+$env:WILDMAGIC_DIALOGUE_MODEL='qwen3:8b'
 ```
 
-If unset, `WILDMAGIC_DIALOGUE_PROVIDER` falls back to `WILDMAGIC_PROVIDER`, and `WILDMAGIC_DIALOGUE_MODEL` falls back to `WILDMAGIC_MODEL`, so one shared setup covers both spell resolution and dialogue. `WILDMAGIC_DIALOGUE_TEMPERATURE` (default `0.7`) and `WILDMAGIC_DIALOGUE_NUM_PREDICT` (default `320`) tune reply style and length.
+If unset, `WILDMAGIC_DIALOGUE_PROVIDER` falls back to `WILDMAGIC_PROVIDER`, and `WILDMAGIC_DIALOGUE_MODEL` falls back to `WILDMAGIC_MODEL`, so a single `ollama`/`qwen3:8b` setup covers both spell resolution and dialogue. `WILDMAGIC_DIALOGUE_TEMPERATURE` (default `0.7`) and `WILDMAGIC_DIALOGUE_NUM_PREDICT` (default `320`) tune reply style and length.
 
 Every dialogue exchange writes a JSONL audit record to `logs/dialogue_audit.jsonl`, alongside the wild-magic log, controlled by the same `WILDMAGIC_AUDIT_DIR`/`WILDMAGIC_AUDIT_LOG` settings.
 
 ## Intel Arc GPU Notes
 
-On the tested Arc A750 setup, larger models may load as mixed CPU/GPU when they exceed available VRAM. Select an installed model that fits the target machine through `.env`.
+On the tested Arc A750 setup, `qwen3.6` loaded as mixed CPU/GPU because it is too large for the available VRAM. `qwen3:8b` fit fully on the GPU and is the recommended default.
 
 To run Ollama on the Arc A750 through Vulkan, start the Ollama server with:
 
 ```powershell
 $env:OLLAMA_VULKAN='1'
 $env:GGML_VK_VISIBLE_DEVICES='0'
-$env:WILDMAGIC_MODEL='qwen3.5:9b'
+$env:WILDMAGIC_MODEL='qwen3:8b'
 ollama serve
 ```
 
@@ -161,7 +161,7 @@ If the desktop Ollama app is already running on port `11434`, quit it before sta
 $env:OLLAMA_HOST='http://127.0.0.1:11435'
 ```
 
-Use `ollama ps` after a spell cast to verify whether the configured model is GPU-resident.
+Use `ollama ps` after a spell cast. The `PROCESSOR` column should show `100% GPU` for `qwen3:8b`.
 
 ## Controls
 

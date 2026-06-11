@@ -33,17 +33,17 @@ Run with the local LLM resolver:
 
 ```powershell
 $env:WILDMAGIC_PROVIDER='ollama'
-$env:WILDMAGIC_MODEL='qwen3.5:9b'
+$env:WILDMAGIC_MODEL='qwen3:8b'
 $env:WILDMAGIC_OLLAMA_TIMEOUT='240'
 $env:WILDMAGIC_OLLAMA_NUM_PREDICT='512'
 $env:WILDMAGIC_OLLAMA_TEMPERATURE='0.25'
 python -m wildmagic.cli --provider ollama --scenario test_chamber --seed 7
 ```
 
-**GPU note for Arc A750:** a model running mostly on CPU may produce poor output or time out.
-The game sets `num_gpu=999` in every Ollama request by default, which requests full GPU offload.
-If you see malformed or empty spell results, check `ollama ps`; `PROCESSOR` should show `100% GPU`.
-You can override the setting via
+**GPU note for Arc A750:** `qwen3:8b` running mostly on CPU produces garbage output (random tokens,
+Chinese characters) for any prompt longer than a few dozen tokens. The game sets `num_gpu=999` in
+every Ollama request by default, which forces full GPU offload and fixes this. If you see garbage or
+empty spell results, check `ollama ps` — `PROCESSOR` should show `100% GPU`. You can override via
 `$env:WILDMAGIC_OLLAMA_NUM_GPU='999'` (already the default).
 
 On the Arc A750 test machine, start Ollama with Intel GPU support:
@@ -59,7 +59,7 @@ Then, in another shell:
 
 ```powershell
 $env:OLLAMA_HOST='http://127.0.0.1:11435'
-$env:WILDMAGIC_MODEL='qwen3.5:9b'
+$env:WILDMAGIC_MODEL='qwen3:8b'
 python -m wildmagic.cli --provider ollama --scenario test_chamber --seed 7
 ```
 
@@ -69,7 +69,7 @@ After an LLM cast, check GPU usage:
 ollama ps
 ```
 
-The `PROCESSOR` column should ideally show the configured model as GPU-resident.
+For `qwen3:8b`, `PROCESSOR` should ideally show `100% GPU`.
 
 ### Split Ollama Routing
 
