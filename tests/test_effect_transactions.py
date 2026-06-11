@@ -48,7 +48,9 @@ def test_intentional_rejection_consumes_a_turn_and_records_failure() -> None:
     assert engine.state.stats.spells_failed == failures_before + 1
 
 
-def test_successful_resolution_applies_effects_and_costs_before_advancing_turn() -> None:
+def test_successful_resolution_applies_effects_and_costs_before_advancing_turn() -> (
+    None
+):
     engine = GameEngine(seed=7, scenario="test_chamber")
     player = engine.state.player
     turn_before = engine.state.turn

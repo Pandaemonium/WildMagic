@@ -84,8 +84,12 @@ def test_legacy_json_configuration_is_removed() -> None:
         if "wildmagic_config.json" in path.read_text(encoding="utf-8")
     ]
 
-    assert not legacy_path.exists(), "wildmagic_config.json is a competing persisted source of truth"
-    assert references == [], f"production modules still reference wildmagic_config.json: {references}"
+    assert not legacy_path.exists(), (
+        "wildmagic_config.json is a competing persisted source of truth"
+    )
+    assert references == [], (
+        f"production modules still reference wildmagic_config.json: {references}"
+    )
 
 
 def test_model_default_is_not_owned_by_provider_or_ui_modules() -> None:
@@ -95,13 +99,10 @@ def test_model_default_is_not_owned_by_provider_or_ui_modules() -> None:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
         for node in ast.walk(tree):
-            if (
-                isinstance(node, (ast.Assign, ast.AnnAssign))
-                and any(
-                    isinstance(target, ast.Name) and target.id == "DEFAULT_MODEL"
-                    for target in (
-                        node.targets if isinstance(node, ast.Assign) else [node.target]
-                    )
+            if isinstance(node, (ast.Assign, ast.AnnAssign)) and any(
+                isinstance(target, ast.Name) and target.id == "DEFAULT_MODEL"
+                for target in (
+                    node.targets if isinstance(node, ast.Assign) else [node.target]
                 )
             ):
                 findings.append(f"{path.relative_to(REPO_ROOT)}:{node.lineno}")

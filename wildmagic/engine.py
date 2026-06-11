@@ -1533,7 +1533,6 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                 )
             self.state.add_message(f"{name} arrives.")
         elif event_type == "conjure":
-            template_id = str(event.get("template") or "small_beast")
             self._apply_effect({"type": "conjure_creature", **event, "event_type": None})
         elif event_type in {"damage", "area_damage"}:
             player = self.state.player
@@ -2012,4 +2011,3 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                         }
                     )
         return details[:60]
-

@@ -117,7 +117,7 @@ def maybe_spawn_quest_item(engine: GameEngine, avoid: set[tuple[int, int]]) -> b
             tags=spec.get("tags")
         )
         avoid.add(spot)
-        engine.state.add_message(f"A strange feeling washes over you. There is something important nearby...")
+        engine.state.add_message("A strange feeling washes over you. There is something important nearby...")
         return True
     return False
 

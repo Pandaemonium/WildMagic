@@ -168,7 +168,7 @@ class _CombatMixin:
             elif damage_type == "lightning":
                 if self.tile_at(entity.x, entity.y) == WATER:
                     entity.statuses["stunned"] = max(status_duration(entity.statuses.get("stunned")), 2)
-                    self.state.add_message(f"Lightning courses through the water!")
+                    self.state.add_message("Lightning courses through the water!")
                     if not self._conducting_lightning:
                         self._conducting_lightning = True
                         try:

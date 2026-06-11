@@ -25,7 +25,10 @@ def resolution(**overrides: object) -> dict[str, object]:
         ({"effects": []}, "accepted spells must have at least one effect"),
         ({"effects": "damage"}, "effects must be a list"),
         ({"costs": {"type": "mana"}}, "costs must be a list"),
-        ({"effects": [{"type": "rewrite_reality"}]}, "unsupported effect type: rewrite_reality"),
+        (
+            {"effects": [{"type": "rewrite_reality"}]},
+            "unsupported effect type: rewrite_reality",
+        ),
         ({"costs": [{"type": "memory"}]}, "unsupported cost type: memory"),
         (
             {"effects": [{"type": "area_damage", "radius": "nearby"}]},
