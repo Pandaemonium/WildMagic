@@ -77,6 +77,7 @@ defaults to the master).
 | `WILDMAGIC_DIALOGUE_MODEL` | shared | NPC conversation (a chattier finetune works well) |
 | `WILDMAGIC_TRADE_MODEL` | dialogue's | trade extraction |
 | `WILDMAGIC_CANON_MODEL` | shared | examine/read materialization |
+| `WILDMAGIC_BACKGROUND_CANON_MODEL` | lore model | background book previews |
 | `WILDMAGIC_TOWN_MODEL` | shared | settlement generation |
 | `WILDMAGIC_LORE_MODEL` | `qwen3:1.7b` | extraction/flesh; small is fine for extraction |
 
@@ -105,8 +106,26 @@ ignoring the spell contract in creative ways.
 | `WILDMAGIC_TRADE_NUM_PREDICT` | no | dialogue's | trade budget |
 | `WILDMAGIC_TOWN_NUM_PREDICT` | no | 2000 (256–8192) | town generation budget |
 | `WILDMAGIC_LORE_NUM_PREDICT` | no | 700 (64–2048) | lore/flesh budget |
-| `WILDMAGIC_CANON_NUM_PREDICT` | no | 700 (64–2048) | examine/read budget |
+| `WILDMAGIC_CANON_NUM_PREDICT` | no | 1400 (64–2048) | examine/read budget; sized for compressed book pages |
 | `WILDMAGIC_OLLAMA_RESOLUTION_ATTEMPTS` | no | 2 (1–4) | wild-magic retries on malformed JSON |
+
+## Canon prewarming
+
+Background canon prewarming is off by default so the game never starts extra LLM work
+without an explicit opt-in. The first slice is now a small saturation queue: it paints
+the current labeled room first, visible non-book entities as far-look details next, then
+nearby visible book identities.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `WILDMAGIC_CANON_PREWARM_ENABLED` | off | when on, room flavor, far-look entity details, and nearby visible book previews can materialize in the background |
+| `WILDMAGIC_CANON_PREWARM_LIMIT` | 1 | maximum queued/in-flight background canon jobs |
+
+Prewarming uses the background route (`LORE`/`BACKGROUND` Ollama options) and the
+`WILDMAGIC_BACKGROUND_CANON_MODEL` model, falling back to `WILDMAGIC_LORE_MODEL`.
+It can materialize `room_flavor`, far-look `object_detail`/`npc_detail`/`creature_detail`,
+and `book_preview` records. Full book pages still come from `read`, and close-study
+details still come from player investigation.
 
 ### The model-reload (thrash) warning
 

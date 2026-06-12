@@ -198,6 +198,10 @@ def _write_flesh_audit(
     resolved_provider_name: str,
 ) -> str | None:
     audit_path = audit_dir() / "flesh_audit.jsonl"
+    prompt_messages = [
+        {"role": "system", "content": FLESH_SYSTEM_PROMPT},
+        {"role": "user", "content": json.dumps(context, ensure_ascii=True)},
+    ]
     record = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "promise_id": context.get("promise_id"),
@@ -205,6 +209,10 @@ def _write_flesh_audit(
         "provider_requested": getattr(provider, "name", "unknown"),
         "model": getattr(provider, "model", None),
         "ollama_base_url": getattr(provider, "base_url", None),
+        "prompt": {
+            "messages": prompt_messages,
+            "context": context,
+        },
         "context": context,
         "raw_response": raw_response,
         "flesh": flesh,

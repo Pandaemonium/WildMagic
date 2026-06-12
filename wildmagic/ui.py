@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import json
 import os
 import textwrap
@@ -11,12 +12,11 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame
 
 from .actions import ActionResult, GameSession
-from .config import DEFAULT_MODEL, get_config_value, set_config_value
+from .config import DEFAULT_MODEL, audit_dir, get_config_value, set_config_value
 from .game_data import _TOWN_GEN_TIMEOUT, EQUIPMENT_SPECS
 from .items import infer_equipment_slot
 from .normalize import normalize_id
 from .wild_magic import fetch_ollama_models
-from .wild_magic import SYSTEM_PROMPT, extract_thinking, strip_thinking
 from .models import (
     DOOR,
     FIRE,
@@ -79,6 +79,26 @@ _MOVE_KEY_MAP: dict[int, str] = {
     pygame.K_KP1: "southwest", pygame.K_KP3: "southeast",
 }
 CONTROLS_HINT_WRAP = 48
+
+LLM_AUDIT_FILES = (
+    "wild_magic_audit.jsonl",
+    "dialogue_audit.jsonl",
+    "trade_audit.jsonl",
+    "town_audit.jsonl",
+    "canon_audit.jsonl",
+    "lore_audit.jsonl",
+    "flesh_audit.jsonl",
+)
+
+LLM_CALL_COLORS = {
+    "spell": MODE_PURPLE,
+    "dialogue": MODE_YELLOW,
+    "trade": MODE_ORANGE,
+    "town": GOLD,
+    "canon": ACCENT,
+    "lore": MANA,
+    "flesh": MODE_GREEN,
+}
 
 # ---------------------------------------------------------------------------
 # Config menu spec — each entry drives the menu display and .env update
@@ -192,7 +212,14 @@ class GameUI:
         self.spell_box_rect = pygame.Rect(MAP_OFFSET_X + MAP_PIXEL_WIDTH + 20, WINDOW_HEIGHT - 92, PANEL_WIDTH - 40, 54)
 
         self.llm_debug_entries: list[dict[str, Any]] = []
+        self.llm_debug_started_at = datetime.now(timezone.utc)
+        self.llm_debug_seen: set[str] = set()
         self._llm_lines_cache: list[tuple[str, tuple[int, int, int]]] | None = None
+        self.llm_block_ranges: list[tuple[int, int]] = []
+        self.llm_entry_block_ranges: dict[int, dict[str, tuple[int, int]]] = {}
+        self.llm_call_button_rects: list[tuple[pygame.Rect, int]] = []
+        self.llm_selected_call_index: int | None = None
+        self.llm_selected_call_part = "response"
         self.llm_scroll_offset = 0
         self.llm_autoscroll = True
         self.llm_dragging_scrollbar = False
@@ -306,6 +333,14 @@ class GameUI:
                 self.execute_command("accept")
             elif event.key in (pygame.K_n, pygame.K_ESCAPE):
                 self.execute_command("reject")
+            return
+
+        if (
+            event.key in (pygame.K_UP, pygame.K_DOWN)
+            and self.llm_selection_anchor is not None
+            and self.llm_selection_focus is not None
+            and self._move_llm_block_selection(-1 if event.key == pygame.K_UP else 1)
+        ):
             return
 
         if event.key == pygame.K_ESCAPE:
@@ -440,6 +475,15 @@ class GameUI:
                 self._llm_scroll_to_fraction(fraction)
                 self.llm_dragging_scrollbar = True
                 return
+            for rect, entry_index in self.llm_call_button_rects:
+                if rect.collidepoint(event.pos):
+                    if self._activate_llm_call_button(entry_index):
+                        self.dragging_llm_selection = False
+                        self.dragging_log_selection = False
+                        self.log_selection_anchor = None
+                        self.log_selection_focus = None
+                        self.input_active = False
+                    return
             for rect, mode in self.mode_label_rects:
                 if rect.collidepoint(event.pos):
                     self.input_mode = mode
@@ -685,6 +729,9 @@ class GameUI:
     def execute_command(self, command: str) -> None:
         self.log_scroll_offset = 0
         result = self.session.execute_command(command)
+        self._refresh_llm_debug_entries()
+        self._llm_lines_cache = None
+        self.llm_autoscroll = True
         if result.action == "read" and result.success and result.canon_materialization:
             record = result.canon_materialization.get("record")
             if isinstance(record, dict) and record.get("kind") == "book":
@@ -712,7 +759,14 @@ class GameUI:
         self._last_trade_active = False
         self.provider_label = self.session.provider_label
         self.llm_debug_entries = []
+        self.llm_debug_started_at = datetime.now(timezone.utc)
+        self.llm_debug_seen = set()
         self._llm_lines_cache = None
+        self.llm_block_ranges = []
+        self.llm_entry_block_ranges = {}
+        self.llm_call_button_rects = []
+        self.llm_selected_call_index = None
+        self.llm_selected_call_part = "response"
         self.llm_scroll_offset = 0
         self.llm_autoscroll = True
         self.llm_line_rects = []
@@ -800,6 +854,86 @@ class GameUI:
             return []
         return [text for text, _color in self._llm_lines_cache[start : end + 1]]
 
+    def _llm_block_index_for_line(self, line_index: int) -> int | None:
+        if self._llm_lines_cache is None:
+            self._llm_lines_cache = self._build_llm_lines(80)
+        for index, (start, end) in enumerate(self.llm_block_ranges):
+            if start <= line_index <= end:
+                return index
+        return None
+
+    def _select_llm_block(self, block_index: int) -> bool:
+        if self._llm_lines_cache is None:
+            self._llm_lines_cache = self._build_llm_lines(80)
+        if not self.llm_block_ranges:
+            return False
+        block_index = max(0, min(block_index, len(self.llm_block_ranges) - 1))
+        start, end = self.llm_block_ranges[block_index]
+        self.llm_selection_anchor = start
+        self.llm_selection_focus = end
+        visible_lines = max(1, self.llm_content_rect.height // (self.small_font.get_linesize() + 1))
+        self.llm_scroll_offset = max(0, min(start, max(0, end - visible_lines + 1)))
+        self.llm_autoscroll = False
+        return True
+
+    def _move_llm_block_selection(self, direction: int) -> bool:
+        if self._llm_lines_cache is None:
+            self._llm_lines_cache = self._build_llm_lines(80)
+        if not self.llm_block_ranges:
+            return False
+        focus = self.llm_selection_focus if self.llm_selection_focus is not None else self.llm_selection_anchor
+        if focus is None:
+            return False
+        current = self._llm_block_index_for_line(focus)
+        if current is None:
+            return False
+        return self._select_llm_block(current + direction)
+
+    def _recent_llm_call_indices(self) -> list[int]:
+        count = len(self.llm_debug_entries)
+        start = max(0, count - 10)
+        return list(range(count - 1, start - 1, -1))
+
+    def _llm_call_kind(self, entry: dict[str, Any]) -> str:
+        raw = normalize_id(str(entry.get("call_type") or "llm"))
+        if raw in {"wild_magic", "wild magic"}:
+            return "spell"
+        if raw in {"dialogue", "trade", "town", "canon", "lore", "flesh"}:
+            return raw
+        return raw.replace("_", " ") or "llm"
+
+    def _fit_text(self, text: str, font: pygame.font.Font, max_width: int) -> str:
+        if font.size(text)[0] <= max_width:
+            return text
+        ellipsis = "..."
+        result = text
+        while result and font.size(result + ellipsis)[0] > max_width:
+            result = result[:-1]
+        return (result + ellipsis) if result else ellipsis
+
+    def _activate_llm_call_button(self, entry_index: int) -> bool:
+        if self.llm_selected_call_index == entry_index:
+            part = "response" if self.llm_selected_call_part == "prompt" else "prompt"
+        else:
+            part = "prompt"
+        return self._select_llm_entry_part(entry_index, part)
+
+    def _select_llm_entry_part(self, entry_index: int, part: str) -> bool:
+        if self._llm_lines_cache is None:
+            self._llm_lines_cache = self._build_llm_lines(80)
+        ranges = self.llm_entry_block_ranges.get(entry_index)
+        if not ranges or part not in ranges:
+            return False
+        start, end = ranges[part]
+        self.llm_selection_anchor = start
+        self.llm_selection_focus = end
+        visible_lines = max(1, self.llm_content_rect.height // (self.small_font.get_linesize() + 1))
+        self.llm_scroll_offset = max(0, min(start, max(0, end - visible_lines + 1)))
+        self.llm_autoscroll = False
+        self.llm_selected_call_index = entry_index
+        self.llm_selected_call_part = part
+        return True
+
     def _investigate_command(self) -> str:
         """The x key: sweep the room, unless a found clue's anchor is in reach —
         standing on or beside the clued thing, x searches it instead. The verb
@@ -838,26 +972,7 @@ class GameUI:
         self._record_llm_debug_entry(result)
 
     def _record_llm_debug_entry(self, result: ActionResult) -> None:
-        wild_magic = result.wild_magic
-        if not wild_magic:
-            return
-        raw = wild_magic.get("raw_response") or ""
-        thinking = extract_thinking(raw) if raw else None
-        response = strip_thinking(raw) if raw else ""
-        if not response and wild_magic.get("data") is not None:
-            response = json.dumps(wild_magic["data"], indent=2, ensure_ascii=False)
-        self.llm_debug_entries.append(
-            {
-                "turn": self.engine.state.turn,
-                "spell": wild_magic.get("spell", ""),
-                "provider": wild_magic.get("provider", ""),
-                "technical_failure": bool(wild_magic.get("technical_failure")),
-                "error": wild_magic.get("error"),
-                "context": result.llm_context,
-                "thinking": thinking,
-                "response": response or "(no response captured)",
-            }
-        )
+        self._refresh_llm_debug_entries()
         self._llm_lines_cache = None
         self.llm_autoscroll = True
 
@@ -1915,18 +2030,39 @@ class GameUI:
         pygame.draw.rect(self.screen, PANEL, (x, 0, LLM_PANEL_WIDTH, WINDOW_HEIGHT))
         pygame.draw.line(self.screen, PANEL_EDGE, (LLM_PANEL_WIDTH, 0), (LLM_PANEL_WIDTH, WINDOW_HEIGHT), 2)
         cursor_y = self.draw_text("LLM Debug", x + 16, 16, self.ui_font, ACCENT)
-        cursor_y = self.draw_text(
-            "Full prompt, the model's <think> reasoning, and its raw response. Scroll with the wheel or the bar; "
-            "click and drag to select text, Ctrl+A to select all, Ctrl+C to copy.",
-            x + 16,
-            cursor_y + 2,
-            self.small_font,
-            MUTED,
-        )
-        pygame.draw.line(self.screen, PANEL_EDGE, (x + 16, cursor_y + 10), (LLM_PANEL_WIDTH - 16, cursor_y + 10), 1)
-        content_y = cursor_y + 20
+        buttons_bottom = self.draw_llm_call_buttons(x + 16, cursor_y + 12, LLM_PANEL_WIDTH - 32)
+        divider_y = max(cursor_y + 10, buttons_bottom + 8)
+        pygame.draw.line(self.screen, PANEL_EDGE, (x + 16, divider_y), (LLM_PANEL_WIDTH - 16, divider_y), 1)
+        content_y = divider_y + 10
         content_height = WINDOW_HEIGHT - content_y - 16
         self.draw_llm_content(x + 16, content_y, LLM_PANEL_WIDTH - 32, content_height)
+
+    def draw_llm_call_buttons(self, x: int, y: int, width: int) -> int:
+        self._refresh_llm_debug_entries()
+        self.llm_call_button_rects = []
+        recent = self._recent_llm_call_indices()
+        if not recent:
+            return y - 8
+        gap = 6
+        button_h = 24
+        button_w = max(40, (width - gap * 4) // 5)
+        for slot, entry_index in enumerate(recent):
+            entry = self.llm_debug_entries[entry_index]
+            col = slot % 5
+            row = slot // 5
+            rect = pygame.Rect(x + col * (button_w + gap), y + row * (button_h + gap), button_w, button_h)
+            kind = self._llm_call_kind(entry)
+            color = LLM_CALL_COLORS.get(kind, PANEL_EDGE)
+            fill = tuple(max(0, int(channel * 0.28)) for channel in color)
+            pygame.draw.rect(self.screen, fill, rect, border_radius=5)
+            border = TEXT if entry_index == self.llm_selected_call_index else color
+            pygame.draw.rect(self.screen, border, rect, 1, border_radius=5)
+            label = self._fit_text(kind, self.small_font, rect.width - 10)
+            label_surf = self.small_font.render(label, True, TEXT)
+            self.screen.blit(label_surf, (rect.x + 5, rect.y + (rect.height - label_surf.get_height()) // 2))
+            self.llm_call_button_rects.append((rect, entry_index))
+        rows = 1 + (len(recent) - 1) // 5
+        return y + rows * button_h + (rows - 1) * gap
 
     def draw_llm_content(self, x: int, y: int, width: int, height: int) -> None:
         scrollbar_width = 10
@@ -1937,7 +2073,7 @@ class GameUI:
         wrap_chars = max(10, text_width // char_width)
         if self._llm_lines_cache is None:
             self._llm_lines_cache = self._build_llm_lines(wrap_chars)
-        elif getattr(self.engine, "_pending_towns", None):
+        else:
             now_sec = int(time.monotonic())
             if now_sec != getattr(self, "_llm_cache_sec", -1):
                 self._llm_cache_sec = now_sec
@@ -2023,7 +2159,7 @@ class GameUI:
         target_thumb_y = mouse_y - self.log_drag_grab_dy
         return (target_thumb_y - track.y) / usable
 
-    def _build_llm_lines(self, wrap_chars: int) -> list[tuple[str, tuple[int, int, int]]]:
+    def _build_llm_lines_legacy_unused(self, wrap_chars: int) -> list[tuple[str, tuple[int, int, int]]]:
         lines: list[tuple[str, tuple[int, int, int]]] = []
 
         def emit(text: str, color: tuple[int, int, int]) -> None:
@@ -2031,8 +2167,8 @@ class GameUI:
                 for wrapped in wrap_text(raw_line, wrap_chars):
                     lines.append((wrapped, color))
 
-        emit("SYSTEM PROMPT (sent with every cast)", ACCENT)
-        emit(SYSTEM_PROMPT.strip(), MUTED)
+        emit("Prompt", ACCENT)
+        emit("(legacy debug renderer is inactive)", MUTED)
         lines.append(("", MUTED))
         lines.append(("=" * wrap_chars, PANEL_EDGE))
 
@@ -2078,16 +2214,169 @@ class GameUI:
             else:
                 emit("(context unavailable — this cast came from a replay)", MUTED)
 
-            emit("MODEL THOUGHTS:", ACCENT)
+            emit("Response", ACCENT)
             thinking = entry.get("thinking")
             if thinking:
                 emit(thinking, MUTED)
             else:
                 emit("(model returned no <think> reasoning block)", MUTED)
 
-            emit("MODEL RESPONSE:", ACCENT)
+            emit("Response", ACCENT)
             emit(entry.get("response") or "(no response captured)", TEXT)
 
+        return lines
+
+    def _refresh_llm_debug_entries(self) -> None:
+        entries_changed = False
+        base_dir = audit_dir()
+        for filename in LLM_AUDIT_FILES:
+            path = base_dir / filename
+            if not path.exists():
+                continue
+            try:
+                with path.open("r", encoding="utf-8") as handle:
+                    for line_no, line in enumerate(handle, start=1):
+                        key = f"{path}:{line_no}"
+                        if key in self.llm_debug_seen:
+                            continue
+                        try:
+                            record = json.loads(line)
+                        except json.JSONDecodeError:
+                            continue
+                        timestamp = self._parse_audit_timestamp(record.get("timestamp"))
+                        if timestamp is not None and timestamp < self.llm_debug_started_at:
+                            self.llm_debug_seen.add(key)
+                            continue
+                        self.llm_debug_seen.add(key)
+                        self.llm_debug_entries.append(self._audit_record_to_debug_entry(filename, record))
+                        entries_changed = True
+            except OSError:
+                continue
+        if entries_changed:
+            self.llm_debug_entries.sort(key=lambda entry: entry.get("timestamp") or "")
+            self._llm_lines_cache = None
+
+    def _parse_audit_timestamp(self, value: Any) -> datetime | None:
+        if not isinstance(value, str) or not value.strip():
+            return None
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+
+    def _audit_record_to_debug_entry(self, filename: str, record: dict[str, Any]) -> dict[str, Any]:
+        call_type = filename.removesuffix("_audit.jsonl").replace("_", " ")
+        if filename == "wild_magic_audit.jsonl":
+            call_type = "wild magic"
+        return {
+            "timestamp": str(record.get("timestamp") or ""),
+            "call_type": call_type,
+            "provider": str(record.get("provider") or record.get("provider_requested") or ""),
+            "model": str(record.get("model") or ""),
+            "technical_failure": bool(record.get("technical_failure")),
+            "error": record.get("error"),
+            "prompt": self._format_audit_prompt(record),
+            "response": self._format_audit_response(record),
+        }
+
+    def _format_audit_prompt(self, record: dict[str, Any]) -> str:
+        prompt = record.get("prompt")
+        if isinstance(prompt, dict):
+            messages = prompt.get("messages")
+            if isinstance(messages, list) and messages:
+                parts: list[str] = []
+                for message in messages:
+                    if not isinstance(message, dict):
+                        continue
+                    role = str(message.get("role") or "message").upper()
+                    content = str(message.get("content") or "")
+                    parts.append(f"{role}:\n{content}")
+                if parts:
+                    return "\n\n".join(parts)
+            if "context" in prompt:
+                return json.dumps(prompt["context"], indent=2, ensure_ascii=False)
+        if "context" in record:
+            return json.dumps(record["context"], indent=2, ensure_ascii=False)
+        return "(prompt unavailable)"
+
+    def _format_audit_response(self, record: dict[str, Any]) -> str:
+        raw = record.get("raw_response")
+        if raw is not None:
+            return str(raw)
+        for key in ("parsed_resolution", "reply", "claims", "record", "flesh", "town"):
+            if record.get(key) is not None:
+                return json.dumps(record[key], indent=2, ensure_ascii=False)
+        return "(no response captured)"
+
+    def _build_llm_lines(self, wrap_chars: int) -> list[tuple[str, tuple[int, int, int]]]:
+        self._refresh_llm_debug_entries()
+        lines: list[tuple[str, tuple[int, int, int]]] = []
+        block_ranges: list[tuple[int, int]] = []
+        entry_block_ranges: dict[int, dict[str, tuple[int, int]]] = {}
+
+        def emit(text: str, color: tuple[int, int, int]) -> None:
+            for raw_line in text.splitlines() or [""]:
+                for wrapped in wrap_text(raw_line, wrap_chars):
+                    lines.append((wrapped, color))
+
+        def emit_block(label: str, text: str, color: tuple[int, int, int]) -> tuple[int, int]:
+            start = len(lines)
+            emit(label, ACCENT)
+            emit(text or "(empty)", color)
+            block_range = (start, max(start, len(lines) - 1))
+            block_ranges.append(block_range)
+            lines.append(("", MUTED))
+            return block_range
+
+        pending = getattr(self.engine, "_pending_towns", {})
+        if pending:
+            emit("Town generation in progress", GOLD)
+            now = time.monotonic()
+            for key in pending:
+                ctx = getattr(self.engine, "_pending_town_contexts", {}).get(key, {})
+                start = getattr(self.engine, "_pending_town_start_times", {}).get(key, now)
+                remaining = max(0.0, _TOWN_GEN_TIMEOUT - (now - start))
+                zx, zy = key
+                emit(f"  Zone ({zx}, {zy}) - {remaining:.0f}s remaining", MODE_ORANGE)
+                if ctx.get("settlement_type"):
+                    emit(f"  Type: {ctx['settlement_type']}", TEXT)
+                if ctx.get("location"):
+                    emit(f"  Location: {ctx['location']}", TEXT)
+                if ctx.get("defining_trait"):
+                    emit(f"  Trait: {ctx['defining_trait']}", TEXT)
+                if ctx.get("current_situation"):
+                    emit(f"  Situation: {ctx['current_situation']}", TEXT)
+                lines.append(("", MUTED))
+
+        if not self.llm_debug_entries:
+            lines.append(("", MUTED))
+            emit("No LLM calls captured yet.", MUTED)
+            self.llm_block_ranges = []
+            self.llm_entry_block_ranges = {}
+            return lines
+
+        for entry_index, entry in enumerate(self.llm_debug_entries):
+            lines.append(("", MUTED))
+            header_bits = [entry.get("call_type") or "llm"]
+            if entry.get("provider"):
+                header_bits.append(f"provider {entry['provider']}")
+            if entry.get("model"):
+                header_bits.append(str(entry["model"]))
+            if entry.get("timestamp"):
+                header_bits.append(str(entry["timestamp"]))
+            emit(" | ".join(header_bits), DANGER if entry["technical_failure"] else GOLD)
+            if entry.get("error"):
+                emit(f"error: {entry['error']}", DANGER)
+            entry_block_ranges[entry_index] = {
+                "prompt": emit_block("Prompt", str(entry.get("prompt") or ""), TEXT),
+                "response": emit_block("Response", str(entry.get("response") or ""), TEXT),
+            }
+
+        self.llm_block_ranges = block_ranges
+        self.llm_entry_block_ranges = entry_block_ranges
         return lines
 
     def handle_mouse_wheel(self, event: pygame.event.Event) -> None:

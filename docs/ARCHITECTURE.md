@@ -179,18 +179,24 @@ claim list.
 Materialized canon generation for room, object, and text details (`examine`, `read`,
 `investigate`). Defines `CanonProvider` plus Ollama/mock/auto providers,
 `CanonResolution`, JSON parsing/normalization into `CanonRecord`,
-`make_canon_provider()`, `resolve_canon()` (with malformed-response retries), and
-`logs/canon_audit.jsonl` writing. The Ollama provider uses the `canon` purpose, which
-routes URGENT (GPU-resident main model) because the player blocks on these calls;
-background prewarming should construct providers with background-channel overrides.
+`make_canon_provider()`, `make_background_canon_provider()`, `resolve_canon()` (with
+malformed-response retries), and `logs/canon_audit.jsonl` writing. The Ollama provider
+uses the `canon` purpose for blocking calls, which routes URGENT (GPU-resident main
+model); background canon saturation uses the `lore`/BACKGROUND route and can use a
+smaller model via `WILDMAGIC_BACKGROUND_CANON_MODEL`. The first background jobs cover
+current-room `room_flavor`, far-look entity detail records, and nearby `book_preview`
+records.
 The engine supplies attachments, tags, allowed outputs, and mechanical choices; the
 provider supplies wording and nonmechanical choices only.
 
 ### `wildmagic/texture.py`
 Layer-1 procedural texture grammars: instant, model-free naming for bulk content.
 Currently `grammar_book()`, which gives placed books a concrete catalog-style name and
-description from room topics; printed titles, authors, and pages stay unmaterialized
-until reading triggers canon generation.
+description plus a richer hidden shelf card (`topic`, `secondary_topic`, `genre`,
+`discipline`, `author_role`, `audience`, `purpose`, `stance`, `institution`,
+`title_shape`, `taboo_level`). Printed titles and authors can materialize through the
+opt-in background `book_preview` pass; full pages stay unmaterialized until reading
+triggers book canon generation.
 
 ### `wildmagic/secrets.py`
 Engine-owned secret resolution for the `investigate` verb: difficulty→turn costs,
@@ -264,7 +270,9 @@ All shared data types and tile constants. No game logic.
 - Dataclasses: `Entity`, `Curse`, `NPCProfile`, `GameStats`, `WildMagicOutcome`, `Room`,
   `RoomProfile`, `CanonRecord`, `ZoneSnapshot`. `RoomProfile` is the deterministic
   semantic seed layer for richer content; `CanonRecord` stores per-run materialized text
-  or descriptions that have become game canon.
+  or descriptions that have become game canon. `Entity.details` stores engine-side
+  nonmechanical metadata such as a book's procedural shelf card; feature-specific
+  context builders decide what, if anything, becomes visible to an LLM.
 
 ### `wildmagic/game_data.py`
 All hand-authored game content and tunable constants:

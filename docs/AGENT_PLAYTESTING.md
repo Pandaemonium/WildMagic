@@ -163,6 +163,13 @@ Materialized canon from `examine` and future richness features is logged to
 `logs/canon_audit.jsonl`. Each record includes the seed packet, provider/model,
 raw response, normalized `CanonRecord`, and any technical failure.
 
+Background canon saturation is opt-in. To test it, set
+`WILDMAGIC_CANON_PREWARM_ENABLED=1`; the current labeled room may receive `room_flavor`
+canon, visible non-book entities may receive far-look detail canon, then nearby visible
+books may receive title/author/summary preview canon before the player reads them.
+Full book pages still come from `read`, and close-study details still come from
+player investigation.
+
 ## Replays
 
 Record a run:

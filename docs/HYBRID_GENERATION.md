@@ -208,6 +208,12 @@ the dual-instance Ollama setup exists for exactly this):
 
 ## Case studies
 
+Current playable slice: the queue paints current-room `room_flavor`, visible non-book
+entities as far-look `object_detail`/`npc_detail`/`creature_detail`, then nearby book
+identity previews. Background detail records use `claim_quota=0` and `turn_cost=0`.
+They never create close-study records, so adjacent investigation can still reveal
+engine-owned secret clues.
+
 ### Books (the model case)
 
 Four tiers, assigned by layer 2 — note the tiers are about *stakes*, not about which
@@ -314,7 +320,10 @@ no compatibility shims with dual authority.
   playtests.
 - **R3 — Books end-to-end.** *First playable slice live (June 2026):* grammar-tier book
   props (`texture.py`) place deterministically in rooms labeled with books/lore/paper
-  across dungeon, open-zone, LLM-town, and Hollowmere generation; `read` materializes
+  across dungeon, open-zone, LLM-town, and Hollowmere generation. The grammar tier now
+  keeps a hidden shelf card with genre, discipline, author role, audience, purpose,
+  stance, institution, title shape, taboo level, and secondary topic, so the LLM sees
+  more than a narrow room topic like "old maps"; `read` materializes
   title, author, and excerpt pages on the urgent channel through the shared canon layer
   (turn cost on first valid read, free reread, failure costs nothing, replay-safe); the
   materialized title becomes the book's in-world name; pages run through `lore.py`
@@ -322,8 +331,12 @@ no compatibility shims with dual authority.
   `source="book:<title>"`. Live-verified on GPU (June 2026): a fresh-run book wove an
   active chapel promise from THREADS into its excerpt as the author's hearsay; reads
   run ~10s on the urgent channel at canon temperature 0.85 (titles/authors vary across
-  packets). Remaining for R3 exit: the background title prewarm pass (today titles
-  materialize on read; the R6 saturation queue is its natural home).
+  packets). Background canon saturation now exists as an opt-in first slice
+  (`WILDMAGIC_CANON_PREWARM_ENABLED=1`): the queue paints current-room `room_flavor`,
+  far-look detail for visible non-book entities, then replay-safe `book_preview` canon
+  on the background route; full `read` pages reuse preview identity while still costing
+  a turn. Remaining for R3/R6: add inscription/notices, richer NPC-detail prioritization,
+  and clue-leak jobs to the same priority queue.
 - **R4 — NPC appearance.** *Done (pulled forward — it needed no canon store):*
   appearance fields ride the existing towngen and flesh calls; tooltip + dialogue
   integration. Remaining exit check: a promise-bound keeper's generated appearance

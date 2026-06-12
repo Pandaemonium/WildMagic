@@ -8,10 +8,12 @@ from typing import Any
 
 from .canon import (
     CanonProvider,
+    CanonResolution,
+    make_background_canon_provider,
     make_canon_provider,
     resolve_canon,
 )
-from .config import flesh_enabled, lore_enabled
+from .config import canon_prewarm_enabled, canon_prewarm_limit, flesh_enabled, lore_enabled
 from .determinism import stable_seed
 from .engine import GameEngine
 from .flesh import (
@@ -127,6 +129,14 @@ class ActionResult:
         }
 
 
+@dataclass(frozen=True)
+class CanonSaturationJob:
+    record_id: str
+    kind: str
+    context: dict[str, Any]
+    superseded_by: str | None = None
+
+
 class GameSession:
     def __init__(
         self,
@@ -174,13 +184,16 @@ class GameSession:
             resolved_canon_provider_name = provider_name
         self.canon_provider = canon_provider or make_canon_provider(resolved_canon_provider_name)
         self.canon_provider_label = getattr(self.canon_provider, "name", "unknown")
+        self.background_canon_provider = canon_provider or make_background_canon_provider(resolved_canon_provider_name)
         # In replay mode, promises and flesh come from the recorded apply points;
         # background producers must stay silent.
         self.replay_mode = replay_mode
         self._lore_executor: concurrent.futures.ThreadPoolExecutor | None = None
         self._pending_lore: list[tuple[concurrent.futures.Future[LoreExtractionResolution], dict[str, Any], int | None]] = []
         self._pending_flesh: list[tuple[concurrent.futures.Future[FleshResolution], str]] = []
+        self._pending_canon: list[tuple[concurrent.futures.Future[CanonResolution], CanonSaturationJob]] = []
         self._queued_flesh_ids: set[str] = set()
+        self._queued_canon_ids: set[str] = set()
         # Promise dicts applied to the engine since the last recorded action, snapshotted
         # pre-merge so replay can re-run the deterministic bind/merge at the same point.
         self._promise_apply_buffer: list[dict[str, Any]] = []
@@ -201,6 +214,8 @@ class GameSession:
         self.drain_lore(block=False)
         self._enqueue_flesh_for_bound_promises()
         self.drain_flesh(block=False)
+        self.drain_canon_prewarm(block=False)
+        self._enqueue_canon_prewarm()
         if replay_promises is not None:
             self.apply_recorded_promises(replay_promises.get("before"))
         if replay_flesh is not None:
@@ -438,10 +453,14 @@ class GameSession:
         self.drain_lore(block=False)
         self._enqueue_flesh_for_bound_promises()
         self.drain_flesh(block=False)
+        self._enqueue_canon_prewarm()
+        self.drain_canon_prewarm(block=False)
         if replay_promises is not None:
             self.apply_recorded_promises(replay_promises.get("after"))
         if replay_flesh is not None:
             self.apply_recorded_flesh(replay_flesh.get("after"))
+        if replay_canon is not None and action not in {"read", "examine", "investigate"}:
+            self.apply_recorded_canon(replay_canon.get("after"))
         if record:
             action_record = result.to_record()
             promises_after = self._pop_applied_promises()
@@ -692,7 +711,21 @@ class GameSession:
         room_dict = room.to_public_dict() if room is not None else None
         room_tags = list(room.tags) if room is not None else []
         room_topics = list(room.topics) if room is not None else []
-        thread_tags = sorted({*book.tags, *room_tags, *room_topics})
+        book_seed = {}
+        if isinstance(getattr(book, "details", None), dict):
+            raw_seed = book.details.get("book_seed")
+            if isinstance(raw_seed, dict):
+                book_seed = {
+                    str(key): str(value)
+                    for key, value in raw_seed.items()
+                    if isinstance(value, (str, int, float)) and str(value).strip()
+                }
+        seed_tags = {
+            normalize_id(str(value))
+            for key, value in book_seed.items()
+            if key in {"topic", "secondary_topic", "genre", "discipline", "author_role", "institution", "taboo_level"}
+        }
+        thread_tags = sorted({*book.tags, *room_tags, *room_topics, *seed_tags})
         threads = self.engine.nearby_canon_records(tags=thread_tags, limit=4)
         active_promises = [
             promise.to_dict()
@@ -701,6 +734,8 @@ class GameSession:
             or set(promise.tags) & set(thread_tags)
         ][:2]
         base_tags = sorted({*book.tags, "book"})
+        preview_id = f"canon_book_preview_{normalize_id(book.id)}"
+        preview = self.engine.state.canon_records.get(preview_id)
         return {
             "record_id": record_id,
             "kind": "book",
@@ -722,6 +757,8 @@ class GameSession:
                     "name": book.name,
                     "description": book.description,
                     "tags": sorted(book.tags),
+                    "catalog": book_seed,
+                    "preview": preview.to_dict() if preview else None,
                 },
                 "attachment": {"kind": "prop", "entity_id": book.id},
             },
@@ -732,6 +769,20 @@ class GameSession:
             "contract": {
                 "allowed_outputs": ["title", "summary", "text", "tags", "llm_choices"],
                 "claim_quota": 2,
+                "book_guidance": {
+                    "use_catalog_fields": [
+                        "genre",
+                        "discipline",
+                        "author_role",
+                        "audience",
+                        "purpose",
+                        "stance",
+                        "institution",
+                        "title_shape",
+                        "taboo_level",
+                    ],
+                    "avoid_defaulting_to": ["ink", "maps", "cartography", "book damage"],
+                },
                 "forbidden": ["treasure locations", "guaranteed allies", "map exits", "named player rewards", "stats", "spell effects"],
             },
             "base_tags": base_tags,
@@ -741,6 +792,20 @@ class GameSession:
                 "turn_cost": 1,
             },
         }
+
+    def _canon_context_for_book_preview(self, book: Any, record_id: str) -> dict[str, Any]:
+        context = self._canon_context_for_book(book, record_id)
+        context["kind"] = "book_preview"
+        context["source"] = "background"
+        context["base_tags"] = sorted({*context.get("base_tags", []), "book_preview"})
+        context["allowed_tags"] = sorted({*context.get("allowed_tags", []), "book_preview"})
+        context["contract"] = {
+            "allowed_outputs": ["title", "summary", "text", "tags", "llm_choices"],
+            "claim_quota": 0,
+            "book_guidance": context.get("contract", {}).get("book_guidance", {}),
+            "forbidden": ["pages", "treasure locations", "guaranteed allies", "map exits", "named player rewards", "stats", "spell effects"],
+        }
+        return context
 
     def _lore_context_for_book(self, book: Any, record: Any) -> dict[str, Any]:
         """Book pages run through the same lore extraction as dialogue; the
@@ -1504,6 +1569,153 @@ class GameSession:
                     self._flesh_apply_buffer.append({"promise_id": promise_id, "flesh": dict(applied.flesh or {})})
         self._pending_flesh = remaining
 
+    def _enqueue_canon_prewarm(self) -> None:
+        """Keep the background canon route busy with low-risk saturation jobs."""
+        if self.replay_mode or not canon_prewarm_enabled():
+            return
+        limit = canon_prewarm_limit()
+        if limit <= 0:
+            return
+        if len(self._pending_canon) >= limit:
+            return
+        for job in self._canon_saturation_candidates():
+            if len(self._pending_canon) >= limit:
+                break
+            self._queued_canon_ids.add(job.record_id)
+            if self._lore_executor is None:
+                self._lore_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            future = self._lore_executor.submit(resolve_canon, self.background_canon_provider, job.context)
+            self._pending_canon.append((future, job))
+
+    def _canon_saturation_candidates(self) -> list[CanonSaturationJob]:
+        candidates: list[tuple[int, str, CanonSaturationJob]] = []
+        room = self.engine.room_profile_at(self.engine.state.player.x, self.engine.state.player.y)
+        if room is not None:
+            record_id = f"canon_room_{normalize_id(room.id)}"
+            if record_id not in self.engine.state.canon_records and record_id not in self._queued_canon_ids:
+                context = self._canon_context_for_room(room, record_id)
+                context["source"] = "background"
+                context["engine_choices"] = dict(context.get("engine_choices") or {})
+                context["engine_choices"]["turn_cost"] = 0
+                candidates.append(
+                    (
+                        0,
+                        record_id,
+                        CanonSaturationJob(record_id=record_id, kind="room_flavor", context=context),
+                    )
+                )
+
+        for distance, entity in self._canon_entity_detail_candidates():
+            record_id = f"canon_detail_{normalize_id(entity.id)}_far"
+            room = self.engine.room_profile_at(entity.x, entity.y)
+            band = "near" if distance <= 4 else "across the room"
+            context = self._canon_context_for_entity(room, None, entity, band, record_id)
+            context["source"] = "background"
+            context["engine_choices"] = dict(context.get("engine_choices") or {})
+            context["engine_choices"]["turn_cost"] = 0
+            context["contract"] = dict(context.get("contract") or {})
+            context["contract"]["claim_quota"] = 0
+            priority = 10 if entity.kind in {"npc", "actor"} else 30
+            candidates.append(
+                (
+                    priority + distance,
+                    record_id,
+                    CanonSaturationJob(
+                        record_id=record_id,
+                        kind=str(context.get("kind") or "object_detail"),
+                        context=context,
+                        superseded_by=f"canon_detail_{normalize_id(entity.id)}_close",
+                    ),
+                )
+            )
+
+        for distance, book in self._canon_book_preview_candidates():
+            record_id = f"canon_book_preview_{normalize_id(book.id)}"
+            context = self._canon_context_for_book_preview(book, record_id)
+            candidates.append(
+                (
+                    20 + distance,
+                    record_id,
+                    CanonSaturationJob(
+                        record_id=record_id,
+                        kind="book_preview",
+                        context=context,
+                        superseded_by=f"canon_book_{normalize_id(book.id)}",
+                    ),
+                )
+            )
+        candidates.sort(key=lambda item: (item[0], item[1]))
+        return [job for _priority, _record_id, job in candidates]
+
+    def _canon_book_preview_candidates(self) -> list[tuple[int, Any]]:
+        state = self.engine.state
+        player = state.player
+        candidates = []
+        for entity in state.entities.values():
+            if entity.kind != "prop" or "book" not in entity.tags:
+                continue
+            preview_id = f"canon_book_preview_{normalize_id(entity.id)}"
+            full_id = f"canon_book_{normalize_id(entity.id)}"
+            if preview_id in state.canon_records or full_id in state.canon_records:
+                continue
+            if preview_id in self._queued_canon_ids:
+                continue
+            distance = max(abs(entity.x - player.x), abs(entity.y - player.y))
+            if distance > 8 or not self.engine.is_visible(entity.x, entity.y):
+                continue
+            candidates.append((distance, entity.id, entity))
+        candidates.sort(key=lambda item: item[:2])
+        return [(distance, entity) for distance, _entity_id, entity in candidates]
+
+    def _canon_entity_detail_candidates(self) -> list[tuple[int, Any]]:
+        state = self.engine.state
+        player = state.player
+        candidates = []
+        for entity in state.entities.values():
+            if entity.id == state.player_id or entity.kind not in {"prop", "item", "npc", "actor"}:
+                continue
+            if entity.kind == "actor" and not entity.alive:
+                continue
+            if entity.kind == "prop" and "book" in entity.tags:
+                continue
+            far_id = f"canon_detail_{normalize_id(entity.id)}_far"
+            close_id = f"canon_detail_{normalize_id(entity.id)}_close"
+            if far_id in state.canon_records or close_id in state.canon_records:
+                continue
+            if far_id in self._queued_canon_ids:
+                continue
+            if not self.engine.is_visible(entity.x, entity.y):
+                continue
+            distance = max(abs(entity.x - player.x), abs(entity.y - player.y))
+            if distance > 8:
+                continue
+            candidates.append((distance, entity.id, entity))
+        candidates.sort(key=lambda item: item[:2])
+        return [(distance, entity) for distance, _entity_id, entity in candidates]
+
+    def drain_canon_prewarm(self, block: bool = False) -> None:
+        remaining: list[tuple[concurrent.futures.Future[CanonResolution], CanonSaturationJob]] = []
+        for future, job in self._pending_canon:
+            if not block and not future.done():
+                remaining.append((future, job))
+                continue
+            try:
+                resolution = future.result()
+            except Exception as exc:
+                resolution = CanonResolution(None, True, str(exc), self.canon_provider_label)
+            self.canon_provider_label = resolution.provider_name
+            self._queued_canon_ids.discard(job.record_id)
+            if resolution.technical_failure or resolution.record is None:
+                continue
+            if job.superseded_by and job.superseded_by in self.engine.state.canon_records:
+                continue
+            if job.record_id in self.engine.state.canon_records:
+                continue
+            applied = self.engine.add_canon_record(resolution.record)
+            self._apply_canon_record_side_effects(applied)
+            self._canon_apply_buffer.append(applied.to_dict())
+        self._pending_canon = remaining
+
     def apply_recorded_flesh(self, raw_events: list[dict[str, Any]] | None) -> None:
         """Inject flesh recorded at this apply point in a live run."""
         for event in raw_events or []:
@@ -1524,11 +1736,36 @@ class GameSession:
             if not isinstance(raw, dict):
                 continue
             record = self.engine.add_canon_record(CanonRecord.from_dict(raw))
+            self._apply_canon_record_side_effects(record)
             self._canon_apply_buffer.append(record.to_dict())
 
     def _pop_applied_canon(self) -> list[dict[str, Any]]:
         applied, self._canon_apply_buffer = self._canon_apply_buffer, []
         return applied
+
+    def _apply_canon_record_side_effects(self, record: CanonRecord) -> None:
+        attachment = record.attachment if isinstance(record.attachment, dict) else {}
+        if attachment.get("kind") != "prop":
+            return
+        entity_id = str(attachment.get("entity_id") or "")
+        entity = self.engine.state.entities.get(entity_id)
+        if entity is None or entity.kind != "prop" or "book" not in entity.tags:
+            return
+        if record.kind == "book":
+            self._apply_book_canon(entity, record)
+        elif record.kind == "book_preview":
+            full_id = f"canon_book_{normalize_id(entity.id)}"
+            if full_id not in self.engine.state.canon_records:
+                self._apply_book_preview(entity, record)
+
+    def _apply_book_preview(self, book: Any, record: CanonRecord) -> None:
+        if record.title:
+            book.name = record.title
+        if record.summary:
+            book.description = record.summary
+        author = record.llm_choices.get("author") if isinstance(record.llm_choices, dict) else None
+        if author and record.summary and author not in record.summary:
+            book.description = f"{record.summary} (by {author})"
 
     def close(self) -> None:
         for future, _dialogue_record, _claim_quota in self._pending_lore:
@@ -1537,6 +1774,9 @@ class GameSession:
         for future, _promise_id in self._pending_flesh:
             future.cancel()
         self._pending_flesh.clear()
+        for future, _job in self._pending_canon:
+            future.cancel()
+        self._pending_canon.clear()
         if self._lore_executor is not None:
             self._lore_executor.shutdown(wait=False, cancel_futures=True)
             self._lore_executor = None
@@ -1570,6 +1810,7 @@ class GameSession:
     def to_replay(self) -> dict[str, Any]:
         self.drain_lore(block=True)
         self.drain_flesh(block=True)
+        self.drain_canon_prewarm(block=True)
         # Promises and flesh drained after the last recorded action have no action to
         # attach to; replay injects them after the action loop, before the final summary.
         final_promises = self._pop_applied_promises()

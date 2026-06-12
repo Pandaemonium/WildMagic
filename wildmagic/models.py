@@ -207,6 +207,7 @@ class Entity:
         "head": None, "chest": None, "legs": None, "feet": None, "hands": None
     })
     description: str | None = None
+    details: dict[str, Any] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if self.kind == "player" and not any(self.equipment.values()):

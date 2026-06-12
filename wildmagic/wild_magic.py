@@ -2070,6 +2070,7 @@ class OllamaTownProvider:
         }
         if ollama_json_format_enabled(self.purpose):
             payload["format"] = "json"
+        raw_response: str | None = None
         try:
             data = _post_ollama_chat(self.base_url, payload, self.timeout_seconds)
         except ValueError as exc:
@@ -2080,8 +2081,50 @@ class OllamaTownProvider:
             data = _post_ollama_chat(self.base_url, retry_payload, self.timeout_seconds)
         content = data.get("message", {}).get("content")
         if not isinstance(content, str) or not content.strip():
+            _write_town_audit(self, zx, zy, context, raw_response, None, True, "Ollama response did not include message.content")
             raise ValueError("Ollama response did not include message.content")
-        return _parse_town_spec(content)
+        raw_response = content
+        try:
+            spec = _parse_town_spec(content)
+        except Exception as exc:
+            _write_town_audit(self, zx, zy, context, raw_response, None, True, str(exc))
+            raise
+        _write_town_audit(self, zx, zy, context, raw_response, spec, False, None)
+        return spec
+
+
+def _write_town_audit(
+    provider: TownProvider,
+    zx: int,
+    zy: int,
+    context: dict[str, Any],
+    raw_response: str | None,
+    spec: TownSpec | None,
+    technical_failure: bool,
+    error: str | None,
+) -> str | None:
+    audit_path = audit_dir() / "town_audit.jsonl"
+    prompt_messages = [
+        {"role": "system", "content": TOWN_SYSTEM_PROMPT},
+        {"role": "user", "content": json.dumps(context, ensure_ascii=True)},
+    ]
+    record = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "zone": {"x": zx, "y": zy},
+        "provider": getattr(provider, "name", "unknown"),
+        "provider_requested": getattr(provider, "name", "unknown"),
+        "model": getattr(provider, "model", None),
+        "ollama_base_url": getattr(provider, "base_url", None),
+        "prompt": {
+            "messages": prompt_messages,
+            "context": context,
+        },
+        "raw_response": raw_response,
+        "town": spec.__dict__ if spec else None,
+        "technical_failure": technical_failure,
+        "error": error,
+    }
+    return _write_jsonl_audit(audit_path, record)
 
 
 class MockTownProvider:

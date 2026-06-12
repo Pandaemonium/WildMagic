@@ -14,6 +14,7 @@ from typing import Any, Protocol
 
 from .config import (
     audit_dir,
+    get_background_canon_model,
     get_canon_model,
     get_canon_provider,
     ollama_canon_num_predict,
@@ -73,16 +74,16 @@ class OllamaCanonProvider:
     model/base_url overrides pointing at the background channel instead."""
 
     name = "ollama"
-    purpose = "canon"
-
     def __init__(
         self,
         model: str | None = None,
         base_url: str | None = None,
         timeout_seconds: float | None = None,
+        purpose: str = "canon",
     ) -> None:
+        self.purpose = purpose
         self._model_override = model
-        self.model = model or get_canon_model()
+        self.model = model or (get_background_canon_model() if purpose == "lore" else get_canon_model())
         self.base_url = normalize_ollama_url(base_url) if base_url else ollama_host(self.purpose)
         self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds(self.purpose)
 
@@ -128,6 +129,8 @@ class MockCanonProvider:
 
     def materialize(self, context: dict[str, Any]) -> str:
         kind = normalize_id(str(context.get("kind") or ""))
+        if kind == "book_preview":
+            return self._materialize_book_preview(context)
         if kind == "book":
             return self._materialize_book(context)
         if kind == "investigation":
@@ -234,11 +237,14 @@ class MockCanonProvider:
         )
 
     def _materialize_book(self, context: dict[str, Any]) -> str:
-        subject = context.get("subject") if isinstance(context.get("subject"), dict) else {}
-        book = subject.get("book") if isinstance(subject.get("book"), dict) else {}
-        book_name = str(book.get("name") or "untitled volume")
-        topic_words = [w for w in book_name.split() if len(w) > 3][-2:]
-        topic = " ".join(topic_words) or "small weather"
+        info = self._book_seed_info(context)
+        title = info["preview_title"] or self._mock_book_title(
+            info["title_shape"],
+            info["topic"],
+            info["secondary"],
+            info["genre"],
+        )
+        author = info["preview_author"] or self._mock_author(info["author_role"])
         threads = context.get("threads") if isinstance(context.get("threads"), dict) else {}
         promises = threads.get("promises") if isinstance(threads.get("promises"), list) else []
         thread_line = ""
@@ -246,33 +252,110 @@ class MockCanonProvider:
             thread_line = f" In the margin, another hand: '{promises[0]['text']}'"
         return json.dumps(
             {
-                "title": f"A Patient Account of {topic.title()}",
-                "summary": f"A meticulous, slightly defensive treatise concerning {topic}.",
+                "title": title,
+                "summary": (
+                    f"A {info['stance']} {info['genre']} by a {info['author_role']}, "
+                    f"written for {info['audience']} and circling {info['topic']}."
+                ),
                 "text": (
-                    f"On the matter of {topic}, most accounts are wrong, and I will say so plainly: "
-                    "they were written by people in a hurry, for people in a hurry, and haste has "
-                    "never yet seen anything worth writing down.\n\n"
-                    f"Consider what the field-wardens say of {topic}. They say it cannot be counted. "
-                    "I have counted it. The counting took eleven years and the better part of my "
-                    "eyesight, and the figures are appended in the third registry, which the reader "
-                    "is begged to consult before writing me letters.\n\n"
-                    "I have heard it said that a shrine east of the river answers those who ask "
-                    f"politely about {topic}, though I never walked there myself; my knees were "
-                    "already against the idea by the time the rumor reached me.\n\n"
-                    f"Let the impatient reader take only this: {topic} rewards the slow."
+                    f"For {info['audience']}, I set down this {info['genre']} from the benches of the "
+                    f"{info['institution']}. My office in these pages is plain: {info['purpose']}, "
+                    f"though the matter has already earned the label {info['taboo']} from people who "
+                    "prefer tidy shelves to true accounts.\n\n"
+                    f"Do not approach {info['topic']} as a picture to admire. Approach it as work. "
+                    f"The first lesson is that {info['secondary']} always stands nearby, asking to be "
+                    "paid in attention before it will explain the smaller facts.\n\n"
+                    f"I write as a {info['author_role']}, which means I have been wrong in public and "
+                    f"corrected in private. That is why the tone here is {info['stance']}; any softer voice would make "
+                    "the dangerous parts sound optional.\n\n"
+                    f"Let the impatient reader take only this: the matter of {info['topic']} changes when "
+                    "handled by the wrong institution, and it changes again when named for the "
+                    "right audience."
                     f"{thread_line}"
                 ),
                 "tags": ["book", "lore"],
-                "llm_choices": {"author": "Magistrate Ellow Venn", "voice": "patient and defensive"},
+                "llm_choices": {"author": author, "voice": info["stance"], "genre": info["genre"]},
             }
         )
+
+    def _materialize_book_preview(self, context: dict[str, Any]) -> str:
+        info = self._book_seed_info(context)
+        title = self._mock_book_title(info["title_shape"], info["topic"], info["secondary"], info["genre"])
+        author = self._mock_author(info["author_role"])
+        return json.dumps(
+            {
+                "title": title,
+                "summary": (
+                    f"A {info['stance']} {info['genre']} from the {info['institution']}, "
+                    f"written for {info['audience']}."
+                ),
+                "text": f"Preview: {title}, by {author}.",
+                "tags": ["book", "lore", "book_preview"],
+                "llm_choices": {"author": author, "voice": info["stance"], "genre": info["genre"]},
+            }
+        )
+
+    def _book_seed_info(self, context: dict[str, Any]) -> dict[str, str]:
+        subject = context.get("subject") if isinstance(context.get("subject"), dict) else {}
+        book = subject.get("book") if isinstance(subject.get("book"), dict) else {}
+        catalog = book.get("catalog") if isinstance(book.get("catalog"), dict) else {}
+        book_name = str(book.get("name") or "untitled volume")
+        topic = str(catalog.get("topic") or "").strip()
+        if not topic:
+            topic_words = [w for w in book_name.split() if len(w) > 3][-2:]
+            topic = " ".join(topic_words) or "small weather"
+        preview = book.get("preview") if isinstance(book.get("preview"), dict) else {}
+        llm_choices = preview.get("llm_choices") if isinstance(preview.get("llm_choices"), dict) else {}
+        return {
+            "topic": topic,
+            "secondary": str(catalog.get("secondary_topic") or "ordinary grief"),
+            "genre": str(catalog.get("genre") or "treatise"),
+            "author_role": str(catalog.get("author_role") or "minor clerk"),
+            "audience": str(catalog.get("audience") or "patient readers"),
+            "purpose": str(catalog.get("purpose") or "to correct a famous mistake"),
+            "stance": str(catalog.get("stance") or "patient and defensive"),
+            "institution": str(catalog.get("institution") or "provincial office"),
+            "title_shape": str(catalog.get("title_shape") or "manual"),
+            "taboo": str(catalog.get("taboo_level") or "ordinary"),
+            "preview_title": str(preview.get("title") or ""),
+            "preview_author": str(llm_choices.get("author") or ""),
+        }
+
+    def _mock_book_title(self, shape: str, topic: str, secondary: str, genre: str) -> str:
+        if "complaint" in shape:
+            return f"Complaint Against the Keepers of {topic.title()}"
+        if "confession" in shape:
+            return f"Confession Concerning {topic.title()} and {secondary.title()}"
+        if "registry" in shape or "record" in shape:
+            return f"Registry of {topic.title()}, With Doubts"
+        if "sermon" in shape:
+            return f"Sermon for Those Who Touch {topic.title()}"
+        if "number" in shape or "calendar" in shape:
+            return f"Seventeen Appointed Days of {topic.title()}"
+        if "letter" in shape:
+            return f"Letter to a Student of {topic.title()}"
+        if "songbook" in shape:
+            return f"Songs for {topic.title()} and Bad Weather"
+        if "insult" in shape:
+            return f"Answer to the Fool Who Mocked {topic.title()}"
+        return f"A {genre.title()} of {topic.title()} and {secondary.title()}"
+
+    def _mock_author(self, role: str) -> str:
+        words = [word for word in re.split(r"[^A-Za-z]+", role.title()) if word]
+        if not words:
+            return "Ellow Venn"
+        return f"{words[0]} Venn"
 
 
 class AutoCanonProvider:
     name = "auto"
 
-    def __init__(self) -> None:
-        self.ollama = OllamaCanonProvider()
+    def __init__(self, background: bool = False) -> None:
+        self.ollama = (
+            OllamaCanonProvider(model=get_background_canon_model(), purpose="lore")
+            if background
+            else OllamaCanonProvider()
+        )
         self.mock = MockCanonProvider()
         self.last_provider_name = "ollama"
 
@@ -294,6 +377,15 @@ def make_canon_provider(provider_name: str | None = None) -> CanonProvider:
     if provider == "ollama":
         return OllamaCanonProvider()
     return AutoCanonProvider()
+
+
+def make_background_canon_provider(provider_name: str | None = None) -> CanonProvider:
+    provider = (provider_name or get_canon_provider()).lower().strip()
+    if provider == "mock":
+        return MockCanonProvider()
+    if provider == "ollama":
+        return OllamaCanonProvider(model=get_background_canon_model(), purpose="lore")
+    return AutoCanonProvider(background=True)
 
 
 def resolve_canon(provider: CanonProvider, context: dict[str, Any]) -> CanonResolution:
@@ -415,6 +507,11 @@ def _write_canon_audit(
     resolved_provider_name: str,
 ) -> str | None:
     audit_path = audit_dir() / "canon_audit.jsonl"
+    prompt_context = {key: value for key, value in context.items() if key != "engine_private"}
+    prompt_messages = [
+        {"role": "system", "content": CANON_SYSTEM_PROMPT},
+        {"role": "user", "content": json.dumps(prompt_context, ensure_ascii=True)},
+    ]
     audit_record = {
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "record_id": context.get("record_id"),
@@ -423,6 +520,10 @@ def _write_canon_audit(
         "provider_requested": getattr(provider, "name", "unknown"),
         "model": getattr(provider, "model", None),
         "ollama_base_url": getattr(provider, "base_url", None),
+        "prompt": {
+            "messages": prompt_messages,
+            "context": prompt_context,
+        },
         "context": context,
         "raw_response": raw_response,
         "record": record.to_dict() if record else None,

@@ -6,6 +6,7 @@ from wildmagic.engine import GameEngine
 from wildmagic.models import CanonRecord, STAIRS_DOWN
 from wildmagic.promises import WorldPromise
 from wildmagic.replay import run_replay, save_replay
+from wildmagic.texture import grammar_book
 
 
 def test_room_profiles_feed_context_and_headless_inspect() -> None:
@@ -158,6 +159,112 @@ def test_examine_canon_replays_without_provider_call(tmp_path) -> None:
     assert replay_result.matched
 
 
+def test_room_prewarm_materializes_current_room_without_turn_cost(monkeypatch) -> None:
+    monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_ENABLED", "1")
+    monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_LIMIT", "1")
+    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    try:
+        room = session.engine.room_profile_at(session.engine.state.player.x, session.engine.state.player.y)
+        assert room is not None
+        result = session.execute_command("inspect")
+        session.drain_canon_prewarm(block=True)
+        assert result.success
+        assert not result.consumed_turn
+        record = session.engine.state.canon_records[f"canon_room_{room.id}"]
+        assert record.kind == "room_flavor"
+        assert record.source == "background"
+        assert record.attachment == {"kind": "room", "room_id": room.id}
+        assert record.engine_choices["turn_cost"] == 0
+    finally:
+        session.close()
+
+
+def test_examine_after_room_prewarm_reuses_room_flavor(monkeypatch) -> None:
+    monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_ENABLED", "1")
+    monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_LIMIT", "1")
+    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    try:
+        session.execute_command("inspect")
+        session.drain_canon_prewarm(block=True)
+        result = session.execute_command("examine")
+        assert result.success
+        assert not result.consumed_turn
+        assert result.canon_materialization["reused"] is True
+        assert sum(1 for record in session.engine.state.canon_records.values() if record.kind == "room_flavor") == 1
+    finally:
+        session.close()
+
+
+def test_room_prewarm_replays_without_provider_call(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_ENABLED", "1")
+    monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_LIMIT", "1")
+    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    try:
+        session.execute_command("inspect")
+        replay_path = tmp_path / "room_prewarm.json"
+        save_replay(session, replay_path)
+    finally:
+        session.close()
+
+    replay_result = run_replay(replay_path)
+    assert replay_result.matched
+    assert any(record["kind"] == "room_flavor" for record in replay_result.final_summary["canon_records"])
+
+
+def test_entity_detail_prewarm_materializes_far_look_without_turn_cost(monkeypatch) -> None:
+    monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_ENABLED", "1")
+    monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_LIMIT", "3")
+    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    try:
+        moss = next(entity for entity in session.engine.state.entities.values() if entity.name == "blood moss")
+        result = session.execute_command("inspect")
+        session.drain_canon_prewarm(block=True)
+        assert result.success
+        assert not result.consumed_turn
+        record = session.engine.state.canon_records[f"canon_detail_{moss.id}_far"]
+        assert record.kind == "object_detail"
+        assert record.source == "background"
+        assert record.attachment == {"kind": "entity", "entity_id": moss.id}
+        assert record.engine_choices["turn_cost"] == 0
+        assert record.engine_choices["distance_band"] == "near"
+    finally:
+        session.close()
+
+
+def test_investigate_after_entity_detail_prewarm_reuses_far_look(monkeypatch) -> None:
+    monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_ENABLED", "1")
+    monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_LIMIT", "3")
+    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    try:
+        session.execute_command("open")
+        session.drain_canon_prewarm(block=True)
+        session.execute_command("inspect")
+        session.drain_canon_prewarm(block=True)
+        result = session.execute_command("investigate goblin")
+        assert result.success
+        assert not result.consumed_turn
+        assert result.canon_materialization["reused"] is True
+        assert result.canon_materialization["record"]["kind"] == "creature_detail"
+    finally:
+        session.close()
+
+
+def test_entity_detail_prewarm_replays_without_provider_call(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_ENABLED", "1")
+    monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_LIMIT", "3")
+    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    try:
+        session.execute_command("inspect")
+        replay_path = tmp_path / "entity_detail_prewarm.json"
+        save_replay(session, replay_path)
+    finally:
+        session.close()
+
+    replay_result = run_replay(replay_path)
+    assert replay_result.matched
+    assert any(record["kind"] == "object_detail" for record in replay_result.final_summary["canon_records"])
+
+
 def test_examine_technical_failure_replays_without_materializing(tmp_path) -> None:
     class FailingCanonProvider:
         name = "failing"
@@ -220,6 +327,112 @@ def test_books_place_deterministically_in_labeled_rooms() -> None:
             assert set(profile.tags) & {"books", "lore", "paper"}
             assert " of " in name  # grammar name, not the bare template name
     assert found_books
+
+
+def test_book_texture_carries_rich_seed_axes() -> None:
+    import random
+
+    entry = grammar_book(random.Random(3), ["old maps"], "imperial")
+    for key in {
+        "topic",
+        "secondary_topic",
+        "genre",
+        "discipline",
+        "author_role",
+        "audience",
+        "purpose",
+        "stance",
+        "institution",
+        "title_shape",
+        "taboo_level",
+    }:
+        assert entry[key]
+    assert entry["topic"] == "old maps"
+    assert entry["genre"] not in {"old maps", "map", "maps"}
+
+
+def test_book_seed_packet_includes_catalog_guidance() -> None:
+    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    try:
+        book = _chamber_book(session.engine)
+        context = session._canon_context_for_book(book, "canon_test_book")
+        catalog = context["subject"]["book"]["catalog"]
+        assert catalog["genre"] == "saint's life"
+        assert catalog["author_role"] == "field nun"
+        assert "title_shape" in catalog
+        guidance = context["contract"]["book_guidance"]
+        assert "genre" in guidance["use_catalog_fields"]
+        assert "maps" in guidance["avoid_defaulting_to"]
+    finally:
+        session.close()
+
+
+def test_book_prewarm_is_disabled_by_default(monkeypatch) -> None:
+    monkeypatch.delenv("WILDMAGIC_CANON_PREWARM_ENABLED", raising=False)
+    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    try:
+        session.execute_command("inspect")
+        assert not any(record.kind == "book_preview" for record in session.engine.state.canon_records.values())
+    finally:
+        session.close()
+
+
+def test_book_prewarm_materializes_preview_without_turn_cost(monkeypatch) -> None:
+    monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_ENABLED", "1")
+    monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_LIMIT", "3")
+    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    try:
+        book = _chamber_book(session.engine)
+        original_name = book.name
+        result = session.execute_command("inspect")
+        session.drain_canon_prewarm(block=True)
+        assert result.success
+        assert not result.consumed_turn
+        previews = [record for record in session.engine.state.canon_records.values() if record.kind == "book_preview"]
+        assert len(previews) == 1
+        preview = previews[0]
+        assert preview.attachment == {"kind": "prop", "entity_id": book.id}
+        assert preview.title
+        assert book.name == preview.title
+        assert book.name != original_name
+    finally:
+        session.close()
+
+
+def test_read_after_book_prewarm_reuses_preview_identity(monkeypatch) -> None:
+    monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_ENABLED", "1")
+    monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_LIMIT", "3")
+    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    try:
+        book = _chamber_book(session.engine)
+        session.execute_command("inspect")
+        session.drain_canon_prewarm(block=True)
+        preview = next(record for record in session.engine.state.canon_records.values() if record.kind == "book_preview")
+        result = session.execute_command("read")
+        assert result.success
+        assert result.consumed_turn
+        full = next(record for record in session.engine.state.canon_records.values() if record.kind == "book")
+        assert full.title == preview.title
+        assert full.llm_choices.get("author") == preview.llm_choices.get("author")
+        assert book.name == full.title
+    finally:
+        session.close()
+
+
+def test_book_prewarm_replays_without_provider_call(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_ENABLED", "1")
+    monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_LIMIT", "3")
+    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    try:
+        session.execute_command("inspect")
+        replay_path = tmp_path / "book_prewarm.json"
+        save_replay(session, replay_path)
+    finally:
+        session.close()
+
+    replay_result = run_replay(replay_path)
+    assert replay_result.matched
+    assert any(record["kind"] == "book_preview" for record in replay_result.final_summary["canon_records"])
 
 
 def test_read_book_materializes_title_pages_and_costs_turn() -> None:

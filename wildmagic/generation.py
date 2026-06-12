@@ -486,6 +486,23 @@ class _GenerationMixin:
         if test_book is not None:
             test_book.name = "water-stained folio of forbidden saints"
             test_book.description = "A folio bound in cracked leather. It concerns forbidden saints."
+            test_book.details["book_seed"] = {
+                "topic": "forbidden saints",
+                "secondary_topic": "devotional practice",
+                "form": "folio",
+                "condition": "water-stained",
+                "binding": "cracked leather",
+                "era": "pre_charter",
+                "genre": "saint's life",
+                "discipline": "devotional practice",
+                "author_role": "field nun",
+                "audience": "pilgrims",
+                "purpose": "to preserve a forbidden custom",
+                "stance": "pious and suspicious",
+                "institution": "road chapel",
+                "title_shape": "sermon",
+                "taboo_level": "forbidden",
+            }
         # Deterministic secret for tests and scripted play: the main chamber
         # always hides one plain compartment (regenerates identically on replay).
         chamber_profile = self.room_profile_at(5, 7)
@@ -1775,7 +1792,10 @@ class _GenerationMixin:
                     continue
                 book.name = entry["name"]
                 book.description = entry["description"]
+                book.details["book_seed"] = dict(entry)
                 book.tags.add(normalize_id(entry["topic"]))
+                book.tags.add(normalize_id(entry["genre"]))
+                book.tags.add(normalize_id(entry["discipline"]))
 
     def _register_room_profile(self, profile: RoomProfile) -> None:
         self.state.room_profiles[profile.id] = profile

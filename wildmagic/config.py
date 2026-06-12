@@ -177,6 +177,10 @@ def get_canon_model() -> str:
     return get_config_value("WILDMAGIC_CANON_MODEL") or _shared_model()
 
 
+def get_background_canon_model() -> str:
+    return get_config_value("WILDMAGIC_BACKGROUND_CANON_MODEL") or get_lore_model()
+
+
 def get_wild_magic_provider() -> str:
     return (get_config_value("WILDMAGIC_PROVIDER", DEFAULT_PROVIDER) or DEFAULT_PROVIDER).lower()
 
@@ -307,6 +311,14 @@ def lore_enabled() -> bool:
 
 def flesh_enabled() -> bool:
     return _bool_value("WILDMAGIC_FLESH_ENABLED", True)
+
+
+def canon_prewarm_enabled() -> bool:
+    return _bool_value("WILDMAGIC_CANON_PREWARM_ENABLED", False)
+
+
+def canon_prewarm_limit() -> int:
+    return _int_value("WILDMAGIC_CANON_PREWARM_LIMIT", 1, 0, 8)
 
 
 def audit_dir() -> Path:
