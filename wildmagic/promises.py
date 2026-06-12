@@ -107,6 +107,7 @@ FLESH_FIELDS = {
     "site_name": 60,
     "keeper_name": 40,
     "keeper_backstory": 300,
+    "keeper_appearance": 240,
     "prop_description": 200,
     "arrival_line": 160,
 }

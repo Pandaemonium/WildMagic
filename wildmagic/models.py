@@ -277,6 +277,7 @@ class NPCProfile:
     name: str
     role: str
     backstory: str
+    appearance: str = ""
     traits: list[str] = field(default_factory=list)
     memory: list[str] = field(default_factory=list)
     conversation: list[dict[str, str]] = field(default_factory=list)
@@ -301,6 +302,7 @@ class NPCProfile:
             "name": self.name,
             "role": self.role,
             "backstory": self.backstory,
+            "appearance": self.appearance,
             "traits": list(self.traits),
             "things_i_have_noticed": list(self.memory),
             "recent_conversation": list(self.conversation),
@@ -375,6 +377,135 @@ class Room:
         )
 
 
+@dataclass(frozen=True)
+class RoomProfile:
+    """Semantic room data that richer generation can use as seed context."""
+
+    id: str
+    x: int
+    y: int
+    w: int
+    h: int
+    room_type: str
+    era: str
+    condition: str
+    topics: list[str] = field(default_factory=list)
+    tags: list[str] = field(default_factory=list)
+    secret_slots: list[dict[str, Any]] = field(default_factory=list)
+    promise_hooks: list[str] = field(default_factory=list)
+
+    @property
+    def center(self) -> tuple[int, int]:
+        return (self.x + self.w // 2, self.y + self.h // 2)
+
+    def contains(self, x: int, y: int) -> bool:
+        return self.x <= x < self.x + self.w and self.y <= y < self.y + self.h
+
+    def to_public_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "bounds": {"x": self.x, "y": self.y, "w": self.w, "h": self.h},
+            "center": {"x": self.center[0], "y": self.center[1]},
+            "type": self.room_type,
+            "era": self.era,
+            "condition": self.condition,
+            "topics": list(self.topics),
+            "tags": list(self.tags),
+            "secret_slots": [dict(slot) for slot in self.secret_slots],
+            "promise_hooks": list(self.promise_hooks),
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "RoomProfile":
+        bounds = data.get("bounds") if isinstance(data.get("bounds"), dict) else {}
+        return cls(
+            id=str(data.get("id") or ""),
+            x=int(bounds.get("x", data.get("x", 0))),
+            y=int(bounds.get("y", data.get("y", 0))),
+            w=int(bounds.get("w", data.get("w", 1))),
+            h=int(bounds.get("h", data.get("h", 1))),
+            room_type=str(data.get("type") or data.get("room_type") or "room"),
+            era=str(data.get("era") or "unknown"),
+            condition=str(data.get("condition") or "undisturbed"),
+            topics=[str(topic) for topic in data.get("topics", []) if str(topic).strip()],
+            tags=[str(tag) for tag in data.get("tags", []) if str(tag).strip()],
+            secret_slots=[dict(slot) for slot in data.get("secret_slots", []) if isinstance(slot, dict)],
+            promise_hooks=[str(hook) for hook in data.get("promise_hooks", []) if str(hook).strip()],
+        )
+
+
+@dataclass
+class CanonRecord:
+    """Per-run materialized text or description that has become game canon."""
+
+    id: str
+    kind: str
+    attachment: dict[str, Any]
+    text: str
+    title: str | None = None
+    summary: str | None = None
+    tags: list[str] = field(default_factory=list)
+    source: str = "grammar_fallback"
+    seed_packet: dict[str, Any] = field(default_factory=dict)
+    claims_emitted: list[str] = field(default_factory=list)
+    engine_choices: dict[str, Any] = field(default_factory=dict)
+    llm_choices: dict[str, Any] = field(default_factory=dict)
+    turn_created: int = 0
+    status: str = "canonical"
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "kind": self.kind,
+            "attachment": dict(self.attachment),
+            "title": self.title,
+            "text": self.text,
+            "summary": self.summary,
+            "tags": list(self.tags),
+            "source": self.source,
+            "seed_packet": dict(self.seed_packet),
+            "claims_emitted": list(self.claims_emitted),
+            "engine_choices": dict(self.engine_choices),
+            "llm_choices": dict(self.llm_choices),
+            "turn_created": self.turn_created,
+            "status": self.status,
+        }
+
+    def to_context_dict(self) -> dict[str, Any]:
+        return {
+            "id": self.id,
+            "kind": self.kind,
+            "attachment": dict(self.attachment),
+            "title": self.title,
+            "summary": self.summary or self.text[:160],
+            "tags": list(self.tags),
+            "source": self.source,
+            "status": self.status,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "CanonRecord":
+        attachment = data.get("attachment")
+        if not isinstance(attachment, dict):
+            attachment = {"kind": "unknown", "id": str(data.get("attached_to") or "")}
+        return cls(
+            id=str(data.get("id") or ""),
+            kind=str(data.get("kind") or "object_detail"),
+            attachment=dict(attachment),
+            title=str(data["title"]) if data.get("title") is not None else None,
+            text=str(data.get("text") or ""),
+            summary=str(data["summary"]) if data.get("summary") is not None else None,
+            tags=[str(tag) for tag in data.get("tags", []) if str(tag).strip()],
+            source=str(data.get("source") or "grammar_fallback"),
+            seed_packet=dict(data.get("seed_packet") or {}),
+            claims_emitted=[str(claim) for claim in data.get("claims_emitted", []) if str(claim).strip()],
+            engine_choices=dict(data.get("engine_choices") or {}),
+            llm_choices=dict(data.get("llm_choices") or data.get("menu_choices") or {}),
+            turn_created=int(data.get("turn_created") or 0),
+            status=str(data.get("status") or "canonical"),
+        )
+
+
 @dataclass
 class ZoneSnapshot:
     """A cached, persisted record of a previously-visited frontier zone (sans player)."""
@@ -385,3 +516,5 @@ class ZoneSnapshot:
     entities: dict[str, Entity]
     explored: set[str]
     zone_type: str
+    room_profiles: dict[str, RoomProfile] = field(default_factory=dict)
+    tile_rooms: dict[str, str] = field(default_factory=dict)

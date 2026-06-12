@@ -57,7 +57,10 @@ split into mixins, leaving engine.py with the infrastructure that everything els
 - Player actions: `attempt_player_move`, `wait_turn`, `open_door`, `open_adjacent_door`, `descend_stairs`, `ascend_stairs`, `teleport_entity`, `_move_to_nearest_open_tile`
 - Standard spells (deterministic, no LLM): `cast_standard_bolt`, `cast_standard_frost`, `cast_standard_heal`, `cast_standard_ward`, `cast_standard_reveal`
 - NPC dialogue/trade/promises: `find_talk_target`, `dialogue_context_for_llm`, `lore_extraction_context`, `promises_for_context`, `promise_hooks_for_zone`, `add_promises`, `apply_dialogue_exchange`, `resolve_pending_trade`, `should_consider_trade`, `trade_context_for_llm`
-- LLM context building: `context_for_llm`, `nearby_spell_anchors`, `nearby_map_strings`, `nearby_tile_details`
+- LLM context building: `context_for_llm`, `nearby_spell_anchors`, `nearby_map_strings`, `nearby_tile_details`.
+  Context includes semantic room labels (`current_room`, `nearby_rooms`) and retrieved
+  materialized canon (`nearby_canon`) so future richness prompts and wild magic share
+  the same world facts.
 - Turn bookkeeping: `finish_player_turn`, `_regenerate_player`, `resolve_target`, `resolve_target_group`, `nearest_enemy`, `_verb`
 - Environment tick: `_tick_environment`, `_tick_fire_spread`, `_tick_poison_spread`, `_apply_tile_entry`, `_ambient_sounds`, `_tick_simple_statuses`, `_tick_tile_durations`, `_tick_event_timers`
 - Trigger system: `_trigger_event`, `_tick_triggers`, `_fire_triggers`, `_fire_damage_triggers`, `_fire_death_triggers`, `_trigger_matches_target`, `_fill_trigger_effect_defaults`
@@ -110,6 +113,12 @@ All map and world generation (41 methods):
   description/NPC/building content and mark it `realized`.
 - **Zone navigation** — `_cross_zone_edge`, `_save_current_zone`, `_load_or_generate_zone`
 - **Road network** — `_road_anchor`, `_zone_is_road`, `_road_edges`, `_zone_should_be_town`
+
+Generation emits `RoomProfile` semantic labels (type, era, condition, topics, tags,
+promise hooks, and future secret slots) for dungeon rooms, Hollowmere buildings,
+generated town buildings, frontier structures, and realized promise sites. Labels are
+saved in `ZoneSnapshot` / dungeon-floor snapshots and bias prop selection without
+consuming gameplay RNG.
 
 ### `wildmagic/effects.py` — `_EffectsMixin`
 Wild magic resolution and every effect/cost handler:
@@ -222,7 +231,10 @@ All shared data types and tile constants. No game logic.
   `WATER`, `FIRE`, `SLICK_ICE`, `ICE_WALL`, `POISON_CLOUD`, `VINES`, `RUBBLE`, `MIST`, `ROAD`
 - Derived tile sets: `BLOCKING_TILES`, `DAMAGING_TILES`, `TILE_NAMES`, `TILE_TAGS`, `TILE_ALIASES`
 - Status/damage type catalogues: `MECHANICAL_STATUSES`, `DAMAGE_TYPES`
-- Dataclasses: `Entity`, `Curse`, `NPCProfile`, `GameStats`, `WildMagicOutcome`, `Room`, `ZoneSnapshot`
+- Dataclasses: `Entity`, `Curse`, `NPCProfile`, `GameStats`, `WildMagicOutcome`, `Room`,
+  `RoomProfile`, `CanonRecord`, `ZoneSnapshot`. `RoomProfile` is the deterministic
+  semantic seed layer for richer content; `CanonRecord` stores per-run materialized text
+  or descriptions that have become game canon.
 
 ### `wildmagic/game_data.py`
 All hand-authored game content and tunable constants:

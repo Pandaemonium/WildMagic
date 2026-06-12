@@ -1980,6 +1980,7 @@ class NpcSpec:
     traits: list[str]
     building: str | None
     wares: dict[str, int] | None
+    appearance: str = ""
 
 
 @dataclass
@@ -2017,6 +2018,7 @@ def _parse_town_spec(raw: str) -> TownSpec:
             traits=[str(t) for t in (n.get("traits") or []) if t],
             building=str(n["building"]).lower().strip() if n.get("building") else None,
             wares=wares or None,
+            appearance=str(n.get("appearance") or "").strip(),
         ))
     return TownSpec(
         town_name=str(data.get("town_name") or "Unnamed Settlement").strip(),
@@ -2114,6 +2116,7 @@ class MockTownProvider:
                     traits=["tired", "hospitable"],
                     building="tavern",
                     wares={"smoke vial": 2, "gold": 15},
+                    appearance="A broad-shouldered woman with flour on her forearms and a wedding ring she still wears. Her smile arrives a half-second late, like it had to be fetched.",
                 ),
                 NpcSpec(
                     name="Oswin Fetch",
@@ -2122,6 +2125,7 @@ class MockTownProvider:
                     traits=["chatty", "shrewd"],
                     building="market",
                     wares={"lockpick": 1, "trinket": 2, "gold": 20},
+                    appearance="A wiry man whose coat is more pockets than cloth, road dust worked permanently into the seams. His eyes do a quick inventory of you before his mouth says hello.",
                 ),
                 NpcSpec(
                     name="Old Britta",
@@ -2130,6 +2134,7 @@ class MockTownProvider:
                     traits=["quiet", "observant"],
                     building="home",
                     wares={"blood moss": 2, "grave salt": 1, "gold": 10},
+                    appearance="A small, weathered woman with green-stained fingertips and a posture like a bent nail. She watches the road the way other people watch the weather.",
                 ),
             ],
         )

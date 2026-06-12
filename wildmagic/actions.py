@@ -764,6 +764,13 @@ def describe_state(engine: GameEngine) -> list[str]:
         key=lambda entity: entity.id,
     ):
         props.append(f"{prop.name} at {prop.x},{prop.y} ({prop.description}) tags:{','.join(sorted(prop.tags))}")
+    current_room = engine.room_profile_at(player.x, player.y)
+    visible_rooms = engine.visible_room_profiles(limit=5)
+    room_lines = []
+    for room in visible_rooms:
+        topics = ", ".join(room["topics"][:2])
+        topic_text = f" topics:{topics}" if topics else ""
+        room_lines.append(f"{room['type']} [{room['era']}, {room['condition']}]{topic_text}")
     equipment = ", ".join(f"{slot}: {item}" for slot, item in sorted(player.equipment.items()) if item) or "none"
     resistances = ", ".join(f"{k}:{v}%" for k, v in sorted(player.resistances.items()) if v) or "none"
     weaknesses = ", ".join(f"{k}:{v}%" for k, v in sorted(player.weaknesses.items()) if v) or "none"
@@ -782,6 +789,12 @@ def describe_state(engine: GameEngine) -> list[str]:
         "Allies: " + ("; ".join(allies) if allies else "none"),
         "NPCs: " + ("; ".join(npcs) if npcs else "none"),
         "Props: " + ("; ".join(props) if props else "none"),
+        "Current room: " + (
+            f"{current_room.room_type} [{current_room.era}, {current_room.condition}]"
+            if current_room else "none"
+        ),
+        "Visible rooms: " + ("; ".join(room_lines) if room_lines else "none"),
+        f"Canon records: {len(state.canon_records)}",
     ]
     if player.resistances:
         lines.append(f"Resistances: {resistances}")
@@ -800,6 +813,7 @@ def describe_state(engine: GameEngine) -> list[str]:
 def summarize_state(engine: GameEngine) -> dict[str, Any]:
     state = engine.state
     player = state.player
+    current_room = engine.room_profile_at(player.x, player.y)
     living_enemies = sorted(engine.living_enemies(), key=lambda entity: entity.id)
     items = sorted(
         [entity for entity in state.entities.values() if entity.kind == "item"],
@@ -823,6 +837,12 @@ def summarize_state(engine: GameEngine) -> dict[str, Any]:
         "inventory": dict(sorted(state.inventory.items())),
         "flags": dict(sorted(state.flags.items())),
         "tile_counts": tile_counts(state.tiles),
+        "current_room": current_room.to_public_dict() if current_room else None,
+        "visible_rooms": engine.visible_room_profiles(limit=8),
+        "canon_records": [
+            record.to_dict()
+            for record in sorted(state.canon_records.values(), key=lambda record: record.id)
+        ],
         "event_timers": sorted(
             [
                 {

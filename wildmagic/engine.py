@@ -34,6 +34,8 @@ from .models import (
     Entity,
     GameStats,
     NPCProfile,
+    CanonRecord,
+    RoomProfile,
     TILE_NAMES,
     TILE_ALIASES,
     TILE_TAGS,
@@ -212,6 +214,9 @@ class GameState:
     zone_type: str = "frontier"
     zones: dict[tuple[int, int], ZoneSnapshot] = field(default_factory=dict)
     dungeon_floors: dict[int, ZoneSnapshot] = field(default_factory=dict)
+    room_profiles: dict[str, RoomProfile] = field(default_factory=dict)
+    tile_rooms: dict[str, str] = field(default_factory=dict)
+    canon_records: dict[str, CanonRecord] = field(default_factory=dict)
     _player_taking_damage: bool = False
     promises: list[WorldPromise] = field(default_factory=list)
     promise_reservations: dict[tuple[int, int], list[PromiseReservation]] = field(default_factory=dict)
@@ -237,6 +242,12 @@ class GameState:
         if self.scenario == "town":
             return "Hollowmere"
         return f"Depth {self.depth}"
+
+    def room_profile_at(self, x: int, y: int) -> RoomProfile | None:
+        room_id = self.tile_rooms.get(f"{x},{y}")
+        if not room_id:
+            return None
+        return self.room_profiles.get(room_id)
 
 
 class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _EffectsMixin):
@@ -323,6 +334,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         y: int,
         role: str,
         backstory: str,
+        appearance: str = "",
         traits: list[str] | None = None,
         tags: set[str] | None = None,
         wares: dict[str, int] | None = None,
@@ -373,6 +385,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             name=name,
             role=role,
             backstory=backstory,
+            appearance=appearance,
             traits=list(traits or []),
             wares=npc_wares,
             wanted_item=wanted_item,
@@ -408,6 +421,59 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         )
         self.state.entities[entity.id] = entity
         return entity
+
+    def room_profile_at(self, x: int, y: int) -> RoomProfile | None:
+        return self.state.room_profile_at(x, y)
+
+    def visible_room_profiles(self, limit: int = 6) -> list[dict[str, Any]]:
+        player = self.state.player
+        rooms: list[tuple[int, dict[str, Any]]] = []
+        for profile in self.state.room_profiles.values():
+            if not any(self.is_visible(x, y) for y in range(profile.y, profile.y + profile.h) for x in range(profile.x, profile.x + profile.w)):
+                continue
+            cx, cy = profile.center
+            distance = abs(cx - player.x) + abs(cy - player.y)
+            data = profile.to_public_dict()
+            data["distance"] = distance
+            rooms.append((distance, data))
+        rooms.sort(key=lambda item: (item[0], item[1]["id"]))
+        return [room for _distance, room in rooms[:limit]]
+
+    def nearby_canon_records(
+        self,
+        tags: list[str] | set[str] | tuple[str, ...] = (),
+        attachment: dict[str, Any] | None = None,
+        limit: int = 6,
+    ) -> list[dict[str, Any]]:
+        wanted_tags = {normalize_id(str(tag)) for tag in tags if str(tag).strip()}
+        scored: list[tuple[int, str, CanonRecord]] = []
+        for record in self.state.canon_records.values():
+            score = 0
+            record_tags = {normalize_id(str(tag)) for tag in record.tags if str(tag).strip()}
+            overlap = wanted_tags & record_tags
+            if overlap:
+                score += 10 + len(overlap)
+            if attachment:
+                for key, value in attachment.items():
+                    if record.attachment.get(key) == value:
+                        score += 8
+            if record.status == "canonical":
+                score += 2
+            if score <= 0 and (wanted_tags or attachment):
+                continue
+            scored.append((-score, record.id, record))
+        scored.sort(key=lambda item: (item[0], item[1]))
+        return [record.to_context_dict() for _score, _id, record in scored[:limit]]
+
+    def add_canon_record(self, record: CanonRecord) -> CanonRecord:
+        existing = self.state.canon_records.get(record.id)
+        if existing is not None and existing.status == "canonical":
+            return existing
+        record.tags = sorted({normalize_id(str(tag)) for tag in record.tags if str(tag).strip()})
+        record.kind = normalize_id(record.kind or "object_detail")
+        record.status = "canonical" if record.status not in {"provisional", "canonical"} else record.status
+        self.state.canon_records[record.id] = record
+        return record
 
 
     @property
@@ -2003,6 +2069,16 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                     "use create_tiles, area_damage, area_status, summon, conjure_item, or create_trigger to express the prop",
                 ],
             }
+            room = self.room_profile_at(entity.x, entity.y)
+            if room is not None:
+                anchor["room"] = {
+                    "id": room.id,
+                    "type": room.room_type,
+                    "era": room.era,
+                    "condition": room.condition,
+                    "topics": list(room.topics),
+                    "tags": list(room.tags),
+                }
             if matched_terms:
                 anchor["matches_spell_terms"] = matched_terms[:6]
             damage_type = "arcane"
@@ -2080,6 +2156,9 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
 
     def context_for_llm(self, spell: str) -> dict[str, Any]:
         player = self.state.player
+        current_room = self.room_profile_at(player.x, player.y)
+        current_room_tags = set(current_room.tags if current_room else [])
+        current_room_tags.update(current_room.topics if current_room else [])
         nearby_entities = [
             entity.to_public_dict()
             for entity in self.state.entities.values()
@@ -2111,6 +2190,9 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             "world_flags": self.state.flags,
             "event_timers": self.state.event_timers,
             "triggers": self.state.triggers,
+            "current_room": current_room.to_public_dict() if current_room else None,
+            "nearby_rooms": self.visible_room_profiles(),
+            "nearby_canon": self.nearby_canon_records(tags=current_room_tags),
             "visible_tile_count": len(self.state.visible),
             "explored_tile_count": len(self.state.explored),
             "nearby_entities": nearby_entities,
@@ -2208,14 +2290,21 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                 key = self.tile_key(x, y)
                 duration = self.state.tile_durations.get(key)
                 if tile != FLOOR or duration is not None or key in self.state.tile_tags:
-                    details.append(
-                        {
-                            "x": x,
-                            "y": y,
-                            "tile": tile,
-                            "name": TILE_NAMES.get(tile, "strange"),
-                            "tags": sorted(self.tile_tags_at(x, y)),
-                            "duration": duration,
+                    detail = {
+                        "x": x,
+                        "y": y,
+                        "tile": tile,
+                        "name": TILE_NAMES.get(tile, "strange"),
+                        "tags": sorted(self.tile_tags_at(x, y)),
+                        "duration": duration,
+                    }
+                    room = self.room_profile_at(x, y)
+                    if room is not None:
+                        detail["room"] = {
+                            "id": room.id,
+                            "type": room.room_type,
+                            "era": room.era,
+                            "condition": room.condition,
                         }
-                    )
+                    details.append(detail)
         return details[:60]

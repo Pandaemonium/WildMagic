@@ -39,6 +39,7 @@ from .models import (
     WATER,
     Entity,
     Room,
+    RoomProfile,
     ZoneSnapshot,
 )
 from .normalize import normalize_id
@@ -113,6 +114,96 @@ SITE_BLUEPRINTS: dict[str, SiteBlueprint] = {
         npc_wares={"sealed form": 1, "gold": 10},
     ),
 }
+
+
+@dataclass(frozen=True)
+class RoomArchetype:
+    id: str
+    room_type: str
+    topics: tuple[str, ...]
+    tags: tuple[str, ...]
+    prop_categories: tuple[str, ...]
+    secret_kinds: tuple[str, ...] = ()
+
+
+ROOM_ARCHETYPES: tuple[RoomArchetype, ...] = (
+    RoomArchetype(
+        "scriptorium",
+        "scriptorium",
+        ("marginalia", "forbidden saints", "weather law", "old maps"),
+        ("lore", "paper", "books", "furniture"),
+        ("furniture", "imperial", "arcane"),
+        ("hidden_compartment", "loose_page"),
+    ),
+    RoomArchetype(
+        "ritual_chamber",
+        "ritual chamber",
+        ("summoning geometry", "blood vows", "warding circles", "debts owed to magic"),
+        ("arcane", "ritual", "magic"),
+        ("arcane", "traditions", "religious"),
+        ("sealed_cache", "false_sigil"),
+    ),
+    RoomArchetype(
+        "ossuary",
+        "ossuary",
+        ("bone lineages", "old burials", "ancestor songs", "saints of the dead"),
+        ("death", "bone", "traditions"),
+        ("traditions", "religious"),
+        ("burial_niche", "marked_skull"),
+    ),
+    RoomArchetype(
+        "laboratory",
+        "laboratory",
+        ("failed mixtures", "specimen notes", "vapor formulae", "licensed experiments"),
+        ("alchemical", "toxic", "glass"),
+        ("alchemical", "arcane"),
+        ("locked_drawer", "sealed_sample"),
+    ),
+    RoomArchetype(
+        "guardroom",
+        "guardroom",
+        ("watch rotations", "confiscations", "wanted notices", "old patrol routes"),
+        ("weapons", "empire", "infrastructure"),
+        ("infrastructure", "imperial", "ruined"),
+        ("loose_flagstone", "stashed_key"),
+    ),
+    RoomArchetype(
+        "shrine",
+        "shrine",
+        ("votive names", "old prayers", "saint cults", "blasphemies"),
+        ("holy", "ritual", "lore"),
+        ("religious", "traditions"),
+        ("hollow_altar", "hidden_reliquary"),
+    ),
+    RoomArchetype(
+        "cistern",
+        "cistern",
+        ("water debts", "drain maps", "flood marks", "subterranean springs"),
+        ("water", "infrastructure", "cold"),
+        ("infrastructure", "natural"),
+        ("drain_cache", "submerged_slot"),
+    ),
+    RoomArchetype(
+        "storeroom",
+        "storeroom",
+        ("abandoned provisions", "old trade goods", "broken tools", "mislabeled crates"),
+        ("debris", "wood", "furniture"),
+        ("ruined", "furniture", "infrastructure"),
+        ("false_bottom", "crate_cache"),
+    ),
+    RoomArchetype(
+        "root_choked_room",
+        "root-choked room",
+        ("plant omens", "buried wells", "fungal blooms", "things growing through stone"),
+        ("natural", "plant", "fungus"),
+        ("natural", "traditions"),
+        ("root_gap", "buried_cache"),
+    ),
+)
+
+
+_ROOM_ERAS = ("pre_charter", "imperial", "abandoned", "wild-touched", "recently disturbed")
+_ROOM_CONDITIONS = ("ransacked", "water-damaged", "smoke-stained", "meticulously arranged", "half-collapsed", "overgrown")
 
 
 # Floor themes (max_depth -> prop category weights) now live on each Region
@@ -191,6 +282,8 @@ class _GenerationMixin:
         state.explored.clear()
         state.tile_tags.clear()
         state.tile_durations.clear()
+        state.room_profiles.clear()
+        state.tile_rooms.clear()
         state.entities = {}
         rooms: list[Room] = []
         for _ in range(80):
@@ -212,6 +305,8 @@ class _GenerationMixin:
             fallback = Room(4, 4, 12, 8)
             self._carve_room(fallback)
             rooms.append(fallback)
+
+        self._label_dungeon_rooms(rooms)
 
         px, py = rooms[0].center
         # Non-blocking themed prop in the starting room for immediate atmosphere.
@@ -333,11 +428,15 @@ class _GenerationMixin:
     def _generate_test_chamber(self) -> None:
         state = self.state
         state.tiles = [[WALL for _ in range(state.width)] for _ in range(state.height)]
+        state.room_profiles.clear()
+        state.tile_rooms.clear()
         chamber = Room(2, 2, 18, 12)
         self._carve_room(chamber)
         for x in range(20, 30):
             state.tiles[7][x] = FLOOR
-        self._carve_room(Room(30, 4, 8, 7))
+        far_chamber = Room(30, 4, 8, 7)
+        self._carve_room(far_chamber)
+        self._label_dungeon_rooms([chamber, far_chamber])
         state.tiles[7][6] = DOOR
         state.tiles[7][20] = DOOR
 
@@ -397,6 +496,8 @@ class _GenerationMixin:
         state.explored.clear()
         state.tile_tags.clear()
         state.tile_durations.clear()
+        state.room_profiles.clear()
+        state.tile_rooms.clear()
         state.entities = {}
 
         axis_x = state.width // 2
@@ -429,6 +530,25 @@ class _GenerationMixin:
             self._carve_corridor_mirrored(tower.center, cell_rooms[partner_cell_y].center, axis_x)
 
         self._place_doors_mirrored(axis_x, count=4)
+        archetype = next(a for a in ROOM_ARCHETYPES if a.id == "guardroom")
+        label_rng = random.Random(stable_seed(state.rng_seed, "empire_room_profile", "courtyard"))
+        base_profile = self._profile_from_archetype(courtyard, "empire_compound_courtyard", archetype, label_rng)
+        self._register_room_profile(
+            RoomProfile(
+                id=base_profile.id,
+                x=base_profile.x,
+                y=base_profile.y,
+                w=base_profile.w,
+                h=base_profile.h,
+                room_type="inspection courtyard",
+                era="imperial",
+                condition=base_profile.condition,
+                topics=base_profile.topics,
+                tags=sorted({*base_profile.tags, "empire", "courtyard"}),
+                secret_slots=base_profile.secret_slots,
+                promise_hooks=[],
+            )
+        )
 
         cx, cy = courtyard.center
         player = Entity(
@@ -471,6 +591,8 @@ class _GenerationMixin:
         state.explored.clear()
         state.tile_tags.clear()
         state.tile_durations.clear()
+        state.room_profiles.clear()
+        state.tile_rooms.clear()
         state.entities = {}
         state.npc_profiles = {}
 
@@ -489,6 +611,31 @@ class _GenerationMixin:
         state.tiles[market.y + market.h // 2][market.x] = DOOR
         state.tiles[temple.y + temple.h - 1][temple.x + temple.w // 2] = DOOR
         state.tiles[gatehouse.y][gatehouse.x + gatehouse.w // 2] = DOOR
+        for room, room_id, room_type, archetype_id in (
+            (inn, "hollowmere_inn", "The Lantern and Bone", "storeroom"),
+            (market, "hollowmere_market", "market stall", "scriptorium"),
+            (temple, "hollowmere_temple", "old saints' shrine", "shrine"),
+            (gatehouse, "hollowmere_gatehouse", "gatehouse", "guardroom"),
+        ):
+            archetype = next(a for a in ROOM_ARCHETYPES if a.id == archetype_id)
+            label_rng = random.Random(stable_seed(state.rng_seed, "hollowmere_room_profile", room_id))
+            base_profile = self._profile_from_archetype(room, room_id, archetype, label_rng)
+            self._register_room_profile(
+                RoomProfile(
+                    id=base_profile.id,
+                    x=base_profile.x,
+                    y=base_profile.y,
+                    w=base_profile.w,
+                    h=base_profile.h,
+                    room_type=room_type,
+                    era=base_profile.era,
+                    condition=base_profile.condition,
+                    topics=base_profile.topics,
+                    tags=sorted({*base_profile.tags, "hollowmere", "town_building"}),
+                    secret_slots=base_profile.secret_slots,
+                    promise_hooks=base_profile.promise_hooks,
+                )
+            )
 
         px, py = state.width // 2, state.height // 2
         player = Entity(
@@ -522,6 +669,11 @@ class _GenerationMixin:
                 "Grand Empire's roads reached this far north. Buries her opinions about the "
                 "legion under a tray of drinks and a closed mouth."
             ),
+            appearance=(
+                "A stout woman gone gray at the temples, forearms like a dockhand's from "
+                "thirty years of kegs. A lantern and a bone are tattooed on her wrist, "
+                "older than the inn's painted sign and clearly its original."
+            ),
             traits=["gruff", "observant", "secretly soft-hearted"],
             tags={"human", "hollowmere_townsfolk"},
             wanted_item="Glass Eye of Hollowmere",
@@ -541,6 +693,11 @@ class _GenerationMixin:
                 "Travels the frontier roads buying odd curios and reselling them at triple "
                 "the price. Knows which rumors are worth repeating and which ones get a "
                 "person's throat cut."
+            ),
+            appearance=(
+                "A reedy man hung with samples of his own stock - chains, charms, a "
+                "spyglass with no lens. One boot is much newer than the other, and he "
+                "stands so you'll notice the new one."
             ),
             traits=["chatty", "shrewd", "easily distracted by anything shiny"],
             tags={"human", "hollowmere_townsfolk"},
@@ -563,6 +720,11 @@ class _GenerationMixin:
                 "Empire brought its own gods north. Worries more about the dungeon's "
                 "restless dead than any war of banners."
             ),
+            appearance=(
+                "A young woman in undyed wool, sleeves rolled for work, knuckles chapped "
+                "from scrubbing the shrine stones. Dried earth is pressed under her nails "
+                "in the old saints' fashion - by choice, not neglect."
+            ),
             traits=["serene", "watchful", "quietly stubborn"],
             tags={"human", "hollowmere_townsfolk"},
             wanted_item="Amulet of the Old Saints",
@@ -584,6 +746,11 @@ class _GenerationMixin:
                 "Commands the dozen guards who keep the peace and watch the old dungeon "
                 "stair. Trusts wild magic about as much as she trusts the Empire - which is "
                 "to say, not at all, and she'll tell you so."
+            ),
+            appearance=(
+                "A tall woman in a town-issue breastplate kept brighter than the Empire "
+                "keeps anything. A scar splits one eyebrow, and her thumb rests on her "
+                "sword's crossguard the way other people cross their arms."
             ),
             traits=["wary", "blunt", "fiercely protective of the town"],
             tags={"human", "hollowmere_townsfolk", "soldier"},
@@ -650,6 +817,8 @@ class _GenerationMixin:
         state.entities = {}
         state.tile_tags = {}
         state.tile_durations = {}
+        state.room_profiles = {}
+        state.tile_rooms = {}
         state.explored = set()
 
         state.zone_type = self._generate_open_zone(0, 0)
@@ -691,6 +860,10 @@ class _GenerationMixin:
         state.visible.clear()
         state.tile_tags.clear()
         state.tile_durations.clear()
+        state.room_profiles.clear()
+        state.tile_rooms.clear()
+        state.room_profiles.clear()
+        state.tile_rooms.clear()
 
         zone_rng = random.Random(stable_seed(state.rng_seed, "frontier_zone", zx, zy))
         imperial_density = self._imperial_density(zx, zy)
@@ -763,12 +936,23 @@ class _GenerationMixin:
             if any(room.intersects(existing) for existing in placed):
                 continue
             placed.append(room)
+            building_index = len(buildings) + 1
+            label_rng = random.Random(stable_seed(state.rng_seed, "zone_building_profile", state.zone_x, state.zone_y, building_index, room.x, room.y, room.w, room.h))
             if imperial:
                 self._build_imperial_structure(room)
                 buildings.append({"room": room, "kind": "imperial"})
+                archetype = next(a for a in ROOM_ARCHETYPES if a.id == "guardroom")
             else:
                 self._build_common_structure(room, zone_rng)
                 buildings.append({"room": room, "kind": "common"})
+                archetype = label_rng.choice(
+                    [
+                        a for a in ROOM_ARCHETYPES
+                        if a.id in {"storeroom", "shrine", "scriptorium", "root_choked_room", "laboratory"}
+                    ]
+                )
+            room_id = f"zone_{state.zone_x}_{state.zone_y}_building_{building_index:02d}_{normalize_id(archetype.room_type)}"
+            self._register_room_profile(self._profile_from_archetype(room, room_id, archetype, label_rng))
         return buildings
 
     def _build_common_structure(self, room: Room, zone_rng: random.Random) -> None:
@@ -810,6 +994,36 @@ class _GenerationMixin:
                 continue
             placed_rooms.append(room)
             self._build_promise_structure(room, site, zone_rng)
+            archetype_by_blueprint = {
+                "sacred_site": "shrine",
+                "inhabited_site": "storeroom",
+                "hostile_site": "guardroom",
+                "memorial_site": "ossuary",
+                "hidden_site": "storeroom",
+                "creature_site": "root_choked_room",
+                "authority_site": "guardroom",
+            }
+            archetype_id = archetype_by_blueprint.get(site.id, "storeroom")
+            archetype = next(a for a in ROOM_ARCHETYPES if a.id == archetype_id)
+            room_id = f"zone_{zx}_{zy}_promise_{normalize_id(promise.id)}"
+            label_rng = random.Random(stable_seed(self.state.rng_seed, "promise_room_profile", zx, zy, promise.id, room.x, room.y, room.w, room.h))
+            base_profile = self._profile_from_archetype(room, room_id, archetype, label_rng, promise_hooks=[promise.id])
+            self._register_room_profile(
+                RoomProfile(
+                    id=base_profile.id,
+                    x=base_profile.x,
+                    y=base_profile.y,
+                    w=base_profile.w,
+                    h=base_profile.h,
+                    room_type=base_profile.room_type,
+                    era=base_profile.era,
+                    condition=base_profile.condition,
+                    topics=base_profile.topics,
+                    tags=sorted({*base_profile.tags, *promise.tags, site.id, "promise_bound"}),
+                    secret_slots=base_profile.secret_slots,
+                    promise_hooks=[promise.id],
+                )
+            )
             buildings.append({"room": room, "kind": "promise", "blueprint": site.id, "promise_id": promise.id})
             self._populate_promise_structure(room, site, promise, zone_rng)
             promise.status = "realized"
@@ -883,6 +1097,7 @@ class _GenerationMixin:
                     spot[1],
                     role=site.npc_role,
                     backstory=backstory,
+                    appearance=flesh.get("keeper_appearance") or "",
                     traits=["watchful", "story-bound"],
                     tags={"npc", *site.npc_tags},
                     wares=dict(site.npc_wares or {}),
@@ -1122,6 +1337,38 @@ class _GenerationMixin:
             placed.append(placed_room)
             self._wall_room_perimeter(placed_room)
             self._build_common_structure(placed_room, zone_rng)
+            archetype_by_building = {
+                "tavern": "storeroom",
+                "inn": "storeroom",
+                "shrine": "shrine",
+                "temple": "shrine",
+                "market": "scriptorium",
+                "smithy": "guardroom",
+                "home": "storeroom",
+                "barracks": "guardroom",
+                "stable": "root_choked_room",
+            }
+            archetype_id = archetype_by_building.get(btype, "storeroom")
+            archetype = next(a for a in ROOM_ARCHETYPES if a.id == archetype_id)
+            room_id = f"zone_{zx}_{zy}_town_{len(placed):02d}_{normalize_id(building_spec.name or btype)}"
+            label_rng = random.Random(stable_seed(state.rng_seed, "town_room_profile", zx, zy, room_id, placed_room.x, placed_room.y, placed_room.w, placed_room.h))
+            base_profile = self._profile_from_archetype(placed_room, room_id, archetype, label_rng)
+            self._register_room_profile(
+                RoomProfile(
+                    id=base_profile.id,
+                    x=base_profile.x,
+                    y=base_profile.y,
+                    w=base_profile.w,
+                    h=base_profile.h,
+                    room_type=str(building_spec.name or btype).strip() or archetype.room_type,
+                    era=base_profile.era,
+                    condition=base_profile.condition,
+                    topics=base_profile.topics,
+                    tags=sorted({*base_profile.tags, btype, "town_building"}),
+                    secret_slots=base_profile.secret_slots,
+                    promise_hooks=base_profile.promise_hooks,
+                )
+            )
             if btype not in placed_by_type:
                 placed_by_type[btype] = placed_room
 
@@ -1153,6 +1400,7 @@ class _GenerationMixin:
                 y=spot[1],
                 role=npc_spec.role,
                 backstory=npc_spec.backstory,
+                appearance=npc_spec.appearance,
                 traits=npc_spec.traits,
                 tags={"npc"},
                 wares=npc_spec.wares,
@@ -1241,6 +1489,8 @@ class _GenerationMixin:
             },
             explored=set(state.explored),
             zone_type=state.zone_type,
+            room_profiles=dict(state.room_profiles),
+            tile_rooms=dict(state.tile_rooms),
         )
 
     # ------------------------------------------------------------------
@@ -1365,6 +1615,8 @@ class _GenerationMixin:
             state.explored = set(snapshot.explored)
             state.entities = dict(snapshot.entities)
             state.zone_type = snapshot.zone_type
+            state.room_profiles = dict(snapshot.room_profiles)
+            state.tile_rooms = dict(snapshot.tile_rooms)
         else:
             state.explored = set()
             if self._zone_should_be_town(zx, zy):
@@ -1388,6 +1640,67 @@ class _GenerationMixin:
                     if self.in_bounds(nx, ny) and self.can_occupy(nx, ny):
                         return nx, ny
         return x, y
+
+    def _register_room_profile(self, profile: RoomProfile) -> None:
+        self.state.room_profiles[profile.id] = profile
+        for y in range(profile.y, profile.y + profile.h):
+            for x in range(profile.x, profile.x + profile.w):
+                if self.in_bounds(x, y):
+                    self.state.tile_rooms[self.tile_key(x, y)] = profile.id
+
+    def _profile_from_archetype(
+        self,
+        room: Room,
+        room_id: str,
+        archetype: RoomArchetype,
+        rng: random.Random,
+        promise_hooks: list[str] | None = None,
+    ) -> RoomProfile:
+        era = rng.choice(_ROOM_ERAS)
+        condition = rng.choice(_ROOM_CONDITIONS)
+        topics = rng.sample(list(archetype.topics), k=min(2, len(archetype.topics)))
+        tags = sorted({archetype.id, era, condition, *archetype.tags, *archetype.prop_categories})
+        secret_slots: list[dict[str, Any]] = []
+        if archetype.secret_kinds and rng.random() < 0.28:
+            secret_kind = rng.choice(archetype.secret_kinds)
+            secret_slots.append(
+                {
+                    "id": f"{room_id}_{secret_kind}",
+                    "kind": secret_kind,
+                    "reveal_difficulty": rng.choice(["plain", "careful", "demanding"]),
+                    "clue_style": rng.choice(["scratches", "draft", "mismatched dust", "odd repetition"]),
+                    "possible_reward_tags": sorted({"lore", *archetype.tags[:2]}),
+                }
+            )
+        return RoomProfile(
+            id=room_id,
+            x=room.x,
+            y=room.y,
+            w=room.w,
+            h=room.h,
+            room_type=archetype.room_type,
+            era=era,
+            condition=condition,
+            topics=topics,
+            tags=tags,
+            secret_slots=secret_slots,
+            promise_hooks=list(promise_hooks or []),
+        )
+
+    def _label_dungeon_rooms(self, rooms: list[Room]) -> None:
+        self.state.room_profiles.clear()
+        self.state.tile_rooms.clear()
+        for index, room in enumerate(rooms, 1):
+            label_rng = random.Random(stable_seed(self.state.rng_seed, "dungeon_room_profile", self.state.depth, index, room.x, room.y, room.w, room.h))
+            archetype = label_rng.choice(ROOM_ARCHETYPES)
+            room_id = f"depth_{self.state.depth}_room_{index:02d}_{normalize_id(archetype.room_type)}"
+            self._register_room_profile(self._profile_from_archetype(room, room_id, archetype, label_rng))
+
+    def _room_prop_categories(self, room: Room) -> list[str]:
+        profile = self.room_profile_at(*room.center)
+        if profile is None:
+            return []
+        return [category for category in PROP_CATEGORIES if category in profile.tags]
 
     def _carve_room(self, room: Room) -> None:
         for y in range(room.y, room.y + room.h):
@@ -1543,7 +1856,14 @@ class _GenerationMixin:
                 return weights
         return themes[-1][1]
 
-    def _pick_themed_prop_id(self, depth: int) -> str:
+    def _pick_themed_prop_id(self, depth: int, preferred_categories: list[str] | None = None) -> str:
+        preferred_ids = [
+            pid
+            for category in (preferred_categories or [])
+            for pid in PROP_CATEGORIES.get(category, [])
+        ]
+        if preferred_ids and self.rng.random() < 0.75:
+            return self.rng.choice(preferred_ids)
         weights = self._floor_theme_weights(depth)
         total = sum(weights.values())
         roll = self.rng.randint(1, total)
@@ -1558,12 +1878,14 @@ class _GenerationMixin:
         return self.rng.choice(ids) if ids else self.rng.choice(get_all_prop_ids())
 
     def _spawn_props_in_room(self, room: Room, depth: int, allow_scene: bool = True) -> None:
+        preferred_categories = self._room_prop_categories(room)
         if allow_scene and self.rng.random() < 0.20:
             # Scenes follow the region's theme gradient too: imperial pairings
             # where the Empire reaches, tradition pairings in the wild. Fall
             # back to any scene if the current themes have no complete pairing.
             weights = self._floor_theme_weights(depth)
-            themed_ids = {pid for cat in weights for pid in PROP_CATEGORIES.get(cat, [])}
+            categories = preferred_categories or list(weights)
+            themed_ids = {pid for cat in categories for pid in PROP_CATEGORIES.get(cat, [])}
             themed_scenes = [s for s in _PROP_SCENES if all(pid in themed_ids for pid in s)]
             scene = self.rng.choice(themed_scenes or _PROP_SCENES)
             for pid in scene:
@@ -1574,7 +1896,7 @@ class _GenerationMixin:
         else:
             count = 1 + (1 if self.rng.random() < 0.40 else 0) + (1 if self.rng.random() < 0.15 else 0)
             for _ in range(count):
-                prop_id = self._pick_themed_prop_id(depth)
+                prop_id = self._pick_themed_prop_id(depth, preferred_categories)
                 x, y = self._random_open_tile_in_room(room)
                 self.spawn_prop(prop_id, x, y)
 
@@ -1591,6 +1913,8 @@ class _GenerationMixin:
             },
             explored=set(state.explored),
             zone_type="dungeon",
+            room_profiles=dict(state.room_profiles),
+            tile_rooms=dict(state.tile_rooms),
         )
 
     def _load_dungeon_floor(self, depth: int, entry_tile: str) -> None:
@@ -1603,6 +1927,8 @@ class _GenerationMixin:
         state.explored = set(snapshot.explored)
         state.entities = dict(snapshot.entities)
         state.zone_type = snapshot.zone_type
+        state.room_profiles = dict(snapshot.room_profiles)
+        state.tile_rooms = dict(snapshot.tile_rooms)
         
         entry_x, entry_y = player.x, player.y
         found = False

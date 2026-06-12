@@ -812,6 +812,12 @@ class GameUI:
         lines.append((f"[{tile}] {tile_name}", ACCENT))
         if all_tags:
             lines.append(("  " + ", ".join(all_tags), MUTED))
+        room = engine.room_profile_at(tx, ty)
+        if room is not None:
+            lines.append((f"  {room.room_type} - {room.era}, {room.condition}", TEXT))
+            topics = ", ".join(room.topics[:2])
+            if topics:
+                lines.append((f"  {topics}", MUTED))
 
         # ── Entities ──────────────────────────────────────────────────────────
         visible = engine.is_visible(tx, ty)
@@ -856,6 +862,9 @@ class GameUI:
                 role_str = f" — {profile.role}" if profile and profile.role else ""
                 lines.append((f"[{entity.char}] {entity.name}{role_str}", ACCENT))
                 lines.append((f"  HP {entity.hp}/{entity.max_hp}  [{entity.faction}]", TEXT))
+                if profile and profile.appearance:
+                    for part in wrap_text(profile.appearance, 34):
+                        lines.append((f"  {part}", TEXT))
 
             else:  # actor: enemy / ally / neutral
                 ent_color = (

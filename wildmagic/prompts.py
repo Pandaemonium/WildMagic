@@ -254,6 +254,7 @@ Respond with ONLY a JSON object in this exact format — no prose, no explanatio
       "name": "Full Name",
       "role": "occupation",
       "backstory": "1-2 sentences",
+      "appearance": "1-2 sentences, what a stranger sees at a glance",
       "traits": ["trait1", "trait2"],
       "building": "building_type or null",
       "wares": {"item_name": quantity} or null
@@ -263,6 +264,7 @@ Respond with ONLY a JSON object in this exact format — no prose, no explanatio
 Building types (use only these): tavern, inn, shrine, temple, market, smithy, home, barracks, stable
 The user message will include four seeds: location, defining_trait, current_situation, and settlement_type. Use all of them. They should shape the town's name, its description, which NPCs live here, their personalities, what they carry, and what they'll say. The seeds are constraints, not suggestions — a town "at a worked-out mine" should feel like it; a town whose defining trait is "people come here to disappear" should have residents who act like it.
 NPCs: number of NPCs is given by npc_count_range in the user message. Include a varied mix of occupations suited to the seeds.
+Appearance: concrete and particular, never generic — build, bearing, clothing, marks of their trade and history (a tanner's stained hands, a deserter's regulation boots gone soft). What they look like should quietly agree with their role, backstory, and wares; a sharp-eyed player should learn something true by looking.
 Naming rule: folk and wild things favor earthy compounds (Saltmarket, Hollowmere, the Glasswild); anything imperial — offices, taxes, edicts, official roles — sounds cold and Latinate (the Censorate, Provincial Edict 44).
 Names: invent distinctive, culturally varied names — not generic fantasy. Mix naming styles: short rough names (Dav, Fen, Rust), foreign-sounding names, names with epithets (One-Eye, the Mute), names that hint at history. Avoid names ending in -ius, -iel, -yn, or starting with El-, Al-, Thal-.
 Wares: most NPCs should have 1-3 items they can trade (include "gold" as one, quantity 5-30). Merchants and traders should have more (4-7 items). Invent creative, specific items suited to each NPC's role and backstory — e.g. a tanner might sell "cured hide strips" and "tallow candles"; a disgraced soldier might sell "a dented Imperial buckle" and "faded campaign maps"; a hedge witch might sell "dried crow feet" and "a stoppered vial of bad dreams". Do not limit yourself to any fixed list. "gold" is always acceptable as a trade currency.
@@ -311,6 +313,7 @@ Shape (every field optional - omit what you cannot improve):
   "site_name": "evocative proper name for the place",
   "keeper_name": "name for the person who keeps it",
   "keeper_backstory": "one or two sentences of who they are and why they stayed",
+  "keeper_appearance": "one or two sentences of what a stranger sees at a glance - let their history show on them, perhaps a visible trace of the rumor itself",
   "prop_description": "one sentence describing a notable object there",
   "arrival_line": "one sentence shown when the player first arrives and the rumor proves true"
 }
