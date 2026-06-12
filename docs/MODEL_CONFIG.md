@@ -1,0 +1,239 @@
+# Model Configuration
+
+How Wild Magic finds, configures, and talks to its language models. Everything here is
+read through `wildmagic/config.py` — if this document and the code disagree, the code
+wins and this file should be fixed.
+
+## Where configuration comes from
+
+Precedence, highest first:
+
+1. **Shell environment** — anything exported before launching the game.
+2. **Project `.env`** — loaded at import time via `load_dotenv(override=False)`, so it
+   never clobbers shell-provided values. This is the right home for per-machine setup.
+3. **Code defaults** — every option has one; a fresh checkout with no `.env` plays.
+
+In-game settings changes persist with `set_config_value()`, which writes back to `.env`
+and updates the running process.
+
+`.env` matters beyond the game process: when the game **autostarts** `ollama serve`
+(see below), the child server inherits the game's full environment — so server-side
+Ollama variables also belong in `.env`.
+
+## Purposes and routes
+
+Every LLM call has a **purpose**, and each purpose belongs to a **route**:
+
+| Purpose | What it does | Route | Default model |
+|---|---|---|---|
+| `wild` | resolve typed wild-magic spells | URGENT | `WILDMAGIC_MODEL` |
+| `dialogue` | NPC conversation | URGENT | `WILDMAGIC_MODEL` |
+| `trade` | trade-offer extraction from dialogue | URGENT | dialogue's model |
+| `canon` | on-demand canon materialization (`examine`, `read`) | URGENT | `WILDMAGIC_MODEL` |
+| `town` | settlement generation (name, buildings, NPCs) | BACKGROUND | `WILDMAGIC_MODEL` |
+| `lore` | rumor/claim extraction, promise flesh | BACKGROUND | `qwen3:1.7b` |
+
+URGENT purposes block the player and want the fastest configuration (GPU). BACKGROUND
+purposes run on executor threads behind gameplay and may use a slower, cheaper
+configuration (CPU, smaller model) so they never compete with the foreground.
+
+> Note: promise **flesh** rides the `lore` purpose configuration (it is genuinely
+> background work). Future background canon prewarming will construct its provider with
+> background-channel overrides; the `canon` purpose covers the blocking, player-facing
+> path.
+
+### Scoped variables
+
+Options marked **scoped** below resolve through up to three keys, most specific first:
+
+```text
+WILDMAGIC_<PURPOSE>_<OPTION>     e.g. WILDMAGIC_LORE_OLLAMA_NUM_GPU
+WILDMAGIC_<ROUTE>_<OPTION>       e.g. WILDMAGIC_BACKGROUND_OLLAMA_NUM_GPU
+WILDMAGIC_<OPTION>               e.g. WILDMAGIC_OLLAMA_NUM_GPU
+```
+
+Purpose names accept aliases (`SPELL`/`WILD_MAGIC`/`MAGIC` → `WILD`, `NPC_DIALOGUE` →
+`DIALOGUE`, `TOWN_GENERATION` → `TOWN`, `LORE_EXTRACTION` → `LORE`). Routes are
+`URGENT` (wild, dialogue, trade) and `BACKGROUND` (town, lore).
+
+## Providers
+
+Per purpose: `WILDMAGIC_PROVIDER` (the master switch, default `ollama`), plus
+`WILDMAGIC_DIALOGUE_PROVIDER`, `WILDMAGIC_TRADE_PROVIDER` (defaults to dialogue's),
+`WILDMAGIC_TOWN_PROVIDER`, `WILDMAGIC_LORE_PROVIDER`, `WILDMAGIC_CANON_PROVIDER` (each
+defaults to the master).
+
+- `ollama` — real local LLM. The mode the game is designed around.
+- `mock` — deterministic fake. For tests, replays, and engine work; never needs a server.
+- `auto` — tries Ollama, falls back to mock when `WILDMAGIC_ENABLE_FALLBACKS=1`.
+  Avoid for LLM evaluation; it hides provider failures.
+
+## Models
+
+| Variable | Default | Notes |
+|---|---|---|
+| `WILDMAGIC_MODEL` | `qwen3.5:9b-q4_K_M` | shared default for wild/dialogue/town |
+| `WILDMAGIC_WILD_MODEL` | shared | spell resolution |
+| `WILDMAGIC_DIALOGUE_MODEL` | shared | NPC conversation (a chattier finetune works well) |
+| `WILDMAGIC_TRADE_MODEL` | dialogue's | trade extraction |
+| `WILDMAGIC_CANON_MODEL` | shared | examine/read materialization |
+| `WILDMAGIC_TOWN_MODEL` | shared | settlement generation |
+| `WILDMAGIC_LORE_MODEL` | `qwen3:1.7b` | extraction/flesh; small is fine for extraction |
+
+Any Ollama model tag works. Sizing guidance: spell resolution and town generation are
+the most demanding (structured JSON against a long system prompt — 7B+ instruct models
+recommended); lore extraction is the least (1.5–4B is usable). Models below ~7B start
+ignoring the spell contract in creative ways.
+
+## Ollama connection and request options
+
+| Variable | Scoped | Default (clamp) | Meaning |
+|---|---|---|---|
+| `WILDMAGIC_*_OLLAMA_HOST` / `OLLAMA_HOST` | yes | `http://localhost:11434` | endpoint per purpose; bare `OLLAMA_HOST` is the final fallback |
+| `WILDMAGIC_*_OLLAMA_TIMEOUT` | yes | 180s (5–1800) | HTTP timeout |
+| `WILDMAGIC_*_OLLAMA_NUM_CTX` | yes | 16384 (2048–32768) | context window. **Load-time option** — see thrash warning below |
+| `WILDMAGIC_*_OLLAMA_NUM_GPU` | yes | 999; **0 for `LORE`** | GPU layer offload. 999 = everything on GPU, 0 = pure CPU. **Load-time option** |
+| `WILDMAGIC_*_OLLAMA_KEEP_ALIVE` | yes | `10m` | how long the server keeps the model resident after a request |
+| `WILDMAGIC_*_OLLAMA_THINK` | yes | off | request model thinking (slower; usually unnecessary) |
+| `WILDMAGIC_*_OLLAMA_FORMAT` | yes | on | ask Ollama for strict JSON output (auto-retries without it on grammar errors) |
+| `WILDMAGIC_OLLAMA_TEMPERATURE` | no | 0.25 | wild/town/lore/canon temperature |
+| `WILDMAGIC_DIALOGUE_TEMPERATURE` | no | 0.7 | dialogue temperature |
+| `WILDMAGIC_TRADE_TEMPERATURE` | no | 0.5 | falls back to the dialogue variable if unset |
+| `WILDMAGIC_CANON_TEMPERATURE` | no | 0.85 | examine/read prose; hot by design so similar seed packets don't yield identical titles |
+| `WILDMAGIC_OLLAMA_NUM_PREDICT` | no | 1024 (128–4096) | wild-magic response budget |
+| `WILDMAGIC_DIALOGUE_NUM_PREDICT` | no | 320 (32–1024) | dialogue budget |
+| `WILDMAGIC_TRADE_NUM_PREDICT` | no | dialogue's | trade budget |
+| `WILDMAGIC_TOWN_NUM_PREDICT` | no | 2000 (256–8192) | town generation budget |
+| `WILDMAGIC_LORE_NUM_PREDICT` | no | 700 (64–2048) | lore/flesh budget |
+| `WILDMAGIC_CANON_NUM_PREDICT` | no | 700 (64–2048) | examine/read budget |
+| `WILDMAGIC_OLLAMA_RESOLUTION_ATTEMPTS` | no | 2 (1–4) | wild-magic retries on malformed JSON |
+
+### The model-reload (thrash) warning
+
+Ollama reloads a model from scratch whenever a request arrives for an already-loaded
+model tag with **different load-time options** (`num_gpu`, `num_ctx`). If two purposes
+share one model tag but differ in those options, every alternation between them evicts
+and reloads the model — visible as VRAM emptying and refilling, and felt as long stalls.
+
+Rules of thumb:
+- Purposes that share a model tag should share `num_gpu` and `num_ctx`.
+- If you want the same weights with two different splits (GPU for play, CPU for
+  background), make a free alias: `ollama cp qwen3.5:9b-q4_K_M qwen3.5:9b-cpu` —
+  copies share blobs on disk, but distinct tags get distinct runners that can stay
+  resident simultaneously.
+- Raise the server's `OLLAMA_MAX_LOADED_MODELS` (see below) so resident models don't
+  evict each other.
+
+## Server lifecycle and server-side variables
+
+`WILDMAGIC_OLLAMA_AUTOSTART` (default on): if no server answers at the configured host,
+the game launches `ollama serve` in the background and waits up to 12s. The child
+inherits the game's environment — including everything from `.env` — so **server-side
+Ollama variables work from `.env` only when the game starts the server**. If Ollama is
+already running (tray app, your own terminal), those values come from wherever *that*
+process got its environment, and `.env` is irrelevant to it.
+
+Server-side variables worth setting (these are Ollama's, not ours — see Ollama's docs):
+
+- `OLLAMA_MAX_LOADED_MODELS` — how many models stay resident at once. With a main GPU
+  model, a CPU lore model, and a separate dialogue model, you want `3`. Old/forked
+  builds may ignore this.
+- `OLLAMA_NUM_PARALLEL` — parallel requests per loaded model. `1` is fine; separate
+  models already serve concurrently on separate runners.
+- GPU backend selection — vendor-specific:
+  - **NVIDIA**: works out of the box (CUDA).
+  - **AMD**: ROCm builds; `HIP_VISIBLE_DEVICES` selects the card.
+  - **Intel Arc** (current stock Ollama): `OLLAMA_VULKAN=1` enables the Vulkan backend,
+    and `GGML_VK_VISIBLE_DEVICES=<n>` selects the card. Discrete card and iGPU each get
+    an index; if you select the iGPU by mistake Ollama drops it ("dropping integrated
+    GPU") and serves **CPU-only without erroring**. `OLLAMA_IGPU_ENABLE=1` un-drops
+    integrated GPUs if you really want one.
+
+### Two-server setups
+
+Per-purpose `OLLAMA_HOST` means purposes can use entirely separate servers, e.g. a GPU
+server for play and a CPU-only server for background work:
+
+```dotenv
+WILDMAGIC_LORE_OLLAMA_HOST=http://localhost:11435
+```
+
+Start the second server with `OLLAMA_HOST=127.0.0.1:11435 ollama serve`. Two servers
+never evict each other's models. Usually unnecessary — one server with
+`OLLAMA_MAX_LOADED_MODELS` set is simpler — but it's the robust fallback when a build
+ignores that variable.
+
+## Feature toggles and logging
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `WILDMAGIC_ENABLE_FALLBACKS` | on | allow mock fallback when a provider fails. Set `0` for strict LLM-contract testing |
+| `WILDMAGIC_LORE_ENABLED` | on | background rumor/claim extraction from dialogue and books |
+| `WILDMAGIC_FLESH_ENABLED` | on | background narrative decoration of bound promises |
+| `WILDMAGIC_AUDIT_LOG` | on | JSONL audit of every LLM call |
+| `WILDMAGIC_AUDIT_DIR` | `logs` | audit destination: `wild_magic_audit.jsonl`, `dialogue_audit.jsonl`, `lore_audit.jsonl`, `flesh_audit.jsonl`, `canon_audit.jsonl`, … |
+
+## Example setups
+
+**Single decent GPU (12GB+):** nothing to set. Optionally one model for everything:
+
+```dotenv
+WILDMAGIC_MODEL=qwen3.5:9b-q4_K_M
+OLLAMA_MAX_LOADED_MODELS=2
+```
+
+**8GB GPU + strong CPU (split foreground/background):** keep play on the GPU, push
+background work to a CPU-resident alias of the same weights:
+
+```dotenv
+WILDMAGIC_MODEL=qwen3.5:9b-q4_K_M
+WILDMAGIC_LORE_MODEL=qwen3.5:9b-cpu      # created with: ollama cp qwen3.5:9b-q4_K_M qwen3.5:9b-cpu
+WILDMAGIC_TOWN_MODEL=qwen3.5:9b-cpu
+WILDMAGIC_BACKGROUND_OLLAMA_NUM_GPU=0
+OLLAMA_MAX_LOADED_MODELS=3
+```
+
+(Or use a genuinely small lore model — `qwen3:1.7b`, the default — instead of the alias.)
+
+**CPU only:** expect slow spell resolution; shrink budgets and lengthen timeouts:
+
+```dotenv
+WILDMAGIC_OLLAMA_NUM_GPU=0
+WILDMAGIC_OLLAMA_TIMEOUT=600
+WILDMAGIC_MODEL=qwen3:4b        # or another small instruct model
+```
+
+**No LLM at all:** `python -m wildmagic.cli --provider mock` — deterministic, playable,
+and what the test suite uses.
+
+## Troubleshooting
+
+**First, look at the audit logs** (`logs/*.jsonl`): every call records the prompt,
+context, raw response, parse result, and error. Most "the model is broken" reports are
+visible there in one minute.
+
+- **Everything is slow / GPU sits idle.** Run `ollama ps` after casting a spell. The
+  PROCESSOR column must say `100% GPU` for your main model. If it says CPU: the *server*
+  has no working GPU backend — request options can't fix that. Check the server's env
+  (backend variables above), and remember an autostarted server gets `.env` while a
+  tray-started one does not. Server logs (`%LOCALAPPDATA%\Ollama\server.log` on Windows)
+  show GPU discovery at startup; look for your card's name, `no compatible GPUs`, or
+  `dropping integrated GPU`.
+- **VRAM fills and empties repeatedly; periodic long stalls.** Model thrash — same model
+  tag requested with different `num_gpu`/`num_ctx`, or more models than
+  `OLLAMA_MAX_LOADED_MODELS` allows. See the thrash warning above.
+- **Garbage output (random tokens, wrong language) on longer prompts.** Seen with
+  partial CPU offload on some hardware. Force a clean split: `num_gpu=999` (fully GPU)
+  or `0` (fully CPU) for that purpose, and verify with `ollama ps`.
+- **Spells fail with timeouts.** Raise `WILDMAGIC_OLLAMA_TIMEOUT` (or the purpose-scoped
+  variant). First call after idle includes model load time; `OLLAMA_KEEP_ALIVE=10m`
+  (our default) keeps warm models warm.
+- **Spells return prose or broken JSON.** Confirm `WILDMAGIC_OLLAMA_FORMAT` is on, try a
+  larger/instruct-tuned model, and check the audit log for what the model actually said.
+  The resolver already retries (`WILDMAGIC_OLLAMA_RESOLUTION_ATTEMPTS`).
+- **Mock responses during an Ollama run** (log lines marked `*>` instead of `>`): a
+  provider failure triggered the fallback. Set `WILDMAGIC_ENABLE_FALLBACKS=0` to surface
+  the real error instead.
+- **`.env` changes seem ignored.** A shell-exported variable overrides `.env` (by
+  design). For server-side variables, the running Ollama predates your edit — quit it
+  and let the game restart it.

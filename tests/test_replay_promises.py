@@ -1,4 +1,4 @@
-"""Replay contract for the Promise Ledger: promises are injected at the recorded apply
+﻿"""Replay contract for the Promise Ledger: promises are injected at the recorded apply
 point (the command boundary where the background lore drain landed), so zones generated
 between the dialogue and the drain see the same reservations live and on replay."""
 
@@ -102,7 +102,7 @@ def test_replay_reproduces_late_lore_drain_across_zone_generation(
         # Release the extraction; the drain lands at the next command boundary.
         lore_provider.gate.set()
         concurrent.futures.wait(
-            [future for future, _ in session._pending_lore], timeout=10
+            [future for future, *_ in session._pending_lore], timeout=10
         )
         session.execute_command("wait")
         assert lore_provider.calls == 1

@@ -18,6 +18,25 @@ Run a deterministic mock playtest:
 python -m wildmagic.cli --provider mock --scenario test_chamber --seed 7
 ```
 
+Run the trim pytest suite:
+
+```powershell
+python -m pytest -q
+```
+
+The default pytest run is the fast, deterministic trim suite. It skips tests marked
+`@pytest.mark.full` and forces background town generation to the mock provider unless
+you explicitly request the full suite. Use this for normal development checks.
+
+Run the full pytest suite:
+
+```powershell
+python -m pytest -q --full
+```
+
+Full mode includes `full`-marked tests and respects provider configuration from the
+environment or `.env`, so it may wait on local LLM services.
+
 Run a scripted mock playtest:
 
 ```powershell
@@ -101,6 +120,7 @@ Useful CLI commands:
 - `spark`
 - `cast <wild spell text>`
 - `talk <message>` (or `speak`/`say`) — talk to an adjacent NPC; costs a turn
+- `examine` (or `study`/`observe`) - materialize or reread room canon
 - `quit`
 
 Use `inspect` often. It prints turn, HP, MP, inventory, curses, flags, scheduled events, and enemy summaries.
@@ -138,6 +158,10 @@ Each record includes:
 When reporting an LLM issue, include the spell text, the visible in-game result, and the relevant audit record or a summary of its `raw_response`, `parsed_resolution`, and `error`.
 
 NPC dialogue (the `talk` command) has its own parallel log at `logs/dialogue_audit.jsonl`, with the NPC name, message, prompt/context, `raw_response`, cleaned `reply`, and any technical error. It's controlled by the same `WILDMAGIC_AUDIT_DIR`/`WILDMAGIC_AUDIT_LOG` settings, and the provider/model can be set independently with `WILDMAGIC_DIALOGUE_PROVIDER`/`WILDMAGIC_DIALOGUE_MODEL` (falling back to `WILDMAGIC_PROVIDER`/`WILDMAGIC_MODEL` if unset).
+
+Materialized canon from `examine` and future richness features is logged to
+`logs/canon_audit.jsonl`. Each record includes the seed packet, provider/model,
+raw response, normalized `CanonRecord`, and any technical failure.
 
 ## Replays
 

@@ -92,7 +92,10 @@ def _purpose_key(purpose: str | None) -> str | None:
 
 def _route_key(purpose: str | None) -> str | None:
     key = _purpose_key(purpose)
-    if key in {"WILD", "DIALOGUE", "TRADE"}:
+    # CANON is on-demand materialization (examine/read): the player is blocked
+    # waiting on it, so it routes URGENT. Background prewarming jobs construct
+    # their provider with lore-scope overrides instead.
+    if key in {"WILD", "DIALOGUE", "TRADE", "CANON"}:
         return "URGENT"
     if key in {"TOWN", "LORE"}:
         return "BACKGROUND"
@@ -170,6 +173,10 @@ def get_lore_model() -> str:
     return get_config_value("WILDMAGIC_LORE_MODEL") or DEFAULT_LORE_MODEL
 
 
+def get_canon_model() -> str:
+    return get_config_value("WILDMAGIC_CANON_MODEL") or _shared_model()
+
+
 def get_wild_magic_provider() -> str:
     return (get_config_value("WILDMAGIC_PROVIDER", DEFAULT_PROVIDER) or DEFAULT_PROVIDER).lower()
 
@@ -188,6 +195,10 @@ def get_town_provider() -> str:
 
 def get_lore_provider() -> str:
     return (get_config_value("WILDMAGIC_LORE_PROVIDER") or get_wild_magic_provider()).lower()
+
+
+def get_canon_provider() -> str:
+    return (get_config_value("WILDMAGIC_CANON_PROVIDER") or get_wild_magic_provider()).lower()
 
 
 def ollama_host(purpose: str | None = None) -> str:
@@ -251,6 +262,18 @@ def ollama_town_num_predict() -> int:
 
 def ollama_lore_num_predict() -> int:
     return _int_value("WILDMAGIC_LORE_NUM_PREDICT", 700, 64, 2048)
+
+
+def ollama_canon_num_predict() -> int:
+    """Books are full compressed pages (300-600 words), so the canon budget is
+    sized for them; shorter kinds simply stop early."""
+    return _int_value("WILDMAGIC_CANON_NUM_PREDICT", 1400, 64, 2048)
+
+
+def ollama_canon_temperature() -> float:
+    """Creative prose wants heat; the wild-magic default (0.25) produces
+    near-identical titles and passages for similar seed packets."""
+    return _float_value("WILDMAGIC_CANON_TEMPERATURE", 0.85, 0.0, 1.5)
 
 
 def ollama_num_gpu(purpose: str | None = None) -> int:

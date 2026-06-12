@@ -84,6 +84,7 @@ PROP_TEMPLATES = {
 
     # ── Imperial (the Empire was here, or is coming) ──────────────────────────
     "posted_notice": PropTemplate("posted_notice", "+", "posted notice", "A crisp notice in regulation type, glued flat at eye level. The grey wax seal of the Censorate.", False, {"paper", "lore", "empire"}),
+    "book": PropTemplate("book", "\"", "book", "A bound volume, waiting to be read.", False, {"paper", "flammable", "lore", "book", "readable"}),
     "charter_waystone": PropTemplate("charter_waystone", "I", "charter waystone", "A square-cut marker stamped with the imperial seal. Distances to places that matter, in tidy numerals.", True, {"stone", "empire"}),
     "survey_marker": PropTemplate("survey_marker", "^", "survey marker", "A brass pin driven into the floor, tagged with a lot number. This place has been measured and filed.", False, {"metal", "empire"}),
     "confiscation_crate": PropTemplate("confiscation_crate", "[", "confiscation crate", "Pine, stenciled THAUMIC CONTAINMENT, wax seals unbroken. It hums very softly to itself.", True, {"wood", "empire", "magic"}),

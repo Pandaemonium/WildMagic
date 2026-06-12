@@ -38,6 +38,7 @@ from .models import (
     WALL,
     WATER,
     Entity,
+    CanonRecord,
     Room,
     RoomProfile,
     ZoneSnapshot,
@@ -425,6 +426,8 @@ class _GenerationMixin:
                         notice.description = notice_text
                     break
 
+        self._place_books_in_labeled_rooms()
+
     def _generate_test_chamber(self) -> None:
         state = self.state
         state.tiles = [[WALL for _ in range(state.width)] for _ in range(state.height)]
@@ -479,6 +482,23 @@ class _GenerationMixin:
         )
         self.spawn_item("mana crystal", "!", 7, 7, "mana crystal")
         self.spawn_item("blood moss", ",", 6, 8, "blood moss")
+        test_book = self.spawn_prop("book", 4, 7)
+        if test_book is not None:
+            test_book.name = "water-stained folio of forbidden saints"
+            test_book.description = "A folio bound in cracked leather. It concerns forbidden saints."
+        # Deterministic secret for tests and scripted play: the main chamber
+        # always hides one plain compartment (regenerates identically on replay).
+        chamber_profile = self.room_profile_at(5, 7)
+        if chamber_profile is not None:
+            chamber_profile.secret_slots[:] = [
+                {
+                    "id": f"{chamber_profile.id}_test_compartment",
+                    "kind": "hidden_compartment",
+                    "reveal_difficulty": "plain",
+                    "clue_style": "drag marks",
+                    "possible_reward_tags": ["lore"],
+                }
+            ]
         state.add_message("The test chamber waits without pretending to be fair.")
         state.add_message("Use CLI commands or type wild spells in the panel.")
         self.update_fov()
@@ -797,6 +817,7 @@ class _GenerationMixin:
             )
             occupied.add(spot)
 
+        self._place_books_in_labeled_rooms()
         state.add_message("Hollowmere clings to the lip of the old dungeon stair, half town and half watchtower.")
         state.add_message("Steel rings out across the square below - Imperial soldiers are already moving on the town.")
         self.update_fov()
@@ -872,6 +893,7 @@ class _GenerationMixin:
         buildings = self._place_zone_buildings(zone_rng, imperial_density)
         realized_promises = self._realize_zone_promises(zx, zy, zone_rng, buildings)
         self._populate_zone(zone_rng, buildings, imperial_density)
+        self._place_books_in_labeled_rooms()
 
         if self._zone_is_road(zx, zy):
             self._draw_road_through_zone(zx, zy)
@@ -1028,6 +1050,7 @@ class _GenerationMixin:
             self._populate_promise_structure(room, site, promise, zone_rng)
             promise.status = "realized"
             promise.realized_in = f"{site.id} at zone ({zx},{zy})"
+            self._write_promise_site_canon(room, site, promise, zx, zy)
             realized.append(promise)
         self.state.promise_reservations[(zx, zy)] = [
             reservation for reservation in reservations if reservation.promise_id not in {promise.id for promise in realized}
@@ -1113,6 +1136,85 @@ class _GenerationMixin:
                 self._spawn_from_template(zone_rng.choice(list(self.region.enemy_templates)), spot[0], spot[1])
                 occupied.add(spot)
         self._spawn_quest_objective_item(room, promise, occupied)
+
+    def _write_promise_site_canon(
+        self,
+        room: Room,
+        site: SiteBlueprint,
+        promise: Any,
+        zx: int,
+        zy: int,
+    ) -> None:
+        flesh = getattr(promise, "flesh", None) or {}
+        profile = self.room_profile_at(*room.center)
+        promise_id = normalize_id(str(getattr(promise, "id", "promise")))
+        promise_tags = {normalize_id(str(tag)) for tag in getattr(promise, "tags", []) if str(tag).strip()}
+        room_tags = set(profile.tags if profile else [])
+        tags = sorted({site.id, "promise_site", *promise_tags, *room_tags})
+        title = flesh.get("site_name") or str(getattr(promise, "subject", "") or site.id).strip()
+        arrival = flesh.get("arrival_line") or f"The story was true: {getattr(promise, 'subject', 'a promised place')} is here."
+        text = f"{arrival} The place answers an earlier claim: {getattr(promise, 'text', '')}".strip()
+        seed_packet = {
+            "promise_id": getattr(promise, "id", ""),
+            "blueprint": site.id,
+            "zone": {"x": zx, "y": zy},
+            "room": profile.to_public_dict() if profile else None,
+            "flesh_fields": sorted(flesh),
+        }
+        self.add_canon_record(
+            CanonRecord(
+                id=f"canon_{promise_id}_site",
+                kind="room_flavor",
+                attachment={"kind": "promise", "promise_id": getattr(promise, "id", ""), "room_id": profile.id if profile else None},
+                title=title,
+                text=text,
+                summary=arrival,
+                tags=tags,
+                source="flesh" if flesh else "realization",
+                seed_packet=seed_packet,
+                turn_created=self.state.turn,
+            )
+        )
+
+        for entity in sorted(self.state.entities.values(), key=lambda item: item.id):
+            if not room.x <= entity.x < room.x + room.w or not room.y <= entity.y < room.y + room.h:
+                continue
+            if entity.kind == "prop" and flesh.get("prop_description") and entity.description == flesh.get("prop_description"):
+                self.add_canon_record(
+                    CanonRecord(
+                        id=f"canon_{promise_id}_{entity.id}",
+                        kind="object_detail",
+                        attachment={"kind": "entity", "entity_id": entity.id, "promise_id": getattr(promise, "id", ""), "room_id": profile.id if profile else None},
+                        title=entity.name,
+                        text=entity.description or "",
+                        summary=entity.description,
+                        tags=sorted({*tags, *entity.tags}),
+                        source="flesh",
+                        seed_packet=seed_packet,
+                        turn_created=self.state.turn,
+                    )
+                )
+            if entity.kind == "npc":
+                npc_profile = self.state.npc_profiles.get(entity.id)
+                if npc_profile is None or npc_profile.role != site.npc_role:
+                    continue
+                text_parts = [npc_profile.backstory]
+                if npc_profile.appearance:
+                    text_parts.insert(0, npc_profile.appearance)
+                self.add_canon_record(
+                    CanonRecord(
+                        id=f"canon_{promise_id}_{entity.id}",
+                        kind="npc_appearance",
+                        attachment={"kind": "entity", "entity_id": entity.id, "promise_id": getattr(promise, "id", ""), "room_id": profile.id if profile else None},
+                        title=npc_profile.name,
+                        text=" ".join(part for part in text_parts if part).strip(),
+                        summary=f"{npc_profile.name}, {npc_profile.role}",
+                        tags=sorted({*tags, *entity.tags, "npc"}),
+                        source="flesh" if flesh else "realization",
+                        seed_packet=seed_packet,
+                        turn_created=self.state.turn,
+                    )
+                )
 
     def _spawn_quest_objective_item(
         self,
@@ -1434,6 +1536,7 @@ class _GenerationMixin:
             ]
             if not self.state.promise_reservations[(zx, zy)]:
                 self.state.promise_reservations.pop((zx, zy), None)
+        self._place_books_in_labeled_rooms()
         return f"town: {spec.town_name}"
 
     def _cross_zone_edge(self, target_x: int, target_y: int) -> bool:
@@ -1640,6 +1743,39 @@ class _GenerationMixin:
                     if self.in_bounds(nx, ny) and self.can_occupy(nx, ny):
                         return nx, ny
         return x, y
+
+    def _place_books_in_labeled_rooms(self) -> None:
+        """Layer-1 book placement: rooms whose labels promise writing get physical,
+        readable book props with grammar-tier names (texture.py). Titles, authors,
+        and pages stay unmaterialized until the player reads them (canon.py).
+        Deterministic per room id, independent of generation rng draw order."""
+        from .texture import grammar_book
+
+        state = self.state
+        for room_id in sorted(state.room_profiles):
+            profile = state.room_profiles[room_id]
+            tags = set(profile.tags)
+            if not tags & {"books", "lore", "paper"}:
+                continue
+            rng = random.Random(stable_seed(state.rng_seed, "room_books", room_id))
+            count = rng.randint(1, 2) if "books" in tags else (1 if rng.random() < 0.5 else 0)
+            if count <= 0:
+                continue
+            candidates = [
+                (x, y)
+                for y in range(profile.y + 1, profile.y + profile.h - 1)
+                for x in range(profile.x + 1, profile.x + profile.w - 1)
+                if self.in_bounds(x, y) and self.can_occupy(x, y)
+            ]
+            rng.shuffle(candidates)
+            for x, y in candidates[:count]:
+                entry = grammar_book(rng, list(profile.topics), profile.era)
+                book = self.spawn_prop("book", x, y)
+                if book is None:
+                    continue
+                book.name = entry["name"]
+                book.description = entry["description"]
+                book.tags.add(normalize_id(entry["topic"]))
 
     def _register_room_profile(self, profile: RoomProfile) -> None:
         self.state.room_profiles[profile.id] = profile

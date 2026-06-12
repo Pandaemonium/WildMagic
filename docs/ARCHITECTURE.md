@@ -28,16 +28,19 @@ drives `GameSession` in a readline loop, and optionally saves a replay JSON at e
 ### `wildmagic/actions.py`
 `GameSession` — the single object callers interact with. Wraps `GameEngine` and the LLM
 providers. Exposes `process_command(text)` which routes movement, wait, open/close, stairs,
-cast, talk, trade, and inventory commands. Returns an `ActionResult`. Also owns the background
+cast, talk, trade, inventory, and `examine` commands. Returns an `ActionResult`. Also owns the background
 lore-extraction executor used after dialogue; completed promises are added to `GameState` and
-recorded into replay data. `close()` cancels pending lore work and shuts down the executor.
+recorded into replay data. On-demand canon materialization for `examine` also lives here:
+valid new room-flavor records cost a turn, technical failures do not, and re-reading existing
+canon is free. `close()` cancels pending lore work and shuts down the executor.
 Also holds `summarize_state()` (used by the replay system) and `to_replay()` / `from_replay()`
 serialization.
 
 ### `wildmagic/replay.py`
 Save/load/run replay JSON files. `run_replay(path)` re-feeds a recorded session's commands back
 through a fresh `GameSession` and optionally checks the final state snapshot against a saved
-expectation. Used for regression testing.
+expectation. Replays carry materialized canon apply points so `examine` and future background
+content replay without calling the provider. Used for regression testing.
 
 ---
 
@@ -118,7 +121,9 @@ Generation emits `RoomProfile` semantic labels (type, era, condition, topics, ta
 promise hooks, and future secret slots) for dungeon rooms, Hollowmere buildings,
 generated town buildings, frontier structures, and realized promise sites. Labels are
 saved in `ZoneSnapshot` / dungeon-floor snapshots and bias prop selection without
-consuming gameplay RNG.
+consuming gameplay RNG. Realized promise sites also write `CanonRecord` entries for the
+site, keeper, and flesh-described prop details, making the fulfilled story retrievable
+by later prompts.
 
 ### `wildmagic/effects.py` — `_EffectsMixin`
 Wild magic resolution and every effect/cost handler:
@@ -170,6 +175,30 @@ background Ollama settings by default; lore `num_gpu` defaults to `0` unless ove
 Extracted promises are stored in the unified Promise Ledger rather than a separate lore
 claim list.
 
+### `wildmagic/canon.py`
+Materialized canon generation for room, object, and text details (`examine`, `read`,
+`investigate`). Defines `CanonProvider` plus Ollama/mock/auto providers,
+`CanonResolution`, JSON parsing/normalization into `CanonRecord`,
+`make_canon_provider()`, `resolve_canon()` (with malformed-response retries), and
+`logs/canon_audit.jsonl` writing. The Ollama provider uses the `canon` purpose, which
+routes URGENT (GPU-resident main model) because the player blocks on these calls;
+background prewarming should construct providers with background-channel overrides.
+The engine supplies attachments, tags, allowed outputs, and mechanical choices; the
+provider supplies wording and nonmechanical choices only.
+
+### `wildmagic/texture.py`
+Layer-1 procedural texture grammars: instant, model-free naming for bulk content.
+Currently `grammar_book()`, which gives placed books a concrete catalog-style name and
+description from room topics; printed titles, authors, and pages stay unmaterialized
+until reading triggers canon generation.
+
+### `wildmagic/secrets.py`
+Engine-owned secret resolution for the `investigate` verb: difficulty→turn costs,
+deterministic anchor selection among room props, and tag-keyed reward tables. The engine
+fixes whether a secret exists (RoomProfile secret slots placed at generation), what
+anchors it, and what the reward is before any model is prompted; the LLM only words the
+clue. No provider calls live here.
+
 ### `wildmagic/promises.py`
 Promise Ledger data types and prompt-shaping helpers. Defines `WorldPromise`,
 `SpatialHint`, `PromiseBinding`, typed `Objective`/`Reward` stubs, lifecycle/kind constants,
@@ -211,8 +240,9 @@ Wild-magic contract data that is shared by resolver and engine code:
 
 ### `wildmagic/prompts.py`
 System prompt strings only — `SYSTEM_PROMPT`, `DIALOGUE_SYSTEM_PROMPT`,
-`TRADE_SYSTEM_PROMPT`, `TOWN_SYSTEM_PROMPT`, `LORE_EXTRACTION_SYSTEM_PROMPT`.
-No logic; imported by `wild_magic.py`, `lore.py`, and re-exported for display in `ui.py`.
+`TRADE_SYSTEM_PROMPT`, `TOWN_SYSTEM_PROMPT`, `LORE_EXTRACTION_SYSTEM_PROMPT`,
+`FLESH_SYSTEM_PROMPT`, and `CANON_SYSTEM_PROMPT`. No logic; imported by the provider
+modules and re-exported for display in `ui.py`.
 
 ### `wildmagic/fallbacks.py`
 Pure-Python regex spell parser used when the LLM is unavailable or returns garbage.

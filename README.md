@@ -202,7 +202,10 @@ Use `ollama ps` after a spell cast. The `PROCESSOR` column should show `100% GPU
 
 - Type a wild spell in the right panel, then press `Enter`.
 - Press `Tab` to leave the spell input and move around.
-- Move with arrow keys, WASD, or vi keys.
+- Move with arrow keys, WASD, or the keypad (keypad corners move diagonally).
+- Press `j` for the journal, `q` for quests, `i` for inventory.
+- Press `x` to investigate the room (costs turns; careful search can turn up clues).
+  When a clue points at something, stand on or beside it and press `x` again to search it.
 - Press `f` for a safe spark bolt.
 - Press `g` to pick up items under your feet.
 - Press `o` to open an adjacent closed door.

@@ -153,7 +153,7 @@ def test_flesh_decorates_realization_and_replays_identically(tmp_path: Path) -> 
         )
         lore_provider.gate.set()
         concurrent.futures.wait(
-            [future for future, _ in session._pending_lore], timeout=10
+            [future for future, *_ in session._pending_lore], timeout=10
         )
         session.execute_command("wait")  # drains lore, binds the chapel, enqueues flesh
         concurrent.futures.wait(

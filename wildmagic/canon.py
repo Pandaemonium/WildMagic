@@ -1,0 +1,438 @@
+"""Materialized canon generation for room, object, and text details.
+
+Canon records are per-run generated descriptions that have become true in the
+current world. The engine supplies the facts; the provider supplies wording only.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+import json
+import re
+import urllib.error
+from typing import Any, Protocol
+
+from .config import (
+    audit_dir,
+    get_canon_model,
+    get_canon_provider,
+    ollama_canon_num_predict,
+    ollama_canon_temperature,
+    ollama_resolution_attempts,
+)
+from .fallbacks import fallbacks_enabled
+from .llm_client import (
+    _post_ollama_chat,
+    normalize_ollama_url,
+    ollama_host,
+    ollama_json_format_enabled,
+    ollama_keep_alive,
+    ollama_num_ctx,
+    ollama_num_gpu,
+    ollama_thinking_enabled,
+    ollama_timeout_seconds,
+    strip_thinking,
+)
+from .llm_resolver import _write_jsonl_audit
+from .models import CanonRecord
+from .normalize import normalize_id
+from .prompts import CANON_SYSTEM_PROMPT
+
+
+_TEXT_LIMITS = {
+    "title": 80,
+    "text": 800,
+    "summary": 180,
+}
+
+# Books are real reading matter — compressed pages, not a vignette.
+_BOOK_TEXT_LIMIT = 4200
+
+
+@dataclass
+class CanonResolution:
+    record: CanonRecord | None
+    technical_failure: bool
+    error: str | None = None
+    provider_name: str = "unknown"
+    raw_response: str | None = None
+    audit_path: str | None = None
+
+
+class CanonProvider(Protocol):
+    name: str
+
+    def materialize(self, context: dict[str, Any]) -> str:
+        ...
+
+
+class OllamaCanonProvider:
+    """On-demand canon materialization (examine/read): the player is blocked
+    waiting, so this rides the URGENT route — GPU-resident main model by
+    default. Background prewarming should construct this with explicit
+    model/base_url overrides pointing at the background channel instead."""
+
+    name = "ollama"
+    purpose = "canon"
+
+    def __init__(
+        self,
+        model: str | None = None,
+        base_url: str | None = None,
+        timeout_seconds: float | None = None,
+    ) -> None:
+        self._model_override = model
+        self.model = model or get_canon_model()
+        self.base_url = normalize_ollama_url(base_url) if base_url else ollama_host(self.purpose)
+        self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds(self.purpose)
+
+    def materialize(self, context: dict[str, Any]) -> str:
+        # engine_private carries bookkeeping (tile coordinates, ids) the model
+        # must never see — it leaks into prose as "at position nine" otherwise.
+        prompt_context = {key: value for key, value in context.items() if key != "engine_private"}
+        payload = {
+            "model": self._model_override or get_canon_model(),
+            "stream": False,
+            "think": ollama_thinking_enabled(self.purpose),
+            "messages": [
+                {"role": "system", "content": CANON_SYSTEM_PROMPT},
+                {"role": "user", "content": json.dumps(prompt_context, ensure_ascii=True)},
+            ],
+            "options": {
+                "temperature": ollama_canon_temperature(),
+                "top_p": 0.9,
+                "num_predict": ollama_canon_num_predict(),
+                "num_ctx": ollama_num_ctx(self.purpose),
+                "num_gpu": ollama_num_gpu(self.purpose),
+            },
+            "keep_alive": ollama_keep_alive(self.purpose),
+        }
+        if ollama_json_format_enabled(self.purpose):
+            payload["format"] = "json"
+        try:
+            data = _post_ollama_chat(self.base_url, payload, self.timeout_seconds)
+        except ValueError as exc:
+            if "Unexpected empty grammar stack" not in str(exc) or "format" not in payload:
+                raise
+            retry_payload = dict(payload)
+            retry_payload.pop("format", None)
+            data = _post_ollama_chat(self.base_url, retry_payload, self.timeout_seconds)
+        content = data.get("message", {}).get("content")
+        if not isinstance(content, str) or not content.strip():
+            raise ValueError("Ollama response did not include message.content")
+        return content
+
+
+class MockCanonProvider:
+    name = "mock"
+
+    def materialize(self, context: dict[str, Any]) -> str:
+        kind = normalize_id(str(context.get("kind") or ""))
+        if kind == "book":
+            return self._materialize_book(context)
+        if kind == "investigation":
+            return self._materialize_investigation(context)
+        if kind in {"object_detail", "npc_detail", "creature_detail"}:
+            return self._materialize_detail(context)
+        room = context.get("subject", {}).get("room", {}) if isinstance(context.get("subject"), dict) else {}
+        room_type = str(room.get("type") or "room")
+        era = str(room.get("era") or "old")
+        condition = str(room.get("condition") or "strange")
+        topics = [str(topic) for topic in room.get("topics", []) if str(topic).strip()]
+        topic_text = topics[0] if topics else "forgotten work"
+        return json.dumps(
+            {
+                "title": f"{room_type.title()}",
+                "summary": f"A {condition} {room_type} carrying traces of {topic_text}.",
+                "text": (
+                    f"This {room_type} is {condition}, its {era} bones showing through the dust. "
+                    f"Everything here seems arranged around {topic_text}, as if the room has been "
+                    "waiting for someone to notice what all its small objects already know."
+                ),
+                "tags": [room_type, era, condition, *topics[:2]],
+                "llm_choices": {"voice": "quietly observant"},
+            }
+        )
+
+    def _materialize_detail(self, context: dict[str, Any]) -> str:
+        subject = context.get("subject") if isinstance(context.get("subject"), dict) else {}
+        engine_choices = context.get("engine_choices") if isinstance(context.get("engine_choices"), dict) else {}
+        name = str(subject.get("name") or "the thing")
+        band = str(subject.get("distance_band") or "adjacent")
+        sentences = []
+        if band == "adjacent":
+            sentences.append(f"Up close, {name} shows its grain: wear in the places hands go, age in the places they don't.")
+        else:
+            sentences.append(f"From {band.replace('_', ' ')}, {name} gives away only outline and bearing.")
+        hint = engine_choices.get("weakness_hint") if isinstance(engine_choices.get("weakness_hint"), dict) else None
+        if hint:
+            if hint.get("kind") == "mechanical":
+                sentences.append(f"It carries itself carefully around any suggestion of {hint.get('damage_type')}, the way wounded things avoid a remembered hurt.")
+            else:
+                sentences.append(f"Something in its posture flinches at {hint.get('hint')}.")
+        if engine_choices.get("secret_present"):
+            anchor = str(engine_choices.get("anchor_name") or name)
+            style = str(engine_choices.get("clue_style") or "scratches")
+            sentences.append(f"{style.capitalize()} ring {anchor}, too deliberate to be accident.")
+        person = subject.get("person") if isinstance(subject.get("person"), dict) else None
+        if person and person.get("appearance"):
+            sentences.append(str(person["appearance"]))
+        return json.dumps(
+            {
+                "title": f"A Study of {name.title()}",
+                "summary": f"What patient observation makes of {name} from {band}.",
+                "text": " ".join(sentences),
+                "tags": ["detail"],
+                "llm_choices": {},
+            }
+        )
+
+    def _materialize_investigation(self, context: dict[str, Any]) -> str:
+        engine_choices = context.get("engine_choices") if isinstance(context.get("engine_choices"), dict) else {}
+        subject = context.get("subject") if isinstance(context.get("subject"), dict) else {}
+        room = subject.get("room") if isinstance(subject.get("room"), dict) else {}
+        room_type = str(room.get("type") or "room")
+        if engine_choices.get("secret_present"):
+            anchor = str(engine_choices.get("anchor_name") or "the floor")
+            style = str(engine_choices.get("clue_style") or "scratches")
+            return json.dumps(
+                {
+                    "title": "Something Disturbed",
+                    "summary": f"{style.capitalize()} point toward {anchor}.",
+                    "text": (
+                        f"Patience pays. {style.capitalize()} arc away from {anchor}, too regular to be "
+                        f"accident; whatever stands there has been moved, and moved again, by someone "
+                        "careful to put it back."
+                    ),
+                    "tags": ["investigation", room_type],
+                    "llm_choices": {},
+                }
+            )
+        llm_choices: dict[str, str] = {}
+        text = (
+            f"You go over the {room_type} a hand-span at a time. The craft is plain and the "
+            "age is honest; everything here is exactly what it appears to be, worn by use "
+            "rather than secrecy."
+        )
+        options = engine_choices.get("decoration_options")
+        if isinstance(options, list) and options and isinstance(options[0], dict):
+            chosen = options[0]
+            llm_choices = {
+                "decoration_template": str(chosen.get("template") or ""),
+                "decoration_name": f"overlooked {chosen.get('name')}",
+                "decoration_description": f"A {chosen.get('name')} the dust had nearly finished swallowing.",
+            }
+            text += f" Under a drift of dust, though, your hands find an overlooked {chosen.get('name')}."
+        return json.dumps(
+            {
+                "title": "An Honest Accounting",
+                "summary": f"Close study of the {room_type} finds craft and age, nothing concealed.",
+                "text": text,
+                "tags": ["investigation", room_type],
+                "llm_choices": llm_choices,
+            }
+        )
+
+    def _materialize_book(self, context: dict[str, Any]) -> str:
+        subject = context.get("subject") if isinstance(context.get("subject"), dict) else {}
+        book = subject.get("book") if isinstance(subject.get("book"), dict) else {}
+        book_name = str(book.get("name") or "untitled volume")
+        topic_words = [w for w in book_name.split() if len(w) > 3][-2:]
+        topic = " ".join(topic_words) or "small weather"
+        threads = context.get("threads") if isinstance(context.get("threads"), dict) else {}
+        promises = threads.get("promises") if isinstance(threads.get("promises"), list) else []
+        thread_line = ""
+        if promises and isinstance(promises[0], dict) and promises[0].get("text"):
+            thread_line = f" In the margin, another hand: '{promises[0]['text']}'"
+        return json.dumps(
+            {
+                "title": f"A Patient Account of {topic.title()}",
+                "summary": f"A meticulous, slightly defensive treatise concerning {topic}.",
+                "text": (
+                    f"On the matter of {topic}, most accounts are wrong, and I will say so plainly: "
+                    "they were written by people in a hurry, for people in a hurry, and haste has "
+                    "never yet seen anything worth writing down.\n\n"
+                    f"Consider what the field-wardens say of {topic}. They say it cannot be counted. "
+                    "I have counted it. The counting took eleven years and the better part of my "
+                    "eyesight, and the figures are appended in the third registry, which the reader "
+                    "is begged to consult before writing me letters.\n\n"
+                    "I have heard it said that a shrine east of the river answers those who ask "
+                    f"politely about {topic}, though I never walked there myself; my knees were "
+                    "already against the idea by the time the rumor reached me.\n\n"
+                    f"Let the impatient reader take only this: {topic} rewards the slow."
+                    f"{thread_line}"
+                ),
+                "tags": ["book", "lore"],
+                "llm_choices": {"author": "Magistrate Ellow Venn", "voice": "patient and defensive"},
+            }
+        )
+
+
+class AutoCanonProvider:
+    name = "auto"
+
+    def __init__(self) -> None:
+        self.ollama = OllamaCanonProvider()
+        self.mock = MockCanonProvider()
+        self.last_provider_name = "ollama"
+
+    def materialize(self, context: dict[str, Any]) -> str:
+        try:
+            self.last_provider_name = self.ollama.name
+            return self.ollama.materialize(context)
+        except (OSError, TimeoutError, urllib.error.URLError, ValueError):
+            if not fallbacks_enabled():
+                raise
+            self.last_provider_name = self.mock.name
+            return self.mock.materialize(context)
+
+
+def make_canon_provider(provider_name: str | None = None) -> CanonProvider:
+    provider = (provider_name or get_canon_provider()).lower().strip()
+    if provider == "mock":
+        return MockCanonProvider()
+    if provider == "ollama":
+        return OllamaCanonProvider()
+    return AutoCanonProvider()
+
+
+def resolve_canon(provider: CanonProvider, context: dict[str, Any]) -> CanonResolution:
+    """Materialize one canon record, retrying malformed responses like the wild
+    resolver does — a truncated or invalid JSON reply should cost a second
+    attempt, not the whole interaction."""
+    attempts = max(1, ollama_resolution_attempts())
+    resolution = CanonResolution(None, True, "no attempts made")
+    for _ in range(attempts):
+        resolution = _resolve_canon_once(provider, context)
+        if not resolution.technical_failure:
+            return resolution
+    return resolution
+
+
+def _resolve_canon_once(provider: CanonProvider, context: dict[str, Any]) -> CanonResolution:
+    resolved_provider_name = _canon_provider_name(provider)
+    raw: str | None = None
+    try:
+        raw = provider.materialize(context)
+        data = parse_canon_json(raw)
+        record = normalize_canon_record(data, context)
+        audit_path = _write_canon_audit(provider, context, raw, record, False, None, resolved_provider_name)
+        return CanonResolution(record, False, None, resolved_provider_name, raw, audit_path)
+    except (OSError, TimeoutError, urllib.error.URLError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        resolved_provider_name = _canon_provider_name(provider)
+        error = str(exc)
+        audit_path = _write_canon_audit(provider, context, raw, None, True, error, resolved_provider_name)
+        return CanonResolution(None, True, error, resolved_provider_name, raw, audit_path)
+
+
+def parse_canon_json(raw: str) -> dict[str, Any]:
+    cleaned = strip_thinking(raw)
+    try:
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+        if not match:
+            raise
+        parsed = json.loads(match.group(0))
+    if not isinstance(parsed, dict):
+        raise TypeError("canon response was not a JSON object")
+    return parsed
+
+
+def normalize_canon_record(data: dict[str, Any], context: dict[str, Any]) -> CanonRecord:
+    subject = context.get("subject") if isinstance(context.get("subject"), dict) else {}
+    attachment = subject.get("attachment") if isinstance(subject.get("attachment"), dict) else {}
+    kind = normalize_id(str(context.get("kind") or data.get("kind") or "room_flavor"))
+    record_id = normalize_id(str(context.get("record_id") or data.get("id") or "canon_record"))
+    if kind == "book":
+        text = _clean_body(data.get("text"), _BOOK_TEXT_LIMIT)
+    else:
+        text = _clean_text(data.get("text"), _TEXT_LIMITS["text"])
+    if not text:
+        raise ValueError("canon response did not include text")
+    title = _clean_text(data.get("title"), _TEXT_LIMITS["title"]) or None
+    summary = _clean_text(data.get("summary"), _TEXT_LIMITS["summary"]) or text[:_TEXT_LIMITS["summary"]]
+    allowed_tags = {normalize_id(str(tag)) for tag in context.get("allowed_tags", []) if str(tag).strip()}
+    tags = [normalize_id(str(tag)) for tag in data.get("tags", []) if str(tag).strip()]
+    tags.extend(str(tag) for tag in context.get("base_tags", []) if str(tag).strip())
+    normalized_tags = sorted({tag for tag in tags if tag and (not allowed_tags or tag in allowed_tags)})
+    llm_choices = {
+        str(key): _clean_text(value, 60)
+        for key, value in (data.get("llm_choices") or {}).items()
+        if isinstance(value, (str, int, float)) and str(value).strip()
+    }
+    engine_choices = dict(context.get("engine_choices") or {})
+    engine_choices.update(context.get("engine_private") or {})
+    return CanonRecord(
+        id=record_id,
+        kind=kind,
+        attachment=dict(attachment),
+        title=title,
+        text=text,
+        summary=summary,
+        tags=normalized_tags,
+        source=str(context.get("source") or "ondemand"),
+        seed_packet=dict(context),
+        engine_choices=engine_choices,
+        llm_choices=llm_choices,
+        turn_created=int(context.get("turn") or 0),
+        status="canonical",
+    )
+
+
+def _clean_text(value: Any, limit: int) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= limit:
+        return text.strip()
+    cut = text[:limit]
+    if " " in cut:
+        cut = cut.rsplit(" ", 1)[0]
+    return cut.strip(" ,;:-")
+
+
+def _clean_body(value: Any, limit: int) -> str:
+    """Multi-paragraph body text: collapse whitespace within paragraphs but
+    keep paragraph breaks — book pages need them."""
+    raw = str(value or "").replace("\r", "")
+    paragraphs = [" ".join(part.split()) for part in raw.split("\n\n")]
+    paragraphs = [part for part in paragraphs if part]
+    text = "\n\n".join(paragraphs)
+    if len(text) <= limit:
+        return text.strip()
+    cut = text[:limit]
+    if " " in cut:
+        cut = cut.rsplit(" ", 1)[0]
+    return cut.strip(" ,;:-")
+
+
+def _write_canon_audit(
+    provider: CanonProvider,
+    context: dict[str, Any],
+    raw_response: str | None,
+    record: CanonRecord | None,
+    technical_failure: bool,
+    error: str | None,
+    resolved_provider_name: str,
+) -> str | None:
+    audit_path = audit_dir() / "canon_audit.jsonl"
+    audit_record = {
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "record_id": context.get("record_id"),
+        "kind": context.get("kind"),
+        "provider": resolved_provider_name,
+        "provider_requested": getattr(provider, "name", "unknown"),
+        "model": getattr(provider, "model", None),
+        "ollama_base_url": getattr(provider, "base_url", None),
+        "context": context,
+        "raw_response": raw_response,
+        "record": record.to_dict() if record else None,
+        "technical_failure": technical_failure,
+        "error": error,
+    }
+    return _write_jsonl_audit(audit_path, audit_record)
+
+
+def _canon_provider_name(provider: CanonProvider) -> str:
+    if isinstance(provider, AutoCanonProvider):
+        return provider.last_provider_name
+    return getattr(provider, "name", "unknown")

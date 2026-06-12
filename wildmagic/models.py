@@ -401,8 +401,11 @@ class RoomProfile:
     def contains(self, x: int, y: int) -> bool:
         return self.x <= x < self.x + self.w and self.y <= y < self.y + self.h
 
-    def to_public_dict(self) -> dict[str, Any]:
-        return {
+    def to_public_dict(self, include_secrets: bool = False) -> dict[str, Any]:
+        """Room data for LLM context and summaries. Secret slots stay out of
+        LLM-facing packets by default — the model must never learn whether a
+        secret exists except through the explicit investigate contract."""
+        data = {
             "id": self.id,
             "bounds": {"x": self.x, "y": self.y, "w": self.w, "h": self.h},
             "center": {"x": self.center[0], "y": self.center[1]},
@@ -411,9 +414,11 @@ class RoomProfile:
             "condition": self.condition,
             "topics": list(self.topics),
             "tags": list(self.tags),
-            "secret_slots": [dict(slot) for slot in self.secret_slots],
             "promise_hooks": list(self.promise_hooks),
         }
+        if include_secrets:
+            data["secret_slots"] = [dict(slot) for slot in self.secret_slots]
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "RoomProfile":

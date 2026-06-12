@@ -14,6 +14,7 @@ from .actions import ActionResult, GameSession
 from .config import DEFAULT_MODEL, get_config_value, set_config_value
 from .game_data import _TOWN_GEN_TIMEOUT, EQUIPMENT_SPECS
 from .items import infer_equipment_slot
+from .normalize import normalize_id
 from .wild_magic import fetch_ollama_models
 from .wild_magic import SYSTEM_PROMPT, extract_thinking, strip_thinking
 from .models import (
@@ -62,15 +63,18 @@ MODE_ORANGE = (228, 146, 74)
 MODE_COLORS = {"spell": MODE_PURPLE, "talk": MODE_YELLOW, "control": MODE_GREEN, "confirm_trade": MODE_ORANGE}
 
 CONTROLS_HINT = (
-    "Keyboard controls active - arrows/WASD/hjkl move, > descend, < ascend, o open, "
-    "g pick up, f cast spark, period or keypad-5 to wait, Esc back to Wild Spell."
+    "Keyboard controls active - arrows/WASD/keypad move, > descend, < ascend, o open, "
+    "g pick up, f cast spark, x investigate, j journal, q quests, i inventory, "
+    "period or keypad-5 to wait, Esc back to Wild Spell."
 )
 
 _MOVE_KEY_MAP: dict[int, str] = {
-    pygame.K_UP: "north", pygame.K_w: "north", pygame.K_k: "north", pygame.K_KP8: "north",
-    pygame.K_DOWN: "south", pygame.K_s: "south", pygame.K_j: "south", pygame.K_KP2: "south",
-    pygame.K_LEFT: "west", pygame.K_a: "west", pygame.K_h: "west", pygame.K_KP4: "west",
-    pygame.K_RIGHT: "east", pygame.K_d: "east", pygame.K_l: "east", pygame.K_KP6: "east",
+    # No vi-keys (h/j/k/l) here: j opens the journal, and the others are
+    # reserved for future bindings. WASD, arrows, and the keypad move.
+    pygame.K_UP: "north", pygame.K_w: "north", pygame.K_KP8: "north",
+    pygame.K_DOWN: "south", pygame.K_s: "south", pygame.K_KP2: "south",
+    pygame.K_LEFT: "west", pygame.K_a: "west", pygame.K_KP4: "west",
+    pygame.K_RIGHT: "east", pygame.K_d: "east", pygame.K_KP6: "east",
     pygame.K_KP7: "northwest", pygame.K_KP9: "northeast",
     pygame.K_KP1: "southwest", pygame.K_KP3: "southeast",
 }
@@ -167,6 +171,10 @@ class GameUI:
         self.tile_font = pygame.font.SysFont("consolas", 20, bold=True)
         self.ui_font = pygame.font.SysFont("consolas", 17)
         self.small_font = pygame.font.SysFont("consolas", 14)
+        # Book popup: a serif face for printed matter (falls back if absent).
+        self.book_title_font = pygame.font.SysFont("georgia,palatino linotype,times new roman", 22, bold=True)
+        self.book_font = pygame.font.SysFont("georgia,palatino linotype,times new roman", 16)
+        self.book_small_font = pygame.font.SysFont("georgia,palatino linotype,times new roman", 13, italic=True)
         self.session = GameSession(scenario="town")
         self.engine = self.session.engine
         self.input_text = ""
@@ -199,6 +207,8 @@ class GameUI:
         self.dragging_llm_selection = False
 
         self.inspect_tile: tuple[int, int] | None = None
+        self.inspect_button_rects: list[tuple[pygame.Rect, str]] = []
+        self.book_popup: dict[str, Any] | None = None
 
         # Menu state
         self.menu_active = False
@@ -273,6 +283,20 @@ class GameUI:
                     self.log_selection_focus = len(self.log_line_rects) - 1
                 return
 
+        if self.book_popup is not None:
+            if event.key == pygame.K_ESCAPE:
+                self.book_popup = None
+            elif event.key in (pygame.K_LEFT, pygame.K_PAGEUP, pygame.K_a, pygame.K_UP):
+                self.book_popup["page"] = max(0, int(self.book_popup.get("page", 0)) - 1)
+            elif event.key in (pygame.K_RIGHT, pygame.K_PAGEDOWN, pygame.K_d, pygame.K_DOWN,
+                               pygame.K_RETURN, pygame.K_KP_ENTER, pygame.K_SPACE):
+                page = int(self.book_popup.get("page", 0))
+                if page + 1 >= int(self.book_popup.get("page_count", 1)):
+                    self.book_popup = None
+                else:
+                    self.book_popup["page"] = page + 1
+            return
+
         if event.key == pygame.K_r and self.engine.state.game_over:
             self.restart_run()
             return
@@ -336,6 +360,8 @@ class GameUI:
             self.execute_command("pickup")
         elif event.key == pygame.K_f:
             self.execute_command("spark")
+        elif event.key == pygame.K_x:
+            self.execute_command(self._investigate_command())
         elif event.key == pygame.K_q:
             self.menu_active = True
             self.menu_page = "quests"
@@ -354,6 +380,21 @@ class GameUI:
         self.provider_label = self.session.provider_label
 
     def handle_mouse(self, event: pygame.event.Event) -> None:
+        if self.book_popup is not None:
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button in (1, 3):
+                # Click left half = page back, right half = page forward/close.
+                page = int(self.book_popup.get("page", 0))
+                if event.pos[0] < WINDOW_WIDTH // 2:
+                    if page > 0:
+                        self.book_popup["page"] = page - 1
+                elif page + 1 >= int(self.book_popup.get("page_count", 1)):
+                    self.book_popup = None
+                else:
+                    self.book_popup["page"] = page + 1
+            elif event.type == pygame.MOUSEBUTTONDOWN:
+                self.book_popup = None
+            return
+
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
             mx, my = event.pos
             if MAP_OFFSET_X <= mx < MAP_OFFSET_X + MAP_PIXEL_WIDTH and 0 <= my < MAP_PIXEL_HEIGHT:
@@ -365,6 +406,11 @@ class GameUI:
             return
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.inspect_tile is not None:
+                for rect, command in self.inspect_button_rects:
+                    if rect.collidepoint(event.pos):
+                        self.execute_command(command)
+                        return
             self.inspect_tile = None
             if self.log_scrollbar_thumb_rect and self.log_scrollbar_thumb_rect.collidepoint(event.pos):
                 self.log_dragging_scrollbar = True
@@ -638,7 +684,18 @@ class GameUI:
             self.menu_cursor = 0
     def execute_command(self, command: str) -> None:
         self.log_scroll_offset = 0
-        self.session.execute_command(command)
+        result = self.session.execute_command(command)
+        if result.action == "read" and result.success and result.canon_materialization:
+            record = result.canon_materialization.get("record")
+            if isinstance(record, dict) and record.get("kind") == "book":
+                llm_choices = record.get("llm_choices") if isinstance(record.get("llm_choices"), dict) else {}
+                self.book_popup = {
+                    "title": str(record.get("title") or "An Untitled Volume"),
+                    "author": str(llm_choices.get("author") or ""),
+                    "text": str(record.get("text") or ""),
+                    "page": 0,
+                    "page_count": 1,
+                }
 
     # ------------------------------------------------------------------
 
@@ -743,6 +800,28 @@ class GameUI:
             return []
         return [text for text, _color in self._llm_lines_cache[start : end + 1]]
 
+    def _investigate_command(self) -> str:
+        """The x key: sweep the room, unless a found clue's anchor is in reach —
+        standing on or beside the clued thing, x searches it instead. The verb
+        itself stays a plain CLI command; this only chooses which one to send."""
+        engine = self.engine
+        player = engine.state.player
+        room = engine.room_profile_at(player.x, player.y)
+        if room is not None:
+            slot = next((s for s in room.secret_slots if s.get("status") == "clued"), None)
+            anchor = str(slot.get("anchor") or "") if slot else ""
+            if anchor:
+                if normalize_id(anchor) == normalize_id("the floor"):
+                    return f"investigate {anchor}"
+                for entity in engine.state.entities.values():
+                    if (
+                        entity.kind == "prop"
+                        and max(abs(entity.x - player.x), abs(entity.y - player.y)) <= 1
+                        and normalize_id(entity.name) == normalize_id(anchor)
+                    ):
+                        return f"investigate {anchor}"
+        return "investigate"
+
     def submit_input(self) -> None:
         text = self.input_text.strip()
         if not text:
@@ -791,6 +870,8 @@ class GameUI:
             self.draw_inspect_tooltip()
         if self.menu_active:
             self.draw_menu()
+        if self.book_popup is not None:
+            self.draw_book_popup()
 
     def draw_inspect_tooltip(self) -> None:
         tx, ty = self.inspect_tile  # type: ignore[misc]
@@ -820,6 +901,16 @@ class GameUI:
                 lines.append((f"  {topics}", MUTED))
 
         # ── Entities ──────────────────────────────────────────────────────────
+        buttons: list[tuple[int, str]] = []  # (line index, command)
+        player = state.player
+
+        def _detail_summary(entity_id: str) -> str | None:
+            for tier in ("close", "far"):
+                record = state.canon_records.get(f"canon_detail_{entity_id}_{tier}")
+                if record is not None and record.summary:
+                    return record.summary
+            return None
+
         visible = engine.is_visible(tx, ty)
         for entity in sorted(state.entities.values(), key=lambda e: e.id):
             if entity.x != tx or entity.y != ty:
@@ -883,7 +974,21 @@ class GameUI:
                 if entity.tags:
                     lines.append(("  " + ", ".join(sorted(entity.tags)), MUTED))
 
+            # Learned canon and study/read affordances for everything but you.
+            if entity.id != state.player_id:
+                summary = _detail_summary(entity.id)
+                if summary:
+                    for part in wrap_text(summary, 34):
+                        lines.append((f"  {part}", (150, 170, 150)))
+                distance = max(abs(entity.x - player.x), abs(entity.y - player.y))
+                if entity.kind == "prop" and "book" in entity.tags and distance <= 1:
+                    buttons.append((len(lines), f"read {entity.name}"))
+                    lines.append(("  [ Read ]", (130, 185, 225)))
+                buttons.append((len(lines), f"investigate {entity.id}"))
+                lines.append(("  [ Investigate ]", (130, 185, 225)))
+
         if not lines:
+            self.inspect_button_rects = []
             return
 
         # ── Draw box ──────────────────────────────────────────────────────────
@@ -907,14 +1012,118 @@ class GameUI:
         pygame.draw.rect(self.screen, (20, 22, 30), (bx, by, tooltip_w, total_h), border_radius=6)
         pygame.draw.rect(self.screen, PANEL_EDGE, (bx, by, tooltip_w, total_h), 1, border_radius=6)
 
+        button_commands = dict(buttons)
+        self.inspect_button_rects = []
         cy = by + pad
-        for text, color in lines:
+        for index, (text, color) in enumerate(lines):
             if text == "":
                 cy += 4
                 continue
             surf = self.small_font.render(text, True, color)
             self.screen.blit(surf, (bx + pad, cy))
+            command = button_commands.get(index)
+            if command:
+                rect = pygame.Rect(bx + pad, cy - 1, surf.get_width() + 8, line_h)
+                pygame.draw.rect(self.screen, (70, 95, 120), rect, 1, border_radius=4)
+                self.inspect_button_rects.append((rect, command))
             cy += line_h
+
+    def draw_book_popup(self) -> None:
+        """A parchment page for reading books, modal over everything else.
+        Long texts paginate; arrows/space/clicks turn pages."""
+        assert self.book_popup is not None
+        title = str(self.book_popup["title"])
+        author = str(self.book_popup["author"])
+        text = str(self.book_popup["text"])
+
+        overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
+        overlay.fill((10, 8, 4, 180))
+        self.screen.blit(overlay, (0, 0))
+
+        parchment = (233, 222, 196)
+        parchment_edge = (140, 112, 72)
+        ink = (58, 44, 30)
+        faded_ink = (120, 100, 72)
+
+        box_w = 600
+        box_h = min(640, WINDOW_HEIGHT - 60)
+        pad = 36
+        wrap_width = 58
+        bx = (WINDOW_WIDTH - box_w) // 2
+        by = (WINDOW_HEIGHT - box_h) // 2
+        title_h = self.book_title_font.get_linesize()
+        body_h = self.book_font.get_linesize()
+        small_h = self.book_small_font.get_linesize()
+
+        # Body lines with paragraph spacing preserved as blank lines.
+        body_lines: list[str] = []
+        for paragraph in text.split("\n"):
+            paragraph = paragraph.strip()
+            if not paragraph:
+                if body_lines and body_lines[-1] != "":
+                    body_lines.append("")
+                continue
+            body_lines.extend(wrap_text(paragraph, wrap_width))
+            body_lines.append("")
+        while body_lines and body_lines[-1] == "":
+            body_lines.pop()
+
+        title_lines = wrap_text(title, 42)
+        header_h = title_h * len(title_lines) + (small_h + 6 if author else 0) + 18
+        footer_h = small_h + 18
+        first_capacity = max(4, (box_h - pad * 2 - header_h - footer_h) // body_h)
+        rest_capacity = max(4, (box_h - pad * 2 - footer_h) // body_h)
+
+        pages: list[list[str]] = []
+        remaining = list(body_lines)
+        capacity = first_capacity
+        while True:
+            page_lines = remaining[:capacity]
+            pages.append(page_lines)
+            remaining = remaining[capacity:]
+            while remaining and remaining[0] == "":
+                remaining = remaining[1:]
+            if not remaining:
+                break
+            capacity = rest_capacity
+        self.book_popup["page_count"] = len(pages)
+        page = max(0, min(int(self.book_popup.get("page", 0)), len(pages) - 1))
+        self.book_popup["page"] = page
+
+        pygame.draw.rect(self.screen, parchment, (bx, by, box_w, box_h), border_radius=4)
+        pygame.draw.rect(self.screen, parchment_edge, (bx, by, box_w, box_h), 2, border_radius=4)
+        pygame.draw.rect(self.screen, parchment_edge, (bx + 6, by + 6, box_w - 12, box_h - 12), 1, border_radius=3)
+
+        cy = by + pad
+        if page == 0:
+            for line in title_lines:
+                surf = self.book_title_font.render(line, True, ink)
+                self.screen.blit(surf, (bx + (box_w - surf.get_width()) // 2, cy))
+                cy += title_h
+            if author:
+                surf = self.book_small_font.render(f"— {author}", True, faded_ink)
+                self.screen.blit(surf, (bx + (box_w - surf.get_width()) // 2, cy + 2))
+                cy += small_h + 6
+            cy += 8
+            pygame.draw.line(self.screen, parchment_edge, (bx + box_w // 2 - 60, cy), (bx + box_w // 2 + 60, cy), 1)
+            cy += 10
+
+        for line in pages[page]:
+            if line:
+                surf = self.book_font.render(line, True, ink)
+                self.screen.blit(surf, (bx + pad, cy))
+            cy += body_h
+
+        if len(pages) > 1:
+            marker = self.book_small_font.render(f"— {page + 1} of {len(pages)} —", True, faded_ink)
+            self.screen.blit(marker, (bx + (box_w - marker.get_width()) // 2, by + box_h - pad // 2 - small_h - 14))
+        last_page = page + 1 >= len(pages)
+        hint_text = (
+            "Esc closes · click or arrows turn the page" if not last_page
+            else "Esc or click to close the book"
+        )
+        hint = self.book_small_font.render(hint_text, True, faded_ink)
+        self.screen.blit(hint, (bx + (box_w - hint.get_width()) // 2, by + box_h - pad // 2 - small_h + 2))
 
     def draw_menu(self) -> None:
         overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)

@@ -2,10 +2,17 @@ from __future__ import annotations
 
 import concurrent.futures
 from dataclasses import dataclass, field
+import random
 import shlex
 from typing import Any
 
+from .canon import (
+    CanonProvider,
+    make_canon_provider,
+    resolve_canon,
+)
 from .config import flesh_enabled, lore_enabled
+from .determinism import stable_seed
 from .engine import GameEngine
 from .flesh import (
     FleshProvider,
@@ -21,6 +28,15 @@ from .lore import (
     resolve_lore_extraction,
 )
 from .normalize import normalize_id
+from .models import CanonRecord
+from .secrets import (
+    choose_anchor,
+    choose_reward,
+    choose_weakness_hint,
+    decoration_menu,
+    secret_kind_label,
+    slot_turn_cost,
+)
 from .promises import WorldPromise
 from .promises import Objective, Reward
 from .wild_magic import (
@@ -92,6 +108,7 @@ class ActionResult:
     technical_failure: bool = False
     wild_magic: dict[str, Any] | None = None
     dialogue: dict[str, Any] | None = None
+    canon_materialization: dict[str, Any] | None = None
     llm_context: dict[str, Any] | None = None
     should_quit: bool = False
 
@@ -106,6 +123,7 @@ class ActionResult:
             "turn_after": self.turn_after,
             "wild_magic": self.wild_magic,
             "dialogue": self.dialogue,
+            "canon_materialization": self.canon_materialization,
         }
 
 
@@ -124,6 +142,8 @@ class GameSession:
         lore_provider_name: str | None = None,
         flesh_provider: FleshProvider | None = None,
         flesh_provider_name: str | None = None,
+        canon_provider: CanonProvider | None = None,
+        canon_provider_name: str | None = None,
         replay_mode: bool = False,
     ) -> None:
         self.seed = seed
@@ -149,17 +169,23 @@ class GameSession:
             resolved_flesh_provider_name = provider_name
         self.flesh_provider = flesh_provider or make_flesh_provider(resolved_flesh_provider_name)
         self.flesh_provider_label = getattr(self.flesh_provider, "name", "unknown")
+        resolved_canon_provider_name = canon_provider_name
+        if resolved_canon_provider_name is None and provider_name in {"mock", "ollama", "auto"}:
+            resolved_canon_provider_name = provider_name
+        self.canon_provider = canon_provider or make_canon_provider(resolved_canon_provider_name)
+        self.canon_provider_label = getattr(self.canon_provider, "name", "unknown")
         # In replay mode, promises and flesh come from the recorded apply points;
         # background producers must stay silent.
         self.replay_mode = replay_mode
         self._lore_executor: concurrent.futures.ThreadPoolExecutor | None = None
-        self._pending_lore: list[tuple[concurrent.futures.Future[LoreExtractionResolution], dict[str, Any]]] = []
+        self._pending_lore: list[tuple[concurrent.futures.Future[LoreExtractionResolution], dict[str, Any], int | None]] = []
         self._pending_flesh: list[tuple[concurrent.futures.Future[FleshResolution], str]] = []
         self._queued_flesh_ids: set[str] = set()
         # Promise dicts applied to the engine since the last recorded action, snapshotted
         # pre-merge so replay can re-run the deterministic bind/merge at the same point.
         self._promise_apply_buffer: list[dict[str, Any]] = []
         self._flesh_apply_buffer: list[dict[str, Any]] = []
+        self._canon_apply_buffer: list[dict[str, Any]] = []
         self.records: list[dict[str, Any]] = []
 
     def execute_command(
@@ -169,6 +195,7 @@ class GameSession:
         replay_dialogue: dict[str, Any] | None = None,
         replay_promises: dict[str, Any] | None = None,
         replay_flesh: dict[str, Any] | None = None,
+        replay_canon: dict[str, Any] | None = None,
         record: bool = True,
     ) -> ActionResult:
         self.drain_lore(block=False)
@@ -178,8 +205,11 @@ class GameSession:
             self.apply_recorded_promises(replay_promises.get("before"))
         if replay_flesh is not None:
             self.apply_recorded_flesh(replay_flesh.get("before"))
+        if replay_canon is not None:
+            self.apply_recorded_canon(replay_canon.get("before"))
         promises_before = self._pop_applied_promises() if record else []
         flesh_before = self._pop_applied_flesh() if record else []
+        canon_before = self._pop_applied_canon() if record else []
         original_command = command.strip()
         turn_before = self.engine.state.turn
         message_count_before = len(self.engine.state.messages)
@@ -188,6 +218,7 @@ class GameSession:
         technical_failure = False
         wild_magic_record: dict[str, Any] | None = None
         dialogue_record: dict[str, Any] | None = None
+        canon_record: dict[str, Any] | None = None
         llm_context: dict[str, Any] | None = None
         should_quit = False
         explicit_messages: list[str] | None = None
@@ -215,6 +246,23 @@ class GameSession:
                 action = "journal"
                 success = True
                 explicit_messages = describe_journal(self.engine)
+            elif verb in {"examine", "study", "observe"}:
+                action = "examine"
+                success, technical_failure, canon_record, explicit_messages = self._examine_current_room(
+                    replay_canon,
+                )
+            elif verb in {"read", "peruse"}:
+                action = "read"
+                success, technical_failure, canon_record, explicit_messages = self._read_book(
+                    command_argument(original_command, tokens),
+                    replay_canon,
+                )
+            elif verb in {"investigate", "search"}:
+                action = "investigate"
+                success, technical_failure, canon_record, explicit_messages = self._investigate(
+                    command_argument(original_command, tokens),
+                    replay_canon,
+                )
             elif verb in {"wares", "browse", "shop"} and self.engine.state.pending_trade is None:
                 action = "wares"
                 success = True
@@ -383,6 +431,7 @@ class GameSession:
             technical_failure=technical_failure,
             wild_magic=wild_magic_record,
             dialogue=dialogue_record,
+            canon_materialization=canon_record,
             llm_context=llm_context,
             should_quit=should_quit,
         )
@@ -397,15 +446,851 @@ class GameSession:
             action_record = result.to_record()
             promises_after = self._pop_applied_promises()
             flesh_after = self._pop_applied_flesh()
+            canon_after = self._pop_applied_canon()
             if promises_before or promises_after:
                 action_record["promises"] = {"before": promises_before, "after": promises_after}
             if flesh_before or flesh_after:
                 action_record["flesh"] = {"before": flesh_before, "after": flesh_after}
+            if canon_before or canon_after:
+                action_record["canon"] = {"before": canon_before, "after": canon_after}
             self.records.append(action_record)
         return result
 
     def cast_wild(self, spell: str, record: bool = True) -> ActionResult:
         return self.execute_command(f"cast {spell}", record=record)
+
+    def _present_canon(self, record: CanonRecord) -> list[str]:
+        """Canon prose goes through the message log so every frontend shows it —
+        the pygame UI renders only state messages, not ActionResult lines.
+        Free retells (reuse paths) skip re-logging while the same prose is still
+        in recent history, so repeated keypresses don't flood the log. Books log
+        only title and summary — their full pages belong to the reading view
+        (and to the CLI via the returned lines), not a combat log."""
+        lines = _canon_display_lines(record)
+        if record.kind == "book":
+            log_lines = [line for line in (record.title, record.summary) if line]
+        else:
+            log_lines = lines
+        recent = set(self.engine.state.messages[-30:])
+        if log_lines and not all(line in recent for line in log_lines):
+            for line in log_lines:
+                self.engine.state.add_message(line)
+        return lines
+
+    def _examine_current_room(
+        self,
+        replay_canon: dict[str, Any] | None = None,
+    ) -> tuple[bool, bool, dict[str, Any] | None, list[str]]:
+        room = self.engine.room_profile_at(self.engine.state.player.x, self.engine.state.player.y)
+        if room is None:
+            return False, False, None, ["There is no coherent place here to examine."]
+        record_id = f"canon_room_{normalize_id(room.id)}"
+        existing = self.engine.state.canon_records.get(record_id)
+        replayed_materialization = False
+        if existing is None and replay_canon is not None:
+            self.apply_recorded_canon(replay_canon.get("after"))
+            existing = self.engine.state.canon_records.get(record_id)
+            replayed_materialization = existing is not None
+            replayed_failure = replay_canon.get("materialization")
+            if existing is None and isinstance(replayed_failure, dict) and replayed_failure.get("technical_failure"):
+                return (
+                    False,
+                    True,
+                    replayed_failure,
+                    [f"The place resists description. ({replayed_failure.get('error')})"],
+                )
+        if existing is not None:
+            if replayed_materialization:
+                self.engine.state.add_message(f"You take time to study {room.room_type}.")
+                self.engine.finish_player_turn()
+                return (
+                    True,
+                    False,
+                    {"record": existing.to_dict(), "replayed": True},
+                    self._present_canon(existing),
+                )
+            return True, False, {"record": existing.to_dict(), "reused": True}, self._present_canon(existing)
+
+        context = self._canon_context_for_room(room, record_id)
+        resolution = resolve_canon(self.canon_provider, context)
+        self.canon_provider_label = resolution.provider_name
+        canon_record = {
+            "kind": "room_flavor",
+            "provider": resolution.provider_name,
+            "technical_failure": resolution.technical_failure,
+            "error": resolution.error,
+            "record": resolution.record.to_dict() if resolution.record else None,
+            "raw_response": resolution.raw_response,
+            "audit_path": resolution.audit_path,
+        }
+        if resolution.technical_failure or resolution.record is None:
+            return False, True, canon_record, [f"The place resists description. ({resolution.error})"]
+        applied = self.engine.add_canon_record(resolution.record)
+        self._canon_apply_buffer.append(applied.to_dict())
+        self.engine.state.add_message(f"You take time to study {room.room_type}.")
+        self.engine.finish_player_turn()
+        return True, False, canon_record, self._present_canon(applied)
+
+    def _canon_context_for_room(self, room: Any, record_id: str) -> dict[str, Any]:
+        state = self.engine.state
+        props = [
+            {
+                "id": entity.id,
+                "name": entity.name,
+                "description": entity.description,
+                "tags": sorted(entity.tags),
+            }
+            for entity in state.entities.values()
+            if entity.kind == "prop"
+            and room.contains(entity.x, entity.y)
+        ][:6]
+        threads = self.engine.nearby_canon_records(tags=[*room.tags, *room.topics], limit=4)
+        active_promises = [
+            promise.to_dict()
+            for promise in state.promises
+            if promise.id in room.promise_hooks or set(promise.tags) & set(room.tags)
+        ][:2]
+        base_tags = sorted({*room.tags, *room.topics, "room_flavor"})
+        return {
+            "record_id": record_id,
+            "kind": "room_flavor",
+            "source": "ondemand",
+            "turn": state.turn,
+            "world": {
+                "location": state.location_label(),
+                "region": self.engine.region.prompt_style(),
+                "scenario": state.scenario,
+                "depth": state.depth,
+                "zone": {"x": state.zone_x, "y": state.zone_y, "type": state.zone_type},
+            },
+            "place": {
+                "room": room.to_public_dict(),
+                "nearby_props": props,
+            },
+            "subject": {
+                "room": room.to_public_dict(),
+                "attachment": {"kind": "room", "room_id": room.id},
+            },
+            "threads": {
+                "canon": threads,
+                "promises": active_promises,
+            },
+            "contract": {
+                "allowed_outputs": ["title", "summary", "text", "tags", "llm_choices"],
+                "claim_quota": 0,
+                "forbidden": ["treasure", "exits", "enemies", "allies", "quests", "stats", "map changes"],
+            },
+            "base_tags": base_tags,
+            "allowed_tags": sorted({*base_tags, "empire", "magic", "ritual", "lore", "holy", "death", "water", "plant", "book", "books"}),
+            "engine_choices": {
+                "mechanical_effect": "none",
+                "turn_cost": 1,
+            },
+        }
+
+    def _find_readable_book(self, target: str) -> Any | None:
+        """A readable book prop on the player's tile or an adjacent one. With a
+        target string, prefer name matches; otherwise the nearest book wins."""
+        player = self.engine.state.player
+        wanted = normalize_id(target) if target else ""
+        candidates = []
+        for entity in self.engine.state.entities.values():
+            if entity.kind != "prop" or "book" not in entity.tags:
+                continue
+            distance = max(abs(entity.x - player.x), abs(entity.y - player.y))
+            if distance > 1:
+                continue
+            name_match = bool(wanted) and wanted in normalize_id(entity.name)
+            candidates.append((not name_match, distance, entity.id, entity))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item[:3])
+        if wanted and candidates[0][0]:
+            return None
+        return candidates[0][3]
+
+    def _read_book(
+        self,
+        target: str,
+        replay_canon: dict[str, Any] | None = None,
+    ) -> tuple[bool, bool, dict[str, Any] | None, list[str]]:
+        book = self._find_readable_book(target)
+        if book is None:
+            if target:
+                return False, False, None, [f"There is no book called '{target}' within reach."]
+            return False, False, None, ["There is no book within reach to read."]
+        record_id = f"canon_book_{normalize_id(book.id)}"
+        existing = self.engine.state.canon_records.get(record_id)
+        replayed_materialization = False
+        if existing is None and replay_canon is not None:
+            self.apply_recorded_canon(replay_canon.get("after"))
+            existing = self.engine.state.canon_records.get(record_id)
+            replayed_materialization = existing is not None
+            replayed_failure = replay_canon.get("materialization")
+            if existing is None and isinstance(replayed_failure, dict) and replayed_failure.get("technical_failure"):
+                return (
+                    False,
+                    True,
+                    replayed_failure,
+                    [f"The ink swims and refuses to settle. ({replayed_failure.get('error')})"],
+                )
+        if existing is not None:
+            if replayed_materialization:
+                self._apply_book_canon(book, existing)
+                self.engine.state.add_message(f"You read {existing.title or book.name}.")
+                self.engine.finish_player_turn()
+                return (
+                    True,
+                    False,
+                    {"record": existing.to_dict(), "replayed": True},
+                    self._present_canon(existing),
+                )
+            return True, False, {"record": existing.to_dict(), "reused": True}, self._present_canon(existing)
+
+        context = self._canon_context_for_book(book, record_id)
+        resolution = resolve_canon(self.canon_provider, context)
+        self.canon_provider_label = resolution.provider_name
+        canon_record = {
+            "kind": "book",
+            "provider": resolution.provider_name,
+            "technical_failure": resolution.technical_failure,
+            "error": resolution.error,
+            "record": resolution.record.to_dict() if resolution.record else None,
+            "raw_response": resolution.raw_response,
+            "audit_path": resolution.audit_path,
+        }
+        if resolution.technical_failure or resolution.record is None:
+            return False, True, canon_record, [f"The ink swims and refuses to settle. ({resolution.error})"]
+        applied = self.engine.add_canon_record(resolution.record)
+        self._canon_apply_buffer.append(applied.to_dict())
+        self._apply_book_canon(book, applied)
+        self.engine.state.add_message(f"You read {applied.title or book.name}.")
+        self.engine.finish_player_turn()
+        if not self.replay_mode:
+            quota = int(context.get("contract", {}).get("claim_quota") or 0)
+            if quota > 0:
+                self._enqueue_lore_extraction(
+                    self._lore_context_for_book(book, applied),
+                    canon_record,
+                    claim_quota=quota,
+                )
+        return True, False, canon_record, self._present_canon(applied)
+
+    def _apply_book_canon(self, book: Any, record: Any) -> None:
+        """Materialized title and summary become the book's in-world identity."""
+        if record.title:
+            book.name = record.title
+        if record.summary:
+            book.description = record.summary
+        author = record.llm_choices.get("author") if isinstance(record.llm_choices, dict) else None
+        if author and record.summary and author not in record.summary:
+            book.description = f"{record.summary} (by {author})"
+
+    def _canon_context_for_book(self, book: Any, record_id: str) -> dict[str, Any]:
+        state = self.engine.state
+        room = self.engine.room_profile_at(book.x, book.y)
+        room_dict = room.to_public_dict() if room is not None else None
+        room_tags = list(room.tags) if room is not None else []
+        room_topics = list(room.topics) if room is not None else []
+        thread_tags = sorted({*book.tags, *room_tags, *room_topics})
+        threads = self.engine.nearby_canon_records(tags=thread_tags, limit=4)
+        active_promises = [
+            promise.to_dict()
+            for promise in state.promises
+            if (room is not None and promise.id in room.promise_hooks)
+            or set(promise.tags) & set(thread_tags)
+        ][:2]
+        base_tags = sorted({*book.tags, "book"})
+        return {
+            "record_id": record_id,
+            "kind": "book",
+            "source": "ondemand",
+            "turn": state.turn,
+            "world": {
+                "location": state.location_label(),
+                "region": self.engine.region.prompt_style(),
+                "scenario": state.scenario,
+                "depth": state.depth,
+                "zone": {"x": state.zone_x, "y": state.zone_y, "type": state.zone_type},
+            },
+            "place": {
+                "room": room_dict,
+            },
+            "subject": {
+                "book": {
+                    "id": book.id,
+                    "name": book.name,
+                    "description": book.description,
+                    "tags": sorted(book.tags),
+                },
+                "attachment": {"kind": "prop", "entity_id": book.id},
+            },
+            "threads": {
+                "canon": threads,
+                "promises": active_promises,
+            },
+            "contract": {
+                "allowed_outputs": ["title", "summary", "text", "tags", "llm_choices"],
+                "claim_quota": 2,
+                "forbidden": ["treasure locations", "guaranteed allies", "map exits", "named player rewards", "stats", "spell effects"],
+            },
+            "base_tags": base_tags,
+            "allowed_tags": sorted({*base_tags, *thread_tags, "empire", "magic", "ritual", "lore", "holy", "death", "water", "plant"}),
+            "engine_choices": {
+                "mechanical_effect": "none",
+                "turn_cost": 1,
+            },
+        }
+
+    def _lore_context_for_book(self, book: Any, record: Any) -> dict[str, Any]:
+        """Book pages run through the same lore extraction as dialogue; the
+        passage stands in for the NPC reply and the source records the book."""
+        state = self.engine.state
+        author = record.llm_choices.get("author") if isinstance(record.llm_choices, dict) else None
+        title = record.title or book.name
+        return {
+            "npc": str(author or title),
+            "source": f"book:{title}",
+            "turn": state.turn,
+            "location": state.location_label(),
+            "zone": {"x": state.zone_x, "y": state.zone_y, "type": state.zone_type},
+            "message": "(the player reads a book)",
+            "reply": record.text,
+            "existing_lore": self.engine.promises_for_context(subject=title, tags=book.tags, limit=5, text_limit=160),
+        }
+
+    def _investigate(
+        self,
+        target: str,
+        replay_canon: dict[str, Any] | None = None,
+    ) -> tuple[bool, bool, dict[str, Any] | None, list[str]]:
+        """Knowledge-gated secret search. The engine owns whether a secret
+        exists (RoomProfile secret slots placed at generation), what anchors
+        it, and what the reward is; the LLM only words the clue. Stages:
+        sweep finds the clue, investigating the clued anchor opens it."""
+        room = self.engine.room_profile_at(self.engine.state.player.x, self.engine.state.player.y)
+        if room is None:
+            return False, False, None, ["There is no coherent place here to investigate."]
+        slot = next((s for s in room.secret_slots if s.get("status") != "opened"), None)
+        if target:
+            return self._investigate_focused(room, slot, target, replay_canon)
+        return self._investigate_sweep(room, slot, replay_canon)
+
+    def _investigate_focused(
+        self,
+        room: Any,
+        slot: dict[str, Any] | None,
+        target: str,
+        replay_canon: dict[str, Any] | None = None,
+    ) -> tuple[bool, bool, dict[str, Any] | None, list[str] | None]:
+        """Targeted study of one named thing. Three outcomes: the clued anchor
+        opens (deterministic reveal, no provider); a matched visible entity gets
+        an LLM detail record; an unmatched name costs nothing."""
+        engine = self.engine
+        wanted = normalize_id(target)
+        anchor = normalize_id(str(slot.get("anchor") or "")) if slot is not None else ""
+        if (
+            slot is not None
+            and slot.get("status") == "clued"
+            and wanted
+            and anchor
+            and (wanted in anchor or anchor in wanted)
+        ):
+            return self._open_secret(room, slot)
+        entity = self._find_investigation_target(target)
+        if entity is None:
+            return False, False, None, [f"You see no '{target.strip()}' here to investigate."]
+        return self._investigate_entity(room, slot, entity, replay_canon)
+
+    def _open_secret(
+        self,
+        room: Any,
+        slot: dict[str, Any],
+    ) -> tuple[bool, bool, dict[str, Any] | None, list[str]]:
+        """Deterministic reveal — the engine chose the reward before the clue
+        was ever worded; no provider call happens here."""
+        engine = self.engine
+        reward = dict(slot.get("reward") or {})
+        name = str(reward.get("name") or "trinket")
+        quantity = max(1, int(reward.get("quantity") or 1))
+        engine.state.inventory[name] = engine.state.inventory.get(name, 0) + quantity
+        engine.state.stats.items_collected += 1
+        slot["status"] = "opened"
+        qty_text = f"{quantity} {name}" if quantity > 1 else name
+        text = (
+            f"Following the {slot.get('clue_style', 'marks')}, you work at "
+            f"{slot.get('anchor')} until it gives: {secret_kind_label(slot)}. "
+            f"Inside: {qty_text}."
+        )
+        record = engine.add_canon_record(
+            CanonRecord(
+                id=f"canon_secret_open_{normalize_id(str(slot.get('id')))}",
+                kind="investigation",
+                attachment={"kind": "room", "room_id": room.id, "secret_id": slot.get("id")},
+                text=text,
+                summary=f"Found {qty_text} in {secret_kind_label(slot)}.",
+                tags=sorted({"investigation", "secret", *list(room.tags)[:3]}),
+                source="engine",
+                seed_packet={"secret_id": slot.get("id"), "room_id": room.id},
+                engine_choices={"secret_id": slot.get("id"), "reward": reward, "anchor": slot.get("anchor")},
+                turn_created=engine.state.turn,
+            )
+        )
+        self._canon_apply_buffer.append(record.to_dict())
+        engine.state.add_message(text)
+        engine.finish_player_turn()
+        return True, False, {"record": record.to_dict(), "engine": True}, [text]
+
+    def _find_investigation_target(self, target: str) -> Any | None:
+        """Resolve a visible prop, item, NPC, or creature by entity id (exact,
+        as the UI buttons send) or by name fragment, nearest first."""
+        engine = self.engine
+        player = engine.state.player
+        wanted = normalize_id(target)
+        if not wanted:
+            return None
+        candidates = []
+        for entity in engine.state.entities.values():
+            if entity.id == engine.state.player_id or entity.kind not in {"prop", "item", "npc", "actor"}:
+                continue
+            if entity.kind == "actor" and not entity.alive:
+                continue
+            if not engine.is_visible(entity.x, entity.y):
+                continue
+            if normalize_id(entity.id) == wanted:
+                return entity
+            if wanted in normalize_id(entity.name):
+                distance = max(abs(entity.x - player.x), abs(entity.y - player.y))
+                candidates.append((distance, entity.id, entity))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item[:2])
+        return candidates[0][2]
+
+    def _investigate_entity(
+        self,
+        room: Any,
+        slot: dict[str, Any] | None,
+        entity: Any,
+        replay_canon: dict[str, Any] | None,
+    ) -> tuple[bool, bool, dict[str, Any] | None, list[str]]:
+        """LLM detail study of one entity. Two record tiers: a look from afar
+        and a close study; close supersedes far, and a far record never blocks
+        earning the close one by walking up."""
+        engine = self.engine
+        state = engine.state
+        player = state.player
+        distance = max(abs(entity.x - player.x), abs(entity.y - player.y))
+        adjacent = distance <= 1
+        band = "adjacent" if adjacent else ("near" if distance <= 4 else "across the room")
+        close_id = f"canon_detail_{normalize_id(entity.id)}_close"
+        far_id = f"canon_detail_{normalize_id(entity.id)}_far"
+        record_id = close_id if adjacent else far_id
+
+        # Best existing knowledge serves free: close always, far for far looks.
+        best = state.canon_records.get(close_id)
+        if best is None and not adjacent:
+            best = state.canon_records.get(far_id)
+        if best is not None:
+            return True, False, {"record": best.to_dict(), "reused": True}, self._present_canon(best)
+
+        # Adjacent study of the prop anchoring a hidden secret surfaces the clue.
+        secret_here = (
+            adjacent
+            and slot is not None
+            and not slot.get("status")
+            and entity.kind == "prop"
+        )
+        if secret_here:
+            rng = random.Random(stable_seed(state.rng_seed, "secret_choices", str(slot.get("id"))))
+            props = [
+                e for e in state.entities.values()
+                if e.kind == "prop" and room is not None and room.contains(e.x, e.y)
+            ]
+            slot.setdefault("anchor", choose_anchor(slot, props, rng))
+            slot.setdefault("reward", choose_reward(slot, rng))
+            secret_here = normalize_id(str(slot.get("anchor"))) == normalize_id(entity.name)
+
+        existing = state.canon_records.get(record_id)
+        replayed = False
+        if existing is None and replay_canon is not None:
+            self.apply_recorded_canon(replay_canon.get("after"))
+            existing = state.canon_records.get(record_id)
+            replayed = existing is not None
+            failure = replay_canon.get("materialization")
+            if existing is None and isinstance(failure, dict) and failure.get("technical_failure"):
+                return False, True, failure, [f"You can make nothing more of it. ({failure.get('error')})"]
+        if existing is not None:
+            if secret_here:
+                slot["status"] = "clued"
+                slot["clue_record"] = record_id
+            if replayed:
+                state.add_message(f"You study {entity.name}.")
+                engine.finish_player_turn()
+                return True, False, {"record": existing.to_dict(), "replayed": True}, self._present_canon(existing)
+            return True, False, {"record": existing.to_dict(), "reused": True}, self._present_canon(existing)
+
+        context = self._canon_context_for_entity(room, slot if secret_here else None, entity, band, record_id)
+        resolution = resolve_canon(self.canon_provider, context)
+        self.canon_provider_label = resolution.provider_name
+        canon_record = {
+            "kind": context["kind"],
+            "provider": resolution.provider_name,
+            "technical_failure": resolution.technical_failure,
+            "error": resolution.error,
+            "record": resolution.record.to_dict() if resolution.record else None,
+            "raw_response": resolution.raw_response,
+            "audit_path": resolution.audit_path,
+        }
+        if resolution.technical_failure or resolution.record is None:
+            return False, True, canon_record, [f"You can make nothing more of it. ({resolution.error})"]
+        applied = engine.add_canon_record(resolution.record)
+        self._canon_apply_buffer.append(applied.to_dict())
+        if secret_here:
+            slot["status"] = "clued"
+            slot["clue_record"] = record_id
+        state.add_message(f"You study {entity.name}.")
+        engine.finish_player_turn()
+        if entity.kind == "npc" and not self.replay_mode:
+            quota = int(context.get("contract", {}).get("claim_quota") or 0)
+            if quota > 0:
+                self._enqueue_lore_extraction(
+                    self._lore_context_for_detail(entity, applied),
+                    canon_record,
+                    claim_quota=quota,
+                )
+        return True, False, canon_record, self._present_canon(applied)
+
+    def _canon_context_for_entity(
+        self,
+        room: Any,
+        secret_slot: dict[str, Any] | None,
+        entity: Any,
+        band: str,
+        record_id: str,
+    ) -> dict[str, Any]:
+        engine = self.engine
+        state = engine.state
+        kind = {"prop": "object_detail", "item": "object_detail", "npc": "npc_detail"}.get(entity.kind, "creature_detail")
+        subject: dict[str, Any] = {
+            "name": entity.name,
+            "entity_kind": entity.kind,
+            "tags": sorted(entity.tags),
+            "material": entity.material,
+            "current_description": entity.description,
+            "distance_band": band,
+            "attachment": {"kind": "entity", "entity_id": entity.id},
+        }
+        engine_choices: dict[str, Any] = {"mechanical_effect": "none", "turn_cost": 1, "distance_band": band}
+        claim_quota = 0
+        if entity.kind == "npc":
+            profile = state.npc_profiles.get(entity.id)
+            if profile is not None:
+                subject["person"] = {
+                    "role": profile.role,
+                    "appearance": profile.appearance,
+                    "traits": list(profile.traits),
+                    "wares": sorted(profile.wares) if band == "adjacent" else [],
+                }
+            claim_quota = 1
+        elif entity.kind == "actor":
+            rng = random.Random(stable_seed(state.rng_seed, "weakness_hint", entity.id, record_id))
+            engine_choices["weakness_hint"] = choose_weakness_hint(entity, rng)
+            subject["creature"] = {
+                "faction": entity.faction,
+                "statuses": sorted(entity.statuses),
+            }
+        if secret_slot is not None:
+            engine_choices.update(
+                {
+                    "secret_present": True,
+                    "secret_kind": secret_slot.get("kind"),
+                    "clue_style": secret_slot.get("clue_style"),
+                    "anchor_name": secret_slot.get("anchor"),
+                    "reward_name": (secret_slot.get("reward") or {}).get("name"),
+                }
+            )
+        room_tags = list(room.tags) if room is not None else []
+        thread_tags = sorted({*entity.tags, *room_tags})
+        base_tags = sorted({*[normalize_id(t) for t in entity.tags if t], kind})
+        return {
+            "record_id": record_id,
+            "kind": kind,
+            "source": "ondemand",
+            "turn": state.turn,
+            "world": {
+                "location": state.location_label(),
+                "region": engine.region.prompt_style(),
+                "scenario": state.scenario,
+                "depth": state.depth,
+                "zone": {"x": state.zone_x, "y": state.zone_y, "type": state.zone_type},
+            },
+            "place": {"room": room.to_public_dict() if room is not None else None},
+            "subject": subject,
+            "threads": {
+                "canon": engine.nearby_canon_records(tags=thread_tags, limit=3),
+                "promises": [
+                    promise.to_dict()
+                    for promise in state.promises
+                    if set(promise.tags) & set(thread_tags)
+                ][:2],
+            },
+            "contract": {
+                "allowed_outputs": ["title", "summary", "text", "tags", "llm_choices"],
+                "claim_quota": claim_quota,
+                "forbidden": [
+                    "inventing secrets or rewards",
+                    "stats or numbers",
+                    "new items",
+                    "exits",
+                    "map changes",
+                    "details that require touch when distance_band is not adjacent",
+                ],
+            },
+            "base_tags": base_tags,
+            "allowed_tags": sorted({*base_tags, *[normalize_id(t) for t in thread_tags if t], "secret"}),
+            "engine_choices": engine_choices,
+        }
+
+    def _lore_context_for_detail(self, entity: Any, record: Any) -> dict[str, Any]:
+        state = self.engine.state
+        return {
+            "npc": entity.name,
+            "source": f"observation:{entity.name}",
+            "turn": state.turn,
+            "location": state.location_label(),
+            "zone": {"x": state.zone_x, "y": state.zone_y, "type": state.zone_type},
+            "message": "(the player studies them closely)",
+            "reply": record.text,
+            "existing_lore": self.engine.promises_for_context(subject=entity.name, tags=entity.tags, limit=5, text_limit=160),
+        }
+
+    def _investigate_sweep(
+        self,
+        room: Any,
+        slot: dict[str, Any] | None,
+        replay_canon: dict[str, Any] | None,
+    ) -> tuple[bool, bool, dict[str, Any] | None, list[str]]:
+        engine = self.engine
+        state = engine.state
+        if slot is not None and slot.get("status") == "clued":
+            clue = state.canon_records.get(str(slot.get("clue_record") or ""))
+            if clue is not None:
+                return True, False, {"record": clue.to_dict(), "reused": True}, self._present_canon(clue)
+        if slot is not None and not slot.get("status"):
+            return self._investigate_clue_stage(room, slot, replay_canon)
+        return self._investigate_plain_stage(room, replay_canon)
+
+    def _investigate_clue_stage(
+        self,
+        room: Any,
+        slot: dict[str, Any],
+        replay_canon: dict[str, Any] | None,
+    ) -> tuple[bool, bool, dict[str, Any] | None, list[str]]:
+        engine = self.engine
+        state = engine.state
+        record_id = f"canon_secret_clue_{normalize_id(str(slot.get('id')))}"
+        # Engine choices are fixed before any prompt is built, deterministically
+        # from the run seed and slot id — replay-safe and provider-independent.
+        rng = random.Random(stable_seed(state.rng_seed, "secret_choices", str(slot.get("id"))))
+        props = [e for e in state.entities.values() if e.kind == "prop" and room.contains(e.x, e.y)]
+        slot.setdefault("anchor", choose_anchor(slot, props, rng))
+        slot.setdefault("reward", choose_reward(slot, rng))
+
+        existing = state.canon_records.get(record_id)
+        replayed = False
+        if existing is None and replay_canon is not None:
+            self.apply_recorded_canon(replay_canon.get("after"))
+            existing = state.canon_records.get(record_id)
+            replayed = existing is not None
+            failure = replay_canon.get("materialization")
+            if existing is None and isinstance(failure, dict) and failure.get("technical_failure"):
+                return False, True, failure, [f"Nothing here holds your attention. ({failure.get('error')})"]
+        if existing is not None:
+            slot["status"] = "clued"
+            slot["clue_record"] = record_id
+            if replayed:
+                self._consume_investigation_turns(room, slot)
+                return True, False, {"record": existing.to_dict(), "replayed": True}, self._present_canon(existing)
+            return True, False, {"record": existing.to_dict(), "reused": True}, self._present_canon(existing)
+
+        context = self._canon_context_for_investigation(room, slot, record_id)
+        resolution = resolve_canon(self.canon_provider, context)
+        self.canon_provider_label = resolution.provider_name
+        canon_record = {
+            "kind": "investigation",
+            "provider": resolution.provider_name,
+            "technical_failure": resolution.technical_failure,
+            "error": resolution.error,
+            "record": resolution.record.to_dict() if resolution.record else None,
+            "raw_response": resolution.raw_response,
+            "audit_path": resolution.audit_path,
+        }
+        if resolution.technical_failure or resolution.record is None:
+            return False, True, canon_record, [f"Nothing here holds your attention. ({resolution.error})"]
+        applied = engine.add_canon_record(resolution.record)
+        self._canon_apply_buffer.append(applied.to_dict())
+        slot["status"] = "clued"
+        slot["clue_record"] = record_id
+        self._consume_investigation_turns(room, slot)
+        return True, False, canon_record, self._present_canon(applied)
+
+    def _investigate_plain_stage(
+        self,
+        room: Any,
+        replay_canon: dict[str, Any] | None,
+    ) -> tuple[bool, bool, dict[str, Any] | None, list[str]]:
+        """No live secret here (none placed, or already opened). The model gets
+        secret_present=false and can only describe — by construction nothing
+        mechanical can come of it."""
+        engine = self.engine
+        state = engine.state
+        record_id = f"canon_invest_{normalize_id(room.id)}"
+        existing = state.canon_records.get(record_id)
+        replayed = False
+        if existing is None and replay_canon is not None:
+            self.apply_recorded_canon(replay_canon.get("after"))
+            existing = state.canon_records.get(record_id)
+            replayed = existing is not None
+            failure = replay_canon.get("materialization")
+            if existing is None and isinstance(failure, dict) and failure.get("technical_failure"):
+                return False, True, failure, [f"Nothing here holds your attention. ({failure.get('error')})"]
+        if existing is not None:
+            if replayed:
+                state.add_message(f"You search the {room.room_type} from corner to corner.")
+                self._spawn_sweep_decoration(existing)
+                engine.finish_player_turn()
+                return True, False, {"record": existing.to_dict(), "replayed": True}, self._present_canon(existing)
+            return True, False, {"record": existing.to_dict(), "reused": True}, self._present_canon(existing)
+
+        context = self._canon_context_for_investigation(room, None, record_id)
+        resolution = resolve_canon(self.canon_provider, context)
+        self.canon_provider_label = resolution.provider_name
+        canon_record = {
+            "kind": "investigation",
+            "provider": resolution.provider_name,
+            "technical_failure": resolution.technical_failure,
+            "error": resolution.error,
+            "record": resolution.record.to_dict() if resolution.record else None,
+            "raw_response": resolution.raw_response,
+            "audit_path": resolution.audit_path,
+        }
+        if resolution.technical_failure or resolution.record is None:
+            return False, True, canon_record, [f"Nothing here holds your attention. ({resolution.error})"]
+        applied = engine.add_canon_record(resolution.record)
+        self._canon_apply_buffer.append(applied.to_dict())
+        state.add_message(f"You search the {room.room_type} from corner to corner.")
+        self._spawn_sweep_decoration(applied)
+        engine.finish_player_turn()
+        return True, False, canon_record, self._present_canon(applied)
+
+    def _decoration_spot(self, room: Any, rng: random.Random) -> tuple[int, int] | None:
+        candidates = [
+            (x, y)
+            for y in range(room.y + 1, room.y + room.h - 1)
+            for x in range(room.x + 1, room.x + room.w - 1)
+            if self.engine.in_bounds(x, y) and self.engine.can_occupy(x, y)
+        ]
+        if not candidates:
+            return None
+        rng.shuffle(candidates)
+        return candidates[0]
+
+    def _spawn_sweep_decoration(self, record: Any) -> None:
+        """Surface the LLM's chosen decoration on the map — engine-validated
+        against the menu it offered, idempotent across reuse and replay."""
+        choices = record.llm_choices if isinstance(record.llm_choices, dict) else {}
+        engine_choices = record.engine_choices if isinstance(record.engine_choices, dict) else {}
+        template = normalize_id(str(choices.get("decoration_template") or ""))
+        allowed = {
+            normalize_id(str(option.get("template") or ""))
+            for option in engine_choices.get("decoration_options", [])
+            if isinstance(option, dict)
+        }
+        spot = engine_choices.get("decoration_spot")
+        if not template or template not in allowed or not isinstance(spot, list) or len(spot) != 2:
+            return
+        flag_key = f"decoration_{record.id}"
+        if self.engine.state.flags.get(flag_key):
+            return
+        prop = self.engine.spawn_prop(template, int(spot[0]), int(spot[1]))
+        if prop is None:
+            return
+        name = str(choices.get("decoration_name") or "").strip()
+        description = str(choices.get("decoration_description") or "").strip()
+        if name:
+            prop.name = name
+        if description:
+            prop.description = description
+        self.engine.state.flags[flag_key] = True
+        self.engine.state.add_message(f"Your search uncovers {prop.name}.")
+
+    def _consume_investigation_turns(self, room: Any, slot: dict[str, Any]) -> None:
+        turns = slot_turn_cost(slot)
+        plural = "s" if turns > 1 else ""
+        self.engine.state.add_message(
+            f"You spend {turns} turn{plural} searching the {room.room_type}; the world does not wait."
+        )
+        for _ in range(turns):
+            self.engine.finish_player_turn()
+
+    def _canon_context_for_investigation(
+        self,
+        room: Any,
+        slot: dict[str, Any] | None,
+        record_id: str,
+    ) -> dict[str, Any]:
+        context = self._canon_context_for_room(room, record_id)
+        context["kind"] = "investigation"
+        context["base_tags"] = sorted(
+            {tag for tag in context["base_tags"] if tag != "room_flavor"} | {"investigation"}
+        )
+        context["allowed_tags"] = sorted({*context["allowed_tags"], "investigation", "secret"})
+        if slot is None:
+            context["engine_choices"] = {
+                "secret_present": False,
+                "mechanical_effect": "none",
+                "turn_cost": 1,
+            }
+            # A secretless sweep may still develop the room: the engine offers a
+            # menu of fitting non-blocking props and a validated tile; the LLM
+            # may surface ONE of them as something the search turns up.
+            deco_rng = random.Random(stable_seed(self.engine.state.rng_seed, "sweep_decoration", room.id))
+            options = decoration_menu(list(room.tags), deco_rng)
+            spot = self._decoration_spot(room, deco_rng)
+            if options and spot is not None:
+                context["engine_choices"]["decoration_options"] = options
+                context["engine_private"] = {"decoration_spot": [spot[0], spot[1]]}
+                context["contract"]["allowed_outputs"] = [
+                    *context["contract"]["allowed_outputs"],
+                    "llm_choices.decoration_template (one of decoration_options)",
+                    "llm_choices.decoration_name",
+                    "llm_choices.decoration_description",
+                ]
+        else:
+            context["engine_choices"] = {
+                "secret_present": True,
+                "secret_kind": slot.get("kind"),
+                "clue_style": slot.get("clue_style"),
+                "anchor_name": slot.get("anchor"),
+                "reveal_difficulty": slot.get("reveal_difficulty"),
+                "reward_name": (slot.get("reward") or {}).get("name"),
+                "turn_cost": slot_turn_cost(slot),
+            }
+        context["contract"] = {
+            "allowed_outputs": ["title", "summary", "text", "tags", "llm_choices"],
+            "claim_quota": 0,
+            "forbidden": [
+                "inventing secrets or rewards",
+                "stating what is hidden or where",
+                "treasure not named in engine_choices",
+                "exits",
+                "enemies",
+                "stats",
+                "map changes",
+            ],
+        }
+        return context
 
     def _move(self, direction: str) -> bool:
         if direction not in DIRECTIONS:
@@ -526,7 +1411,12 @@ class GameSession:
             self._enqueue_lore_extraction(lore_context, dialogue_record)
         return True, False, dialogue_record
 
-    def _enqueue_lore_extraction(self, context: dict[str, Any], dialogue_record: dict[str, Any]) -> None:
+    def _enqueue_lore_extraction(
+        self,
+        context: dict[str, Any],
+        dialogue_record: dict[str, Any],
+        claim_quota: int | None = None,
+    ) -> None:
         if not lore_enabled():
             dialogue_record["lore"] = {"enabled": False, "promises": []}
             return
@@ -541,19 +1431,23 @@ class GameSession:
         if self._lore_executor is None:
             self._lore_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         future = self._lore_executor.submit(resolve_lore_extraction, self.lore_provider, context)
-        self._pending_lore.append((future, dialogue_record))
+        self._pending_lore.append((future, dialogue_record, claim_quota))
 
     def drain_lore(self, block: bool = False) -> None:
-        remaining: list[tuple[concurrent.futures.Future[LoreExtractionResolution], dict[str, Any]]] = []
-        for future, dialogue_record in self._pending_lore:
+        remaining: list[tuple[concurrent.futures.Future[LoreExtractionResolution], dict[str, Any], int | None]] = []
+        for future, dialogue_record, claim_quota in self._pending_lore:
             if not block and not future.done():
-                remaining.append((future, dialogue_record))
+                remaining.append((future, dialogue_record, claim_quota))
                 continue
             try:
                 resolution = future.result()
             except Exception as exc:
                 resolution = LoreExtractionResolution([], True, str(exc), self.lore_provider_label)
             self.lore_provider_label = resolution.provider_name
+            # CONTRACT enforcement: claim quotas are clamped here, not negotiated
+            # in the prompt — extra claims are dropped before they can bind.
+            if claim_quota is not None and len(resolution.promises) > claim_quota:
+                resolution.promises = resolution.promises[:claim_quota]
             # Snapshot the extraction outputs before add_promises mutates them (binding,
             # merging) so the replay record carries the apply-point inputs.
             self._promise_apply_buffer.extend(promise.to_dict() for promise in resolution.promises)
@@ -624,8 +1518,20 @@ class GameSession:
         applied, self._flesh_apply_buffer = self._flesh_apply_buffer, []
         return applied
 
+    def apply_recorded_canon(self, raw_records: list[dict[str, Any]] | None) -> None:
+        """Inject materialized canon recorded at this apply point in a live run."""
+        for raw in raw_records or []:
+            if not isinstance(raw, dict):
+                continue
+            record = self.engine.add_canon_record(CanonRecord.from_dict(raw))
+            self._canon_apply_buffer.append(record.to_dict())
+
+    def _pop_applied_canon(self) -> list[dict[str, Any]]:
+        applied, self._canon_apply_buffer = self._canon_apply_buffer, []
+        return applied
+
     def close(self) -> None:
-        for future, _dialogue_record in self._pending_lore:
+        for future, _dialogue_record, _claim_quota in self._pending_lore:
             future.cancel()
         self._pending_lore.clear()
         for future, _promise_id in self._pending_flesh:
@@ -668,11 +1574,14 @@ class GameSession:
         # attach to; replay injects them after the action loop, before the final summary.
         final_promises = self._pop_applied_promises()
         final_flesh = self._pop_applied_flesh()
+        final_canon = self._pop_applied_canon()
         return {
             "version": 3,
             "final_promises": final_promises,
             "final_flesh": final_flesh,
+            "final_canon": final_canon,
             "flesh_provider": self.flesh_provider_label,
+            "canon_provider": self.canon_provider_label,
             "seed": self.seed,
             "scenario": self.scenario,
             "provider": self.provider_label,
@@ -702,7 +1611,9 @@ def command_argument(command: str, tokens: list[str]) -> str:
 
 def command_help() -> list[str]:
     return [
-        "Commands: move north/south/east/west, open, descend, ascend, wait, cast <spell>, talk <message>, use <item>, equip <item>, unequip <slot>, drop <item>, pickup, inspect (or inventory), journal (or rumors), wares (or browse), quit.",
+        "Commands: move north/south/east/west, open, descend, ascend, wait, cast <spell>, talk <message>, examine, read [book], use <item>, equip <item>, unequip <slot>, drop <item>, pickup, inspect (or inventory), journal (or rumors), wares (or browse), quit.",
+        "Reading: stand on or next to a book and 'read' (or 'read <name>' to pick one). The first reading takes a turn and fixes the book's title and pages forever; rereading is free. What books claim about the world is hearsay - but the world has a way of honoring what gets written down.",
+        "Investigating: 'investigate' (or 'search') studies the room - it costs 1-3 turns while the world keeps moving, and what you learn is permanent. If something here is hidden, careful search turns up a clue; investigate the thing the clue points at ('investigate <name>') to see what it was protecting.",
         "Journal: 'journal' lists everything the world has told you - rumors heard, claims corroborated, places found true - with a rough direction when one was given. Free, costs no turn.",
         "Talking: stand next to an NPC and 'talk <what you want to say>' (or 'speak'/'say') to start a conversation - it costs a turn, just like any other action.",
         "Trading: some NPCs deal in goods and gold - 'wares' (or 'browse') lists what they have for trade, a free look. Haggle naturally through 'talk' - if a real offer comes together, you'll get a confirmation prompt to 'accept' (or 'yes') or 'reject' (or 'no') before anything changes hands.",
@@ -710,6 +1621,14 @@ def command_help() -> list[str]:
         "Standard spells (deterministic, no wild magic risk): spark, frost, heal, ward, reveal. Type the name directly, e.g. 'frost' -- 'cast frost' instead asks wild magic to improvise one.",
         "Short movement aliases also work: n, s, e, w. Walk into an enemy to attack it.",
     ]
+
+
+def _canon_display_lines(record: CanonRecord) -> list[str]:
+    lines = []
+    if record.title:
+        lines.append(record.title)
+    lines.append(record.text)
+    return lines
 
 
 def describe_journal(engine: GameEngine) -> list[str]:
@@ -841,7 +1760,7 @@ def summarize_state(engine: GameEngine) -> dict[str, Any]:
         "inventory": dict(sorted(state.inventory.items())),
         "flags": dict(sorted(state.flags.items())),
         "tile_counts": tile_counts(state.tiles),
-        "current_room": current_room.to_public_dict() if current_room else None,
+        "current_room": current_room.to_public_dict(include_secrets=True) if current_room else None,
         "visible_rooms": engine.visible_room_profiles(limit=8),
         "canon_records": [
             record.to_dict()

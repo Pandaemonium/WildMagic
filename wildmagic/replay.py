@@ -45,15 +45,20 @@ def run_replay(path: Path) -> ReplayResult:
             # Promises are injected at the recorded apply point (the command boundary
             # where the background lore drain landed), so zones generated between the
             # dialogue and the drain see the same reservations as the live run.
+            canon_replay = action.get("canon")
+            if canon_replay is None and action.get("action") in {"examine", "read", "investigate"} and action.get("canon_materialization"):
+                canon_replay = {"materialization": action.get("canon_materialization")}
             session.execute_command(
                 str(action.get("command") or ""),
                 replay_wild_magic=action.get("wild_magic"),
                 replay_dialogue=action.get("dialogue"),
                 replay_promises=action.get("promises"),
                 replay_flesh=action.get("flesh"),
+                replay_canon=canon_replay,
             )
         session.apply_recorded_promises(data.get("final_promises"))
         session.apply_recorded_flesh(data.get("final_flesh"))
+        session.apply_recorded_canon(data.get("final_canon"))
         final_summary = summarize_state(session.engine)
     finally:
         session.close()

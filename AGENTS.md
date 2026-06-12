@@ -64,6 +64,7 @@ Examples to avoid:
 - `wildmagic/replay.py`: deterministic replay runner.
 - `docs/ARCHITECTURE.md`: full map of every module — what it contains, what it imports, and how the layers fit together. Read this first when orienting to the codebase.
 - `docs/WILD_MAGIC_SCHEMA.md`: current wild-magic operation surface.
+- `docs/MODEL_CONFIG.md`: model/provider configuration — every supported environment variable, per-purpose scoping, Ollama server setup on different hardware, and troubleshooting.
 - `docs/AGENT_PLAYTESTING.md`: practical playtesting guide.
 - `docs/EXECUTION_PLAN.md`: staged project plan.
 - `docs/AESTHETICS_AND_TONE.md`: North star document for content creation aesthetics.
@@ -107,6 +108,8 @@ $env:WILDMAGIC_MODEL='qwen3:8b'
 $env:WILDMAGIC_OLLAMA_TIMEOUT='240'
 python -m wildmagic.cli --provider ollama --scenario test_chamber --seed 7
 ```
+
+See `docs/MODEL_CONFIG.md` for all model/provider environment variables, per-purpose scoping, and GPU troubleshooting.
 
 Compile check:
 

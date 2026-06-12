@@ -50,8 +50,14 @@ Implementation note (June 2026): the first foundation slice is live. `RoomProfil
 semantic labels now exist in engine state and are emitted for dungeon rooms, Hollowmere
 buildings, generated town buildings, frontier structures, and realized promise sites;
 labels feed `context_for_llm`, headless inspect, UI tooltips, and prop theming. The
-`CanonRecord` data model and retrieval hooks also exist, ready for materialization
-providers to write canonical generated text.
+`CanonRecord` data model and retrieval hooks also exist. Realized promise sites now write
+site, keeper, and flesh-prop canon records, so future materialization prompts can
+retrieve the story a place was built to honor. The first on-demand materializer is also
+live: `examine` creates a canonical `room_flavor` record for the current labeled room,
+audits the provider call, records replay apply points, costs a turn only on valid new
+materialization, and reuses the same record thereafter. On-demand canon has its own
+config purpose (`canon`) routed URGENT — the GPU-resident main model — per decision 5;
+the lore/flesh extraction channel stays BACKGROUND/CPU.
 
 ## The principle
 
@@ -301,21 +307,56 @@ no compatibility shims with dual authority.
 - **R1 — Room semantic labels.** *Initial implementation live:* `generation.py` emits typed room labels with topics,
   era, condition, secret_slots. Exit: labels visible in debug inspect; spell_anchors and
   region prompts consume them.
-- **R2 — Canon store.** *Data model and retrieval hooks live:* `CanonRecord`, retrieval-by-tags,
-  and replay-summary visibility exist; materialization apply-point replay and audit file
-  remain in this milestone. Exit: flesh writes canon records for realized promises
-  (single writer).
-- **R3 — Books end-to-end.** Tiering, seed packets, background title pass, on-demand
-  read (blocking), `lore.py` extraction with claim quota. Exit: a book in a labeled
-  library references an active promise in a fresh run; another book can seed a new
-  promise candidate; reread is identical.
+- **R2 — Canon store.** *First writers live:* `CanonRecord`, retrieval-by-tags, replay-summary
+  visibility, realized-promise canon writing, on-demand room-flavor materialization,
+  materialization apply-point replay, and `canon_audit.jsonl` exist. Remaining exit
+  check: flesh and `examine` canon both survive save/replay in longer mixed-provider
+  playtests.
+- **R3 — Books end-to-end.** *First playable slice live (June 2026):* grammar-tier book
+  props (`texture.py`) place deterministically in rooms labeled with books/lore/paper
+  across dungeon, open-zone, LLM-town, and Hollowmere generation; `read` materializes
+  title, author, and excerpt pages on the urgent channel through the shared canon layer
+  (turn cost on first valid read, free reread, failure costs nothing, replay-safe); the
+  materialized title becomes the book's in-world name; pages run through `lore.py`
+  extraction with the CONTRACT claim quota (2) clamped at the drain, and claims carry
+  `source="book:<title>"`. Live-verified on GPU (June 2026): a fresh-run book wove an
+  active chapel promise from THREADS into its excerpt as the author's hearsay; reads
+  run ~10s on the urgent channel at canon temperature 0.85 (titles/authors vary across
+  packets). Remaining for R3 exit: the background title prewarm pass (today titles
+  materialize on read; the R6 saturation queue is its natural home).
 - **R4 — NPC appearance.** *Done (pulled forward — it needed no canon store):*
   appearance fields ride the existing towngen and flesh calls; tooltip + dialogue
   integration. Remaining exit check: a promise-bound keeper's generated appearance
   references their promise in live play.
-- **R5 — Investigate.** Secret slots in generation, turn cost, slot-truth prompting,
-  engine-chosen rewards, clue canon. Exit: a hidden compartment found via clue→action; zero
-  secrets findable where `secret_present=false` across the eval corpus.
+- **R5 — Investigate.** *Live (June 2026):* `investigate`/`search` runs the
+  knowledge-gated loop — a sweep costs 1–3 turns (by `reveal_difficulty`, danger clock
+  running) and materializes either an honest no-secret deepening
+  (`secret_present=false`) or a clue worded by the LLM in the slot's `clue_style`
+  pointing at an engine-chosen anchor prop; `investigate <anchor>` then opens the
+  secret deterministically (no provider call) and delivers the engine-chosen reward
+  from tag-keyed tables (`secrets.py`). Clue and finding are canon (retell, never
+  reroll); failures cost no turn; full sequences replay. Secret slots no longer leak
+  into any LLM context (`to_public_dict` excludes them by default). Exit gates pass:
+  hidden compartment found via clue→anchor in live play, and the no-secret test
+  spam-investigates every prop without yielding loot. Remaining polish: richer reward
+  tables, multi-slot rooms, and clue leakage through books/NPC descriptions (THREADS
+  already supports it once clue canon carries shared tags).
+
+  *Extended (June 2026) — targeted investigation:* `investigate <entity>` (or the
+  inspect-tooltip's Investigate button, which sends the entity id) materializes
+  `object_detail`/`npc_detail`/`creature_detail` canon in two distance tiers —
+  far (silhouette and bearing) and close (texture and fine marks), close superseding
+  far. Creatures yield one engine-chosen weakness per study (`secrets.py`
+  `choose_weakness_hint`): a real mechanical weakness when one exists (the prose IS
+  the stat) or a tag-derived flavor weakness a wild spell can exploit. Adjacent study
+  of the prop anchoring a hidden slot surfaces the clue without a sweep. NPC details
+  may emit one lore claim (`source="observation:<name>"`). Secretless sweeps can
+  develop the room: the engine offers a menu of fitting non-blocking props plus a
+  validated tile (passed via `engine_private`, stripped from the prompt so
+  coordinates never leak into prose), and the LLM may surface one as a discovered
+  decoration — which then exists on the map as a spell anchor. Canon prose now reaches
+  the message log, so all of this is visible in the pygame UI, and the tooltip shows
+  learned detail summaries with Read/Investigate buttons per entity.
 - **R6 — Saturation queue.** Priority queue on the background channel unifying flesh,
   lore, and texture jobs. Exit: on a fresh map, all NPCs and top-salience props
   materialize within N turns of play without urgent-channel contention.

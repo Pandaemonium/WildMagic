@@ -261,7 +261,7 @@ def normalize_lore_promises(data: dict[str, Any], context: dict[str, Any]) -> li
                 kind=kind,
                 subject=subject,
                 text=text,
-                source=f"dialogue:{context.get('npc') or 'unknown'}",
+                source=str(context.get("source") or f"dialogue:{context.get('npc') or 'unknown'}"),
                 source_turn=int(context.get("turn") or 0),
                 origin_zone=origin_zone,
                 location=str(context.get("location") or "unknown"),

@@ -272,7 +272,7 @@ The user message may include promise_hooks: attributed world promises reserved f
 The building field for each NPC should match one of the building types you listed, or null if they are outdoors."""
 
 
-LORE_EXTRACTION_SYSTEM_PROMPT = """You extract persistent story material from one NPC dialogue exchange in a fantasy roguelike.
+LORE_EXTRACTION_SYSTEM_PROMPT = """You extract persistent story material from one NPC dialogue exchange - or one passage of in-world writing the player reads - in a fantasy roguelike.
 Return ONLY one JSON object, no markdown, no commentary, no <think> text.
 
 Shape:
@@ -322,3 +322,35 @@ You are given the rumor that promised this place (subject, text, tags) and its b
 Stay faithful to what was claimed - decorate the rumor, never contradict or replace it.
 You cannot change what the place is, where it is, or who must be there; the engine already decided. Words only.
 Be concrete and warm-blooded, not grandiose. No stats, no mechanics, no new locations, no new promises."""
+
+
+CANON_SYSTEM_PROMPT = """You materialize one piece of observed world canon for a fantasy roguelike about wild magic under a handsome, cold Empire.
+Return ONLY one JSON object, no markdown, no commentary, no <think> text.
+
+Shape:
+{
+  "title": "short evocative title",
+  "summary": "one sentence, 20-40 words",
+  "text": "one vivid paragraph, 80-150 words",
+  "tags": ["short_tag"],
+  "llm_choices": {"author": "for books: the writer's invented name (required)", "voice": "optional nonmechanical choice"}
+}
+
+The user message is a seed packet. Treat WORLD, PLACE, SUBJECT, and THREADS as facts and constraints, not suggestions.
+Describe the SUBJECT itself. THREADS are background the subject may echo or reference in passing - never what you describe instead of the subject.
+Write only sensory and interpretive detail. You may imply mood, age, use, neglect, local history, and connections to provided threads.
+When kind is "book": you are writing the book itself, not describing it. The reader is already holding it - give them its words.
+- title: the book's own printed title - particular, in-world, freshly invented from concrete nouns of the subject's topic. Vary the shape: a count of something, a complaint against something, a manual for something, a confession, a registry, a sermon. Never reuse the subject book's catalog description (its name field) as the title.
+- llm_choices.author: the author's invented name (required).
+- text: the book's actual contents, compressed to a few readable pages - 4 to 7 paragraphs, 300-600 words, paragraphs separated by blank lines. Write entirely in the author's voice and purpose: an argument made, events recounted, instructions given, sins confessed, entries logged. Let the author have opinions, blind spots, and a reason for writing. Begin mid-work if you like, as an excerpt of something longer.
+- NEVER describe the physical object - no bindings, stains, brittle pages, ink, thumbprints, or smells of the volume. That is the catalog's job. Words only, as printed.
+- Marginalia are welcome as bracketed lines in another hand, sparingly.
+- If THREADS carry rumors or promises, the author may treat them as hearsay worth recording - places, names, troubles - without proving or mapping anything.
+When kind is "room_flavor": title names the place; text describes the room as a whole - its air, light, arrangement, and what living in it must have been like. Mention objects in it (including books) in at most one clause each.
+When kind is "investigation": engine_choices carry the only truth about secrets. If secret_present is false, write what patient study honestly finds - material, age, craft, history - and never imply hidden treasure, compartments, or passages. If secret_present is true, write the search and exactly one concrete clue in the manner of clue_style pointing at anchor_name; do not state what is hidden, where the reward sits, or how to open it - the clue should make a careful reader want to investigate the anchor itself.
+If engine_choices include decoration_options, you may surface ONE as something the search turns up: set llm_choices.decoration_template to its exact template id, optionally llm_choices.decoration_name (a particular name for it) and llm_choices.decoration_description (one sensory sentence), and mention it in your text. If your text mentions any decoration option, you MUST set llm_choices.decoration_template to match; never describe an option you did not choose. Choose none if nothing fits.
+When kind is "object_detail", "npc_detail", or "creature_detail": describe the named SUBJECT at its distance_band - across the room or near, only what eyes catch (silhouette, glint, posture, movement); adjacent adds texture, smell, fine marks, wear. For people, what you observe should quietly agree with their role and history; never reveal thoughts or inventory. For creatures, engine_choices may carry weakness_hint: weave exactly that one vulnerability into the prose as observed behavior (the way it flinches from the brazier's light), never as game terms; if the hint has damage_type, express that element as the thing it fears. If secret_present is true (adjacent prop study), include the clue exactly as the investigation rule above describes.
+Do not invent treasure, exits, enemies, allies, quests, rewards, stats, spell effects, or map facts.
+Do not contradict the engine-owned facts. If THREADS mention rumors or promises, echo them as local texture rather than proving new mechanics.
+Keep tags short and grounded in the seed packet. No instructions, no rules text, no UI explanation.
+Never mention coordinates, positions, tile numbers, entity ids, or any other engine bookkeeping in your prose - the world has places, not numbers."""

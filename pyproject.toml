@@ -17,6 +17,9 @@ dev = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "full: long-running or provider-sensitive tests skipped by the default trim suite",
+]
 
 [tool.ruff.lint]
 ignore = [
