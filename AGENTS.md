@@ -34,6 +34,7 @@ Wild Magic should handle arbitrary inputs gracefully by growing general systems:
 - Use `pyproject.toml` as the authoritative Python project and dependency metadata file, following the applicable Python packaging standards. Keep it current when dependencies, supported Python versions, build configuration, or development tooling change.
 - `uv` is a supported dependency-management and execution workflow for this repository. Keep `uv.lock` current when using it, while avoiding parallel dependency manifests or undocumented installation paths.
 - Inspect impact, coupling, affected execution paths, and test coverage before and after architectural changes. Use available structural-analysis tools as evidence to verify against source, not as infallible truth.
+- Development workflow prefers forking, branching, and PRs into `Main`. Hotfixes and other reasons where a commit to `main` may be necessary should ensure that `ruff` and `pytest` are run manually. 
 
 Examples of good general work:
 
