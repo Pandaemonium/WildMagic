@@ -30,7 +30,9 @@ def score_binding_funnel(promise: WorldPromise) -> dict[str, Any]:
     }
 
 
-def run_lore_eval(input_path: Path, output_path: Path, provider_name: str, model: str | None) -> dict[str, Any]:
+def run_lore_eval(
+    input_path: Path, output_path: Path, provider_name: str, model: str | None
+) -> dict[str, Any]:
     data = json.loads(input_path.read_text(encoding="utf-8"))
     rows = data.get("rows") or []
     if provider_name == "mock":
@@ -55,7 +57,9 @@ def run_lore_eval(input_path: Path, output_path: Path, provider_name: str, model
         promise_rows = []
         for promise in resolution.promises:
             promise_dict = promise.to_dict()
-            promise_rows.append({"promise": promise_dict, "binding": score_binding_funnel(promise)})
+            promise_rows.append(
+                {"promise": promise_dict, "binding": score_binding_funnel(promise)}
+            )
         eval_rows.append(
             {
                 "source_model": row.get("model"),
@@ -101,9 +105,13 @@ def run_lore_eval(input_path: Path, output_path: Path, provider_name: str, model
         "funnel": {
             "promises": len(bindings),
             "usable_where": usable_where,
-            "usable_where_rate": round(usable_where / len(bindings), 3) if bindings else None,
+            "usable_where_rate": round(usable_where / len(bindings), 3)
+            if bindings
+            else None,
             "blueprint_matched": blueprint_matched,
-            "blueprint_match_rate": round(blueprint_matched / len(bindings), 3) if bindings else None,
+            "blueprint_match_rate": round(blueprint_matched / len(bindings), 3)
+            if bindings
+            else None,
             "bound": bound,
             "binding_rate": round(bound / len(bindings), 3) if bindings else None,
         },
@@ -111,13 +119,19 @@ def run_lore_eval(input_path: Path, output_path: Path, provider_name: str, model
         "rows": eval_rows,
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    output_path.write_text(
+        json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     return report
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Extract lore promises from saved dialogue eval logs.")
-    parser.add_argument("--input", default="logs/dialogue_eval/requested_models.json", type=Path)
+    parser = argparse.ArgumentParser(
+        description="Extract lore promises from saved dialogue eval logs."
+    )
+    parser.add_argument(
+        "--input", default="logs/dialogue_eval/requested_models.json", type=Path
+    )
     parser.add_argument("--output", default="logs/lore_eval/report.json", type=Path)
     parser.add_argument("--provider", choices=["mock", "ollama"], default="ollama")
     parser.add_argument("--model", default=None)
@@ -125,14 +139,18 @@ def main(argv: list[str] | None = None) -> int:
 
     report = run_lore_eval(args.input, args.output, args.provider, args.model)
     print(f"Read {report['dialogue_rows']} dialogue rows")
-    print(f"Extracted {report['promise_count']} promise(s); technical failures: {report['technical_failures']}")
+    print(
+        f"Extracted {report['promise_count']} promise(s); technical failures: {report['technical_failures']}"
+    )
     funnel = report["funnel"]
     print(
         f"Funnel: usable-where {funnel['usable_where']}/{funnel['promises']}"
         f" | blueprint {funnel['blueprint_matched']}/{funnel['promises']}"
         f" | bound {funnel['bound']}/{funnel['promises']}"
     )
-    print(f"Bound promises to review for false bindings: {len(report['bound_for_review'])}")
+    print(
+        f"Bound promises to review for false bindings: {len(report['bound_for_review'])}"
+    )
     print(f"Wrote {args.output}")
     return 0 if report["technical_failures"] == 0 else 1
 

@@ -20,7 +20,9 @@ class ReplayResult:
 
 def save_replay(session: GameSession, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(session.to_replay(), indent=2, sort_keys=True), encoding="utf-8")
+    path.write_text(
+        json.dumps(session.to_replay(), indent=2, sort_keys=True), encoding="utf-8"
+    )
 
 
 def load_replay(path: Path) -> dict[str, Any]:
@@ -31,7 +33,9 @@ def run_replay(path: Path) -> ReplayResult:
     data = load_replay(path)
     version = int(data.get("version") or 1)
     if version != 3:
-        raise ValueError(f"Unsupported replay version {version}; promise apply-point replays require version 3.")
+        raise ValueError(
+            f"Unsupported replay version {version}; promise apply-point replays require version 3."
+        )
     session = GameSession(
         seed=data.get("seed"),
         scenario=data.get("scenario", "dungeon"),
@@ -46,7 +50,11 @@ def run_replay(path: Path) -> ReplayResult:
             # where the background lore drain landed), so zones generated between the
             # dialogue and the drain see the same reservations as the live run.
             canon_replay = action.get("canon")
-            if canon_replay is None and action.get("action") in {"examine", "read", "investigate"} and action.get("canon_materialization"):
+            if (
+                canon_replay is None
+                and action.get("action") in {"examine", "read", "investigate"}
+                and action.get("canon_materialization")
+            ):
                 canon_replay = {"materialization": action.get("canon_materialization")}
             session.execute_command(
                 str(action.get("command") or ""),

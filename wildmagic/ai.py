@@ -27,7 +27,9 @@ class _AIMixin:
             return distance <= 1.5
         if distance <= 5:
             return True
-        if distance <= 11 and self.has_line_of_sight(observer.x, observer.y, target.x, target.y):
+        if distance <= 11 and self.has_line_of_sight(
+            observer.x, observer.y, target.x, target.y
+        ):
             return True
         return "marked" in target.statuses and distance <= 14
 
@@ -53,8 +55,10 @@ class _AIMixin:
         Falls back to `default` (the player) when nothing qualifies at all.
         """
         hostiles = [
-            other for other in self.state.entities.values()
-            if other.kind in {"player", "actor", "npc"} and self.is_hostile_to(actor, other)
+            other
+            for other in self.state.entities.values()
+            if other.kind in {"player", "actor", "npc"}
+            and self.is_hostile_to(actor, other)
         ]
         if not hostiles:
             return default
@@ -86,7 +90,11 @@ class _AIMixin:
         self._npc_perception_message_count = state.message_count
         if new_count <= 0:
             return
-        new_messages = state.messages[-new_count:] if new_count <= len(state.messages) else list(state.messages)
+        new_messages = (
+            state.messages[-new_count:]
+            if new_count <= len(state.messages)
+            else list(state.messages)
+        )
         witnessed = [m for m in new_messages if not m.startswith(("> ", "*> "))]
         if not witnessed:
             return
@@ -97,9 +105,15 @@ class _AIMixin:
             profile = self.state.npc_profiles.get(entity.id)
             if profile is None or not self.is_visible(entity.x, entity.y):
                 continue
-            if max(abs(entity.x - player.x), abs(entity.y - player.y)) > NPC_PERCEPTION_RADIUS:
+            if (
+                max(abs(entity.x - player.x), abs(entity.y - player.y))
+                > NPC_PERCEPTION_RADIUS
+            ):
                 continue
-            own_dialogue_prefixes = (f"You say to {entity.name}:", f"{entity.name} says:")
+            own_dialogue_prefixes = (
+                f"You say to {entity.name}:",
+                f"{entity.name} says:",
+            )
             for text in witnessed:
                 # An NPC's own exchange with the player already lives in profile.conversation
                 # (and is surfaced as recent_conversation) -- recording it again here would
@@ -190,8 +204,11 @@ class _AIMixin:
     def _try_enemy_summon(self, summoner: Entity) -> bool:
         """A summoner calls a minion of its own kind instead of moving. Returns True if it acted."""
         nearby_minions = [
-            e for e in self.living_enemies()
-            if e.id != summoner.id and "summoned" in e.tags and self.distance(summoner, e) <= 12
+            e
+            for e in self.living_enemies()
+            if e.id != summoner.id
+            and "summoned" in e.tags
+            and self.distance(summoner, e) <= 12
         ]
         if len(nearby_minions) >= 2 or self.rng.random() > 0.3:
             return False
@@ -200,15 +217,24 @@ class _AIMixin:
             return False
         name = self.rng.choice(self._SUMMONER_MINIONS)
         self.spawn_actor(
-            name, "w", x, y, hp=4, attack=2, defense=0,
-            faction="enemy", ai="simple", tags={"summoned", "conjured", "beast"},
+            name,
+            "w",
+            x,
+            y,
+            hp=4,
+            attack=2,
+            defense=0,
+            faction="enemy",
+            ai="simple",
+            tags={"summoned", "conjured", "beast"},
         )
         self.state.add_message(f"{summoner.name} calls forth {name}.")
         return True
 
     def _ally_turns(self) -> None:
         allies = [
-            e for e in self.state.entities.values()
+            e
+            for e in self.state.entities.values()
             if e.kind in {"actor", "npc"} and e.faction == "ally" and e.hp > 0
         ]
         for ally in allies:
@@ -244,7 +270,8 @@ class _AIMixin:
             if "ranged" in ally.tags:
                 ranged_range = 7
                 los_enemies = [
-                    e for e in enemies
+                    e
+                    for e in enemies
                     if self.distance(ally, e) <= ranged_range
                     and self.has_line_of_sight(ally.x, ally.y, e.x, e.y)
                 ]
@@ -275,14 +302,19 @@ class _AIMixin:
         in, their one instinct is to run. Reuses `_flee_step` (engine.py), the
         exact helper scavengers and frightened enemies already lean on."""
         for npc in [
-            e for e in self.state.entities.values()
+            e
+            for e in self.state.entities.values()
             if e.kind == "npc" and e.faction not in {"ally", "enemy"} and e.hp > 0
         ]:
-            if any(s in npc.statuses for s in ["stunned", "frozen", "rooted", "webbed"]):
+            if any(
+                s in npc.statuses for s in ["stunned", "frozen", "rooted", "webbed"]
+            ):
                 continue
             threats = [
-                e for e in self.state.entities.values()
-                if e.kind in {"actor", "player", "npc"} and e.hp > 0
+                e
+                for e in self.state.entities.values()
+                if e.kind in {"actor", "player", "npc"}
+                and e.hp > 0
                 and self.is_hostile_to(e, npc)
                 and self.distance(e, npc) <= 6
             ]
@@ -295,7 +327,6 @@ class _AIMixin:
                 self._apply_tile_entry(npc)
 
     _AURA_RE = re.compile(r"^aura_([a-z]+)(?:_(\d+))?$")
-
 
     def _process_entity_behaviors(self) -> None:
         """Process per-turn behavior tags on all living actors."""
@@ -310,31 +341,48 @@ class _AIMixin:
                 aura_type = m.group(1)
                 radius = int(m.group(2)) if m.group(2) else 2
                 nearby = [
-                    e for e in self.entities_in_radius(entity.x, entity.y, radius)
-                    if e.kind in {"actor", "player", "npc"} and e.hp > 0 and e.id != entity.id
+                    e
+                    for e in self.entities_in_radius(entity.x, entity.y, radius)
+                    if e.kind in {"actor", "player", "npc"}
+                    and e.hp > 0
+                    and e.id != entity.id
                 ]
-                offensive_targets, beneficial_targets = self._behavior_targets(entity, nearby)
+                offensive_targets, beneficial_targets = self._behavior_targets(
+                    entity, nearby
+                )
                 if aura_type in {"burn", "fire"}:
                     for t in offensive_targets:
-                        t.statuses["burning"] = max(status_duration(t.statuses.get("burning")), 2)
+                        t.statuses["burning"] = max(
+                            status_duration(t.statuses.get("burning")), 2
+                        )
                 elif aura_type in {"heal", "healing"}:
                     for t in beneficial_targets:
                         self.heal_entity(t, 1)
                 elif aura_type in {"fear", "dread"}:
                     for t in offensive_targets:
-                        t.statuses["frightened"] = max(status_duration(t.statuses.get("frightened")), 2)
+                        t.statuses["frightened"] = max(
+                            status_duration(t.statuses.get("frightened")), 2
+                        )
                 elif aura_type in {"slow", "sluggish", "weight"}:
                     for t in offensive_targets:
-                        t.statuses["slowed"] = max(status_duration(t.statuses.get("slowed")), 2)
+                        t.statuses["slowed"] = max(
+                            status_duration(t.statuses.get("slowed")), 2
+                        )
                 elif aura_type in {"poison", "toxic", "plague"}:
                     for t in offensive_targets:
-                        t.statuses["poisoned"] = max(status_duration(t.statuses.get("poisoned")), 3)
+                        t.statuses["poisoned"] = max(
+                            status_duration(t.statuses.get("poisoned")), 3
+                        )
                 elif aura_type in {"bleed", "bleeding", "wound"}:
                     for t in offensive_targets:
-                        t.statuses["bleeding"] = max(status_duration(t.statuses.get("bleeding")), 2)
+                        t.statuses["bleeding"] = max(
+                            status_duration(t.statuses.get("bleeding")), 2
+                        )
                 elif aura_type in {"reveal", "sight", "detect"}:
                     for t in nearby:
-                        t.statuses["revealed"] = max(status_duration(t.statuses.get("revealed")), 2)
+                        t.statuses["revealed"] = max(
+                            status_duration(t.statuses.get("revealed")), 2
+                        )
                 elif aura_type in {"mana", "arcane", "font"}:
                     dist = math.hypot(entity.x - player.x, entity.y - player.y)
                     if dist <= radius and player.mana < player.max_mana:
@@ -344,22 +392,36 @@ class _AIMixin:
                         self.damage_entity(t, 1, "arcane")
                 elif aura_type in {"confuse", "confusion"}:
                     for t in offensive_targets:
-                        t.statuses["confused"] = max(status_duration(t.statuses.get("confused")), 2)
+                        t.statuses["confused"] = max(
+                            status_duration(t.statuses.get("confused")), 2
+                        )
                 elif aura_type in {"berserk", "rage"}:
                     for t in beneficial_targets:
-                        t.statuses["berserk"] = max(status_duration(t.statuses.get("berserk")), 2)
+                        t.statuses["berserk"] = max(
+                            status_duration(t.statuses.get("berserk")), 2
+                        )
                 elif aura_type in {"regen", "regenerate"}:
                     for t in beneficial_targets:
                         self.heal_entity(t, 1)
 
-    def _behavior_targets(self, source: Entity, nearby: list[Entity]) -> tuple[list[Entity], list[Entity]]:
+    def _behavior_targets(
+        self, source: Entity, nearby: list[Entity]
+    ) -> tuple[list[Entity], list[Entity]]:
         player_side = {"ally", "player"}
         if source.faction == "enemy":
-            offensive = [e for e in nearby if e.faction in player_side or e.id == self.state.player_id]
+            offensive = [
+                e
+                for e in nearby
+                if e.faction in player_side or e.id == self.state.player_id
+            ]
             beneficial = [e for e in nearby if e.faction == "enemy"]
         elif source.faction in player_side or source.id == self.state.player_id:
             offensive = [e for e in nearby if e.faction == "enemy"]
-            beneficial = [e for e in nearby if e.faction in player_side or e.id == self.state.player_id]
+            beneficial = [
+                e
+                for e in nearby
+                if e.faction in player_side or e.id == self.state.player_id
+            ]
         else:
             offensive = nearby
             beneficial = [e for e in nearby if e.faction == source.faction]
@@ -368,7 +430,9 @@ class _AIMixin:
     def enemy_can_sense_player(self, enemy: Entity) -> bool:
         return self.can_sense(enemy)
 
-    def next_path_step(self, entity: Entity, goal_x: int, goal_y: int) -> tuple[int, int] | None:
+    def next_path_step(
+        self, entity: Entity, goal_x: int, goal_y: int
+    ) -> tuple[int, int] | None:
         start = (entity.x, entity.y)
         goal = (goal_x, goal_y)
         queue: deque[tuple[int, int]] = deque([start])
@@ -387,14 +451,24 @@ class _AIMixin:
         current = goal
         while came_from[current] is not None and came_from[current] != start:
             current = came_from[current]  # type: ignore[index]
-        if current == goal and self.blocking_entity_at(goal_x, goal_y) is self.state.player:
+        if (
+            current == goal
+            and self.blocking_entity_at(goal_x, goal_y) is self.state.player
+        ):
             return None
         if current == start:
             return None
         return current
 
-    def _flee_step(self, entity: Entity, from_x: int, from_y: int) -> tuple[int, int] | None:
-        neighbors = [(entity.x + 1, entity.y), (entity.x - 1, entity.y), (entity.x, entity.y + 1), (entity.x, entity.y - 1)]
+    def _flee_step(
+        self, entity: Entity, from_x: int, from_y: int
+    ) -> tuple[int, int] | None:
+        neighbors = [
+            (entity.x + 1, entity.y),
+            (entity.x - 1, entity.y),
+            (entity.x, entity.y + 1),
+            (entity.x, entity.y - 1),
+        ]
         self.rng.shuffle(neighbors)
         best: tuple[int, int] | None = None
         best_dist = math.hypot(entity.x - from_x, entity.y - from_y)
@@ -435,4 +509,3 @@ class _AIMixin:
                 continue
             valid.append((tx, ty))
         return valid
-

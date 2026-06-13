@@ -46,7 +46,12 @@ from .ai import _AIMixin
 from .generation import _GenerationMixin
 from .effects import _EffectsMixin
 from .items import _ItemsMixin
-from .templates import creature_template, creature_template_ids, item_template, item_template_ids
+from .templates import (
+    creature_template,
+    creature_template_ids,
+    item_template,
+    item_template_ids,
+)
 from .props import get_prop_template, get_all_prop_ids
 from .regions import Region, get_region
 from .promises import (
@@ -166,7 +171,13 @@ _PROP_TAG_AFFORDANCES: dict[str, list[str]] = {
 }
 
 
-_PROP_GENERIC_AFFORDANCES = ["use as a spell center", "flavor the outcome", "anchor a summon or terrain change"]
+_PROP_GENERIC_AFFORDANCES = [
+    "use as a spell center",
+    "flavor the outcome",
+    "anchor a summon or terrain change",
+]
+
+
 @dataclass
 class GameState:
     width: int = MAP_WIDTH
@@ -179,17 +190,19 @@ class GameState:
     turn: int = 0
     messages: list[str] = field(default_factory=list)
     message_count: int = 0
-    inventory: dict[str, int] = field(default_factory=lambda: {
-        "chalk": 2,
-        "grave salt": 2,
-        "mana crystal": 2,
-        "blood moss": 2,
-        "bone shard": 2,
-        "viscous residue": 1,
-        "metal scrap": 2,
-        "arcane residue": 1,
-        "gold": 30,
-    })
+    inventory: dict[str, int] = field(
+        default_factory=lambda: {
+            "chalk": 2,
+            "grave salt": 2,
+            "mana crystal": 2,
+            "blood moss": 2,
+            "bone shard": 2,
+            "viscous residue": 1,
+            "metal scrap": 2,
+            "arcane residue": 1,
+            "gold": 30,
+        }
+    )
     curses: dict[str, Curse] = field(default_factory=dict)
     npc_profiles: dict[str, NPCProfile] = field(default_factory=dict)
     pending_trade: dict[str, Any] | None = None
@@ -201,7 +214,9 @@ class GameState:
     triggers: list[dict[str, Any]] = field(default_factory=list)
     game_over: bool = False
     victory: bool = False
-    death_cause: str | None = None  # "empire" | "wild" | None — set when the player dies
+    death_cause: str | None = (
+        None  # "empire" | "wild" | None — set when the player dies
+    )
     region_id: str = "frontier"  # which Region (regions.py) the player is currently in
     rng_seed: int | None = None
     scenario: str = "dungeon"
@@ -219,7 +234,9 @@ class GameState:
     canon_records: dict[str, CanonRecord] = field(default_factory=dict)
     _player_taking_damage: bool = False
     promises: list[WorldPromise] = field(default_factory=list)
-    promise_reservations: dict[tuple[int, int], list[PromiseReservation]] = field(default_factory=dict)
+    promise_reservations: dict[tuple[int, int], list[PromiseReservation]] = field(
+        default_factory=dict
+    )
 
     @property
     def player(self) -> Entity:
@@ -228,7 +245,15 @@ class GameState:
     def add_message(self, message: str, is_danger: bool = False) -> None:
         if self._player_taking_damage:
             msg_lower = message.lower()
-            if not any(pos in msg_lower for pos in {"cauterized", "heal", "recover", "collapses... but begins to stir"}):
+            if not any(
+                pos in msg_lower
+                for pos in {
+                    "cauterized",
+                    "heal",
+                    "recover",
+                    "collapses... but begins to stir",
+                }
+            ):
                 is_danger = True
         self.messages.append(LogMessage(message, is_danger))
         self.messages = self.messages[-80:]
@@ -251,7 +276,12 @@ class GameState:
 
 
 class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _EffectsMixin):
-    def __init__(self, seed: int | None = None, scenario: str = "dungeon", provider_name: str | None = None) -> None:
+    def __init__(
+        self,
+        seed: int | None = None,
+        scenario: str = "dungeon",
+        provider_name: str | None = None,
+    ) -> None:
         self.rng = random.Random(seed)
         self.state = GameState(rng_seed=seed, scenario=scenario)
         self._next_entity_number = 1
@@ -263,6 +293,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         self._pending_town_start_times: dict[tuple[int, int], float] = {}
         self._town_executor: concurrent.futures.ThreadPoolExecutor | None = None
         from .wild_magic import make_town_provider
+
         self.town_provider = make_town_provider(provider_name)
         if scenario == "test_chamber":
             self._generate_test_chamber()
@@ -276,7 +307,6 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             self._maybe_pregenerate_adjacent_towns()
         else:
             self._generate_new_run()
-
 
     def next_entity_id(self, prefix: str) -> str:
         value = f"{prefix}_{self._next_entity_number}"
@@ -300,9 +330,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
     ) -> Entity:
         faction = normalize_faction(faction, default="ally")
         actor_tags = {
-            normalize_id(str(tag))
-            for tag in (tags or set())
-            if str(tag).strip()
+            normalize_id(str(tag)) for tag in (tags or set()) if str(tag).strip()
         }
         actor_tags = infer_behavior_tags(name, actor_tags)
         entity = Entity(
@@ -354,7 +382,9 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         `hp`/`attack`/`defense`/`faction` default to ordinary-townsfolk values, but can
         be overridden for NPCs who are meant to actually fight -- a guard captain who
         holds her ground rather than a peddler who'd rather not be there at all."""
-        npc_tags = {normalize_id(str(tag)) for tag in (tags or set()) if str(tag).strip()}
+        npc_tags = {
+            normalize_id(str(tag)) for tag in (tags or set()) if str(tag).strip()
+        }
         npc_tags.add("npc")
         entity = Entity(
             id=self.next_entity_id("npc"),
@@ -429,7 +459,11 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         player = self.state.player
         rooms: list[tuple[int, dict[str, Any]]] = []
         for profile in self.state.room_profiles.values():
-            if not any(self.is_visible(x, y) for y in range(profile.y, profile.y + profile.h) for x in range(profile.x, profile.x + profile.w)):
+            if not any(
+                self.is_visible(x, y)
+                for y in range(profile.y, profile.y + profile.h)
+                for x in range(profile.x, profile.x + profile.w)
+            ):
                 continue
             cx, cy = profile.center
             distance = abs(cx - player.x) + abs(cy - player.y)
@@ -449,7 +483,9 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         scored: list[tuple[int, str, CanonRecord]] = []
         for record in self.state.canon_records.values():
             score = 0
-            record_tags = {normalize_id(str(tag)) for tag in record.tags if str(tag).strip()}
+            record_tags = {
+                normalize_id(str(tag)) for tag in record.tags if str(tag).strip()
+            }
             overlap = wanted_tags & record_tags
             if overlap:
                 score += 10 + len(overlap)
@@ -469,12 +505,17 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         existing = self.state.canon_records.get(record.id)
         if existing is not None and existing.status == "canonical":
             return existing
-        record.tags = sorted({normalize_id(str(tag)) for tag in record.tags if str(tag).strip()})
+        record.tags = sorted(
+            {normalize_id(str(tag)) for tag in record.tags if str(tag).strip()}
+        )
         record.kind = normalize_id(record.kind or "object_detail")
-        record.status = "canonical" if record.status not in {"provisional", "canonical"} else record.status
+        record.status = (
+            "canonical"
+            if record.status not in {"provisional", "canonical"}
+            else record.status
+        )
         self.state.canon_records[record.id] = record
         return record
-
 
     @property
     def region(self) -> Region:
@@ -523,7 +564,14 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                 return False
         return True
 
-    def set_tile(self, x: int, y: int, tile: str, duration: int | None = None, tags: set[str] | None = None) -> bool:
+    def set_tile(
+        self,
+        x: int,
+        y: int,
+        tile: str,
+        duration: int | None = None,
+        tags: set[str] | None = None,
+    ) -> bool:
         if not self.in_bounds(x, y):
             return False
         if tile not in TILE_NAMES:
@@ -594,14 +642,18 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             if entity.hp < 0 or entity.hp > max(entity.max_hp, 0):
                 errors.append(f"{entity.id} has invalid hp {entity.hp}/{entity.max_hp}")
             if entity.max_mana < 0 or entity.mana < 0 or entity.mana > entity.max_mana:
-                errors.append(f"{entity.id} has invalid mana {entity.mana}/{entity.max_mana}")
+                errors.append(
+                    f"{entity.id} has invalid mana {entity.mana}/{entity.max_mana}"
+                )
             if entity.quantity < 0:
                 errors.append(f"{entity.id} has negative quantity")
             if entity.blocks and entity.alive:
                 position = (entity.x, entity.y)
                 other = blocking_positions.get(position)
                 if other is not None:
-                    errors.append(f"blocking entities overlap at {entity.x},{entity.y}: {other}, {entity.id}")
+                    errors.append(
+                        f"blocking entities overlap at {entity.x},{entity.y}: {other}, {entity.id}"
+                    )
                 else:
                     blocking_positions[position] = entity.id
         for item, amount in state.inventory.items():
@@ -610,7 +662,10 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         for curse_id, curse in state.curses.items():
             if curse.id != curse_id or curse.stacks < 1:
                 errors.append(f"curse {curse_id!r} is invalid")
-        for table_name, table in (("tile_tags", state.tile_tags), ("tile_durations", state.tile_durations)):
+        for table_name, table in (
+            ("tile_tags", state.tile_tags),
+            ("tile_durations", state.tile_durations),
+        ):
             for key in table:
                 try:
                     x, y = parse_tile_key(key)
@@ -631,7 +686,11 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         return errors
 
     def entities_at(self, x: int, y: int) -> list[Entity]:
-        return [entity for entity in self.state.entities.values() if entity.x == x and entity.y == y and entity.alive]
+        return [
+            entity
+            for entity in self.state.entities.values()
+            if entity.x == x and entity.y == y and entity.alive
+        ]
 
     def blocking_entity_at(self, x: int, y: int) -> Entity | None:
         for entity in self.entities_at(x, y):
@@ -643,7 +702,9 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         return [
             entity
             for entity in self.state.entities.values()
-            if entity.kind in {"actor", "npc"} and entity.faction == "enemy" and entity.hp > 0
+            if entity.kind in {"actor", "npc"}
+            and entity.faction == "enemy"
+            and entity.hp > 0
         ]
 
     def is_hostile_to(self, actor: Entity, other: Entity) -> bool:
@@ -672,10 +733,11 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         baseline and (in `_select_target`) to let such forces march on each
         other with intent rather than waiting to physically spot one another."""
         for side_a, side_b in FACTION_HOSTILITIES:
-            if (side_a & actor.tags and side_b & other.tags) or (side_b & actor.tags and side_a & other.tags):
+            if (side_a & actor.tags and side_b & other.tags) or (
+                side_b & actor.tags and side_a & other.tags
+            ):
                 return True
         return False
-
 
     def distance(self, a: Entity, b: Entity) -> float:
         return math.hypot(a.x - b.x, a.y - b.y)
@@ -685,13 +747,17 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             return False
         player = self.state.player
         if any(s in player.statuses for s in ["rooted", "webbed", "frozen", "stunned"]):
-            self.state.add_message("You strain against it, but you cannot move - you are held in place.")
+            self.state.add_message(
+                "You strain against it, but you cannot move - you are held in place."
+            )
             self.finish_player_turn()
             return True
         target_x = player.x + dx
         target_y = player.y + dy
         if not self.in_bounds(target_x, target_y):
-            if self.state.scenario in {"frontier", "town"} and self._cross_zone_edge(target_x, target_y):
+            if self.state.scenario in {"frontier", "town"} and self._cross_zone_edge(
+                target_x, target_y
+            ):
                 self.finish_player_turn()
                 return True
             self.state.add_message("The dungeon refuses that edge.")
@@ -710,16 +776,22 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                 key_tag = next((tag for tag in tags if tag.startswith("key_")), None)
                 owned = self.find_inventory_item(key_tag[4:]) if key_tag else None
                 if not owned:
-                    self.state.add_message("The door is locked tight. You'll need the right key.")
+                    self.state.add_message(
+                        "The door is locked tight. You'll need the right key."
+                    )
                     return False
                 self.consume_inventory_item(owned, 1)
                 self.state.tile_tags.pop(self.tile_key(target_x, target_y), None)
-                self.state.add_message(f"You turn the {owned} in the lock and the door swings open.")
+                self.state.add_message(
+                    f"You turn the {owned} in the lock and the door swings open."
+                )
             self.open_door(target_x, target_y)
             self.finish_player_turn()
             return True
         if self.tile_at(target_x, target_y) in BLOCKING_TILES:
-            self.state.add_message(f"{TILE_NAMES.get(self.tile_at(target_x, target_y), 'stone')} blocks the way.")
+            self.state.add_message(
+                f"{TILE_NAMES.get(self.tile_at(target_x, target_y), 'stone')} blocks the way."
+            )
             return False
         player.x = target_x
         player.y = target_y
@@ -730,9 +802,11 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         # Slick ice keeps you sliding one extra tile in the same direction.
         if self.tile_at(player.x, player.y) == SLICK_ICE:
             slide_x, slide_y = player.x + dx, player.y + dy
-            if (self.in_bounds(slide_x, slide_y)
-                    and self.tile_at(slide_x, slide_y) not in BLOCKING_TILES
-                    and not self.blocking_entity_at(slide_x, slide_y)):
+            if (
+                self.in_bounds(slide_x, slide_y)
+                and self.tile_at(slide_x, slide_y) not in BLOCKING_TILES
+                and not self.blocking_entity_at(slide_x, slide_y)
+            ):
                 player.x = slide_x
                 player.y = slide_y
                 self.state.add_message("You slide on the ice!")
@@ -812,7 +886,9 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         closed_entries.sort(key=lambda entry: (-entry["turn"], entry["id"]))
         return open_entries + closed_entries
 
-    def fulfill_promise(self, promise_id: str, realized_in: str | None = None) -> WorldPromise | None:
+    def fulfill_promise(
+        self, promise_id: str, realized_in: str | None = None
+    ) -> WorldPromise | None:
         for promise in self.state.promises:
             if promise.id == promise_id:
                 promise.status = "fulfilled"
@@ -821,7 +897,9 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                 return promise
         return None
 
-    def apply_promise_flesh(self, promise_id: str, flesh: dict[str, Any] | None) -> WorldPromise | None:
+    def apply_promise_flesh(
+        self, promise_id: str, flesh: dict[str, Any] | None
+    ) -> WorldPromise | None:
         """Attach background-model decoration to a promise. Decoration only: this never
         creates, moves, unbinds, or realizes anything."""
         normalized = normalize_flesh(flesh)
@@ -846,7 +924,10 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         tags: list[str] | None = None,
     ) -> WorldPromise:
         promise_id = f"quest_{normalize_id(contact)}_{normalize_id(name)}"
-        existing = next((promise for promise in self.state.promises if promise.id == promise_id), None)
+        existing = next(
+            (promise for promise in self.state.promises if promise.id == promise_id),
+            None,
+        )
         if existing is not None:
             return existing
         promise = WorldPromise(
@@ -871,7 +952,14 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
 
     def quest_log_entries(self) -> list[QuestLogEntry]:
         entries: list[QuestLogEntry] = []
-        for promise in sorted(self.state.promises, key=lambda item: (item.status == "fulfilled", item.source_turn, item.subject.lower())):
+        for promise in sorted(
+            self.state.promises,
+            key=lambda item: (
+                item.status == "fulfilled",
+                item.source_turn,
+                item.subject.lower(),
+            ),
+        ):
             if promise.kind != "quest":
                 continue
             entries.append(
@@ -891,24 +979,41 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         if index < 0 or index >= len(entries):
             return None
         entry = entries[index]
-        promise = next((item for item in self.state.promises if item.id == entry.id), None)
+        promise = next(
+            (item for item in self.state.promises if item.id == entry.id), None
+        )
         if promise is None:
             return None
         promise.status = "fulfilled"
-        return QuestLogEntry(entry.id, entry.name, entry.description, entry.contact, entry.location, "completed")
+        return QuestLogEntry(
+            entry.id,
+            entry.name,
+            entry.description,
+            entry.contact,
+            entry.location,
+            "completed",
+        )
 
     def remove_quest_by_index(self, index: int) -> QuestLogEntry | None:
         entries = self.quest_log_entries()
         if index < 0 or index >= len(entries):
             return None
         entry = entries[index]
-        self.state.promises = [promise for promise in self.state.promises if promise.id != entry.id]
+        self.state.promises = [
+            promise for promise in self.state.promises if promise.id != entry.id
+        ]
         self.state.promise_reservations = {
-            zone: [reservation for reservation in reservations if reservation.promise_id != entry.id]
+            zone: [
+                reservation
+                for reservation in reservations
+                if reservation.promise_id != entry.id
+            ]
             for zone, reservations in self.state.promise_reservations.items()
         }
         self.state.promise_reservations = {
-            zone: reservations for zone, reservations in self.state.promise_reservations.items() if reservations
+            zone: reservations
+            for zone, reservations in self.state.promise_reservations.items()
+            if reservations
         }
         return entry
 
@@ -938,13 +1043,20 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             tag_id = normalize_id(tag)
             if tag_id and tag_id not in existing.tags:
                 existing.tags.append(tag_id)
-        if existing.status not in {"verified", "false", "redeemed"} and incoming.status not in {"false"}:
+        if existing.status not in {
+            "verified",
+            "false",
+            "redeemed",
+        } and incoming.status not in {"false"}:
             existing.status = "corroborated"
 
-    def _bind_and_reserve_promise(self, promise: WorldPromise) -> PromiseReservation | None:
+    def _bind_and_reserve_promise(
+        self, promise: WorldPromise
+    ) -> PromiseReservation | None:
         reservation = bind_promise(
             promise,
-            explored_zones=set(self.state.zones) | {(self.state.zone_x, self.state.zone_y)},
+            explored_zones=set(self.state.zones)
+            | {(self.state.zone_x, self.state.zone_y)},
             reserved_counts=self._promise_reservation_counts(),
         )
         if reservation is None:
@@ -957,7 +1069,9 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             for zone, reservations in self.state.promise_reservations.items()
         }
 
-    def _reserve_promise(self, reservation: PromiseReservation) -> PromiseReservation | None:
+    def _reserve_promise(
+        self, reservation: PromiseReservation
+    ) -> PromiseReservation | None:
         existing = self.state.promise_reservations.setdefault(reservation.zone, [])
         if any(item.promise_id == reservation.promise_id for item in existing):
             return None
@@ -973,9 +1087,16 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         ]
         if len(all_reservations) <= PROMISE_RESERVATION_LIMIT:
             return
-        keep_ids = {reservation.promise_id for reservation in all_reservations[-PROMISE_RESERVATION_LIMIT:]}
+        keep_ids = {
+            reservation.promise_id
+            for reservation in all_reservations[-PROMISE_RESERVATION_LIMIT:]
+        }
         self.state.promise_reservations = {
-            zone: [reservation for reservation in reservations if reservation.promise_id in keep_ids]
+            zone: [
+                reservation
+                for reservation in reservations
+                if reservation.promise_id in keep_ids
+            ]
             for zone, reservations in self.state.promise_reservations.items()
         }
         self.state.promise_reservations = {
@@ -998,9 +1119,13 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             ),
         )
         keep = set(promise.id for promise in ranked[-PROMISE_LEDGER_LIMIT:])
-        self.state.promises = [promise for promise in self.state.promises if promise.id in keep]
+        self.state.promises = [
+            promise for promise in self.state.promises if promise.id in keep
+        ]
 
-    def _invalidate_pending_town_generation(self, zone: tuple[int, int] | None = None) -> None:
+    def _invalidate_pending_town_generation(
+        self, zone: tuple[int, int] | None = None
+    ) -> None:
         if not self._pending_towns:
             return
         if zone is not None:
@@ -1025,11 +1150,18 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         limit: int = 8,
         text_limit: int = 240,
     ) -> list[dict[str, Any]]:
-        wanted_terms = {normalize_id(part) for part in re.findall(r"[A-Za-z0-9_'-]+", subject or "") if len(part) >= 3}
+        wanted_terms = {
+            normalize_id(part)
+            for part in re.findall(r"[A-Za-z0-9_'-]+", subject or "")
+            if len(part) >= 3
+        }
         wanted_tags = {normalize_id(tag) for tag in (tags or set()) if tag}
         ranked: list[tuple[int, WorldPromise]] = []
         for promise in self.state.promises:
-            if promise.status in {"realized", "fulfilled", "redeemed"} and not include_realized:
+            if (
+                promise.status in {"realized", "fulfilled", "redeemed"}
+                and not include_realized
+            ):
                 continue
             promise_terms = set(normalize_id(promise.subject).split("_"))
             promise_terms.update(normalize_id(tag) for tag in promise.tags)
@@ -1043,33 +1175,55 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             if promise.location == self.state.location_label():
                 score += 6
             ranked.append((score, promise))
-        ranked.sort(key=lambda item: (-item[0], -item[1].source_turn, item[1].subject.lower()))
-        return promise_context_for_prompt([promise for _, promise in ranked[:limit]], limit=limit, text_limit=text_limit)
+        ranked.sort(
+            key=lambda item: (-item[0], -item[1].source_turn, item[1].subject.lower())
+        )
+        return promise_context_for_prompt(
+            [promise for _, promise in ranked[:limit]],
+            limit=limit,
+            text_limit=text_limit,
+        )
 
-    def promise_hooks_for_zone(self, zone: tuple[int, int], *, limit: int = 3, text_limit: int = 240) -> list[dict[str, Any]]:
+    def promise_hooks_for_zone(
+        self, zone: tuple[int, int], *, limit: int = 3, text_limit: int = 240
+    ) -> list[dict[str, Any]]:
         reservations = self.state.promise_reservations.get(zone, [])[:limit]
         by_id = {promise.id: promise for promise in self.state.promises}
         hooks: list[dict[str, Any]] = []
         for reservation in reservations:
             promise = by_id.get(reservation.promise_id)
-            if promise is None or promise.status in {"realized", "fulfilled", "redeemed"}:
+            if promise is None or promise.status in {
+                "realized",
+                "fulfilled",
+                "redeemed",
+            }:
                 continue
-            hook = promise_context_for_prompt([promise], limit=1, text_limit=text_limit)[0]
+            hook = promise_context_for_prompt(
+                [promise], limit=1, text_limit=text_limit
+            )[0]
             hook["blueprint"] = reservation.blueprint
             hook["bound_zone"] = list(reservation.zone)
             hooks.append(hook)
         return hooks
 
-    def lore_extraction_context(self, npc: Entity, message: str, reply: str) -> dict[str, Any]:
+    def lore_extraction_context(
+        self, npc: Entity, message: str, reply: str
+    ) -> dict[str, Any]:
         return {
             "npc": npc.name,
             "turn": self.state.turn,
             "location": self.state.location_label(),
-            "zone": {"x": self.state.zone_x, "y": self.state.zone_y, "type": self.state.zone_type},
+            "zone": {
+                "x": self.state.zone_x,
+                "y": self.state.zone_y,
+                "type": self.state.zone_type,
+            },
             "message": message,
             "reply": reply,
             "npc_profile": self.state.npc_profiles[npc.id].to_dialogue_context(),
-            "existing_lore": self.promises_for_context(subject=npc.name, tags=npc.tags, limit=5, text_limit=160),
+            "existing_lore": self.promises_for_context(
+                subject=npc.name, tags=npc.tags, limit=5, text_limit=160
+            ),
         }
 
     def dialogue_context_for_llm(self, npc: Entity, message: str) -> dict[str, Any]:
@@ -1082,16 +1236,26 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                 "hp": player.hp,
                 "max_hp": player.max_hp,
                 "statuses": sorted(player.statuses),
-                "equipment": {slot: item for slot, item in player.equipment.items() if item},
+                "equipment": {
+                    slot: item for slot, item in player.equipment.items() if item
+                },
             },
-            "scene": {"turn": self.state.turn, "depth": self.state.depth, "scenario": self.state.scenario,
-                      "region": self.region.name},
+            "scene": {
+                "turn": self.state.turn,
+                "depth": self.state.depth,
+                "scenario": self.state.scenario,
+                "region": self.region.name,
+            },
             "nearby_objects": self._npc_nearby_objects(npc),
-            "relevant_lore": self.promises_for_context(subject=npc.name, tags=npc.tags, limit=5, text_limit=160),
+            "relevant_lore": self.promises_for_context(
+                subject=npc.name, tags=npc.tags, limit=5, text_limit=160
+            ),
             "message": message,
         }
 
-    def _npc_nearby_objects(self, npc: Entity, radius: int = NPC_PERCEPTION_RADIUS, limit: int = 8) -> list[dict[str, Any]]:
+    def _npc_nearby_objects(
+        self, npc: Entity, radius: int = NPC_PERCEPTION_RADIUS, limit: int = 8
+    ) -> list[dict[str, Any]]:
         """Props and loose items within the NPC's perception, nearest first, so the NPC
         can talk about the objects in the room around them."""
         nearby: list[tuple[int, str, Entity]] = []
@@ -1124,7 +1288,9 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             return False
         return scan_for_trade_intent(message, reply)
 
-    def trade_context_for_llm(self, npc: Entity, message: str, reply: str) -> dict[str, Any]:
+    def trade_context_for_llm(
+        self, npc: Entity, message: str, reply: str
+    ) -> dict[str, Any]:
         profile = self.state.npc_profiles[npc.id]
         player = self.state.player
         return {
@@ -1132,19 +1298,31 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             "player": {
                 "name": player.name,
                 "inventory": dict(sorted(self.state.inventory.items())),
-                "equipment": {slot: item for slot, item in player.equipment.items() if item},
+                "equipment": {
+                    slot: item for slot, item in player.equipment.items() if item
+                },
             },
-            "scene": {"turn": self.state.turn, "depth": self.state.depth, "scenario": self.state.scenario},
+            "scene": {
+                "turn": self.state.turn,
+                "depth": self.state.depth,
+                "scenario": self.state.scenario,
+            },
             "exchange": {"player_said": message, "npc_replied": reply},
         }
 
-    def _validate_trade_payload(self, npc: Entity, trade_data: dict[str, Any]) -> str | None:
+    def _validate_trade_payload(
+        self, npc: Entity, trade_data: dict[str, Any]
+    ) -> str | None:
         profile = self.state.npc_profiles.get(npc.id)
         if profile is None:
             return "trader no longer exists"
         for label, entries, source in (
             ("npc_gives", coerce_list(trade_data.get("npc_gives")), profile.wares),
-            ("npc_wants", coerce_list(trade_data.get("npc_wants")), self.state.inventory),
+            (
+                "npc_wants",
+                coerce_list(trade_data.get("npc_wants")),
+                self.state.inventory,
+            ),
         ):
             for entry in entries:
                 if not isinstance(entry, dict):
@@ -1156,7 +1334,11 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                     return f"{label} has an invalid quantity for {item or '(missing item)'}"
                 key = self.find_item_in(source, item) if item else None
                 if key is None:
-                    owner = "the trader's wares" if label == "npc_gives" else "your inventory"
+                    owner = (
+                        "the trader's wares"
+                        if label == "npc_gives"
+                        else "your inventory"
+                    )
                     return f"{item or '(missing item)'} is not in {owner}"
                 available = source.get(key, 0)
                 if quantity < 1 or quantity > available:
@@ -1164,7 +1346,11 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         return None
 
     def apply_dialogue_exchange(
-        self, npc: Entity, message: str, reply: str, trade_data: dict[str, Any] | None = None
+        self,
+        npc: Entity,
+        message: str,
+        reply: str,
+        trade_data: dict[str, Any] | None = None,
     ) -> None:
         """Record + display the exchange, then either settle the turn immediately
         (the normal case) or -- when the structuring call came back with a real
@@ -1183,12 +1369,15 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         self.state.last_talked_npc_name = npc.name
         if profile.wanted_item and not profile.quest_completed:
             from .npc_quests import register_heard_quest_item
+
             register_heard_quest_item(self, npc.id)
 
         if trade_data is not None and trade_data.get("trade_proposed"):
             trade_error = self._validate_trade_payload(npc, trade_data)
             if trade_error:
-                self.state.add_message(f"The proposed trade cannot be settled: {trade_error}.")
+                self.state.add_message(
+                    f"The proposed trade cannot be settled: {trade_error}."
+                )
                 self.finish_player_turn()
                 return
             proposal_text = str(trade_data.get("proposal_text") or "").strip()
@@ -1196,12 +1385,18 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                 "npc_id": npc.id,
                 "npc_name": npc.name,
                 "initiator": trade_data.get("initiator"),
-                "npc_gives": [dict(entry) for entry in coerce_list(trade_data.get("npc_gives"))],
-                "npc_wants": [dict(entry) for entry in coerce_list(trade_data.get("npc_wants"))],
+                "npc_gives": [
+                    dict(entry) for entry in coerce_list(trade_data.get("npc_gives"))
+                ],
+                "npc_wants": [
+                    dict(entry) for entry in coerce_list(trade_data.get("npc_wants"))
+                ],
                 "proposal_text": proposal_text,
             }
             if proposal_text:
-                self.state.add_message(f'{npc.name} proposes a trade: "{proposal_text}"')
+                self.state.add_message(
+                    f'{npc.name} proposes a trade: "{proposal_text}"'
+                )
             return
 
         self.finish_player_turn()
@@ -1227,7 +1422,9 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
 
         trade_error = self._validate_trade_payload(npc, trade)
         if trade_error:
-            self.state.add_message(f"The deal with {npc_name} falls apart: {trade_error}.")
+            self.state.add_message(
+                f"The deal with {npc_name} falls apart: {trade_error}."
+            )
             self.finish_player_turn()
             return
 
@@ -1257,23 +1454,33 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
 
         receive_text = ", ".join(received) or "nothing"
         give_text = ", ".join(given) or "nothing"
-        self.state.add_message(f"Deal struck with {npc_name} -- you receive {receive_text}, and hand over {give_text}.")
+        self.state.add_message(
+            f"Deal struck with {npc_name} -- you receive {receive_text}, and hand over {give_text}."
+        )
 
         # Check if this trade fulfills the NPC's quest/need
         if profile.wanted_item and not profile.quest_completed:
             for entry in trade.get("npc_wants", []):
                 item_name = str(entry.get("item") or "").strip().lower()
                 qty = int(entry.get("quantity") or 0)
-                if item_name == profile.wanted_item.lower() and qty >= profile.wanted_qty:
+                if (
+                    item_name == profile.wanted_item.lower()
+                    and qty >= profile.wanted_qty
+                ):
                     profile.quest_completed = True
-                    self.state.add_message(f"Quest completed: You delivered {profile.wanted_item} to {profile.name}!")
+                    self.state.add_message(
+                        f"Quest completed: You delivered {profile.wanted_item} to {profile.name}!"
+                    )
                     for promise in self.state.promises:
-                        if promise.kind == "quest" and promise.giver_npc == profile.name and promise.status != "fulfilled":
+                        if (
+                            promise.kind == "quest"
+                            and promise.giver_npc == profile.name
+                            and promise.status != "fulfilled"
+                        ):
                             promise.status = "fulfilled"
                     break
 
         self.finish_player_turn()
-
 
     def open_door(self, x: int, y: int) -> bool:
         if self.tile_at(x, y) != DOOR:
@@ -1302,25 +1509,29 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             self.state.victory = True
             self.state.game_over = True
             self.state.turn += 1
-            self.state.add_message("You descend past the last stair and escape with your impossible magic intact.")
+            self.state.add_message(
+                "You descend past the last stair and escape with your impossible magic intact."
+            )
             return True
-        
+
         # Save current floor before transitioning
-        is_surface = (self.state.depth == 1 and self.state.scenario != "dungeon")
+        is_surface = self.state.depth == 1 and self.state.scenario != "dungeon"
         if is_surface:
             self._save_current_zone()
         else:
             self._save_dungeon_floor(self.state.depth)
-            
+
         self.state.depth += 1
-        self.state.stats.deepest_floor = max(self.state.stats.deepest_floor, self.state.depth)
-        
+        self.state.stats.deepest_floor = max(
+            self.state.stats.deepest_floor, self.state.depth
+        )
+
         # Load or generate the next dungeon floor
         if self.state.depth in self.state.dungeon_floors:
             self._load_dungeon_floor(self.state.depth, STAIRS_UP)
         else:
             self._generate_dungeon_floor(preserve_player=True)
-            
+
         self.state.turn += 1
         self.update_fov()
         self.state.add_message(f"You descend to dungeon floor {self.state.depth}.")
@@ -1334,14 +1545,14 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         if self.state.depth <= 1:
             self.state.add_message("The dungeon mouth is not that easy to find again.")
             return False
-            
+
         # Save current dungeon floor
         self._save_dungeon_floor(self.state.depth)
-        
+
         self.state.depth -= 1
-        
+
         # Are we returning to the surface?
-        is_surface = (self.state.depth == 1 and self.state.scenario != "dungeon")
+        is_surface = self.state.depth == 1 and self.state.scenario != "dungeon"
         if is_surface:
             key = (self.state.zone_x, self.state.zone_y)
             if key in self.state.zones:
@@ -1356,9 +1567,13 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                             break
                     if found:
                         break
-                self._load_or_generate_zone(self.state.zone_x, self.state.zone_y, stairs_x, stairs_y)
+                self._load_or_generate_zone(
+                    self.state.zone_x, self.state.zone_y, stairs_x, stairs_y
+                )
             else:
-                self._load_or_generate_zone(self.state.zone_x, self.state.zone_y, player.x, player.y)
+                self._load_or_generate_zone(
+                    self.state.zone_x, self.state.zone_y, player.x, player.y
+                )
             self.state.turn += 1
             self.update_fov()
             self.state.add_message("You climb back to the surface.")
@@ -1370,7 +1585,9 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                 self._generate_dungeon_floor(preserve_player=True)
             self.state.turn += 1
             self.update_fov()
-            self.state.add_message(f"You climb back to dungeon floor {self.state.depth}.")
+            self.state.add_message(
+                f"You climb back to dungeon floor {self.state.depth}."
+            )
             return True
 
     def cast_standard_bolt(self) -> bool:
@@ -1404,8 +1621,12 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         player.mana -= 2
         self.damage_entity(target, 4, "frost")
         if target.hp > 0:
-            target.statuses["slowed"] = max(status_duration(target.statuses.get("slowed")), 2)
-            self.state.add_message(f"A frost shard bites into {target.name}, slowing it.")
+            target.statuses["slowed"] = max(
+                status_duration(target.statuses.get("slowed")), 2
+            )
+            self.state.add_message(
+                f"A frost shard bites into {target.name}, slowing it."
+            )
         else:
             self.state.add_message(f"A frost shard bites into {target.name}.")
         self.finish_player_turn()
@@ -1435,8 +1656,12 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             self.state.add_message("The safe spell fizzles. You need 3 mana.")
             return False
         player.mana -= 3
-        player.statuses["warded"] = max(status_duration(player.statuses.get("warded")), 6)
-        self.state.add_message("A steady ward settles over you, dulling the next blows.")
+        player.statuses["warded"] = max(
+            status_duration(player.statuses.get("warded")), 6
+        )
+        self.state.add_message(
+            "A steady ward settles over you, dulling the next blows."
+        )
         self.finish_player_turn()
         return True
 
@@ -1450,27 +1675,39 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         player.mana -= 2
         found = 0
         for entity in self.entities_in_radius(player.x, player.y, 8):
-            if entity.id == self.state.player_id or entity.kind != "actor" or entity.hp <= 0:
+            if (
+                entity.id == self.state.player_id
+                or entity.kind != "actor"
+                or entity.hp <= 0
+            ):
                 continue
-            entity.statuses["revealed"] = max(status_duration(entity.statuses.get("revealed")), 6)
+            entity.statuses["revealed"] = max(
+                status_duration(entity.statuses.get("revealed")), 6
+            )
             found += 1
         if found:
-            self.state.add_message(f"Your senses sharpen. {found} hidden presence(s) stand revealed nearby.")
+            self.state.add_message(
+                f"Your senses sharpen. {found} hidden presence(s) stand revealed nearby."
+            )
         else:
-            self.state.add_message("Your senses sharpen, but nothing nearby is hiding from you.")
+            self.state.add_message(
+                "Your senses sharpen, but nothing nearby is hiding from you."
+            )
         self.finish_player_turn()
         return True
-
 
     def nearest_enemy(self, max_distance: int | None = None) -> Entity | None:
         player = self.state.player
         enemies = self.living_enemies()
         if max_distance is not None:
-            enemies = [enemy for enemy in enemies if self.distance(player, enemy) <= max_distance]
+            enemies = [
+                enemy
+                for enemy in enemies
+                if self.distance(player, enemy) <= max_distance
+            ]
         if not enemies:
             return None
         return min(enemies, key=lambda enemy: self.distance(player, enemy))
-
 
     def teleport_entity(self, entity: Entity, x: int, y: int) -> bool:
         if self.can_occupy(x, y):
@@ -1492,7 +1729,6 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                         entity.y = y
                         return True
         return False
-
 
     def finish_player_turn(self) -> None:
         if self.state.game_over:
@@ -1516,14 +1752,15 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             return
         region = self.region
         unseen_enemies = [
-            e for e in self.living_enemies()
-            if not self.is_visible(e.x, e.y)
+            e for e in self.living_enemies() if not self.is_visible(e.x, e.y)
         ]
         if not unseen_enemies:
             # No threat nearby: the place itself speaks. Strangeness scales
             # with effective wildness (region base + depth) — surveyed and
             # sensible near imperial reach, dreamlike in the deep wild.
-            self.state.add_message(self.rng.choice(list(region.wonder_lines(self.state.depth))))
+            self.state.add_message(
+                self.rng.choice(list(region.wonder_lines(self.state.depth)))
+            )
             return
         enemy = self.rng.choice(unseen_enemies)
         messages = list(region.ambient_default)
@@ -1542,20 +1779,38 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             if tile == FIRE:
                 self.damage_entity(entity, 1, "fire")
                 if entity.hp > 0:
-                    entity.statuses["burning"] = max(status_duration(entity.statuses.get("burning")), 2)
-                    self.state.add_message("You are scorched by wild fire." if is_player else f"{entity.name} is scorched by wild fire.", is_danger=is_player)
+                    entity.statuses["burning"] = max(
+                        status_duration(entity.statuses.get("burning")), 2
+                    )
+                    self.state.add_message(
+                        "You are scorched by wild fire."
+                        if is_player
+                        else f"{entity.name} is scorched by wild fire.",
+                        is_danger=is_player,
+                    )
             elif tile == POISON_CLOUD:
                 self.damage_entity(entity, 1, "poison")
                 if entity.hp > 0:
-                    entity.statuses["poisoned"] = max(status_duration(entity.statuses.get("poisoned")), 2)
-                    self.state.add_message("You cough in poison vapors." if is_player else f"{entity.name} coughs in poison vapors.", is_danger=is_player)
+                    entity.statuses["poisoned"] = max(
+                        status_duration(entity.statuses.get("poisoned")), 2
+                    )
+                    self.state.add_message(
+                        "You cough in poison vapors."
+                        if is_player
+                        else f"{entity.name} coughs in poison vapors.",
+                        is_danger=is_player,
+                    )
             elif tile == WATER and "burning" in entity.statuses:
                 entity.statuses.pop("burning")
                 if is_player:
                     self.state.add_message("The water extinguishes your flames.")
                 else:
                     self.state.add_message(f"{entity.name} is doused by the water.")
-            elif tile == VINES and "rooted" not in entity.statuses and "webbed" not in entity.statuses:
+            elif (
+                tile == VINES
+                and "rooted" not in entity.statuses
+                and "webbed" not in entity.statuses
+            ):
                 entity.statuses["rooted"] = 2
                 if is_player:
                     self.state.add_message("Vines coil around your feet!")
@@ -1568,7 +1823,12 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                 self.damage_entity(entity, 1, "fire")
                 if entity.hp > 0:
                     burn_name = entity.status_display.get("burning", "burning")
-                    self.state.add_message("You burn." if _is_player else f"{entity.name} burns ({burn_name}).", is_danger=_is_player)
+                    self.state.add_message(
+                        "You burn."
+                        if _is_player
+                        else f"{entity.name} burns ({burn_name}).",
+                        is_danger=_is_player,
+                    )
                 turns -= 1
                 if turns <= 0:
                     entity.statuses.pop("burning", None)
@@ -1581,7 +1841,12 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                 self.damage_entity(entity, 1, "poison")
                 if entity.hp > 0:
                     poison_name = entity.status_display.get("poisoned", "poison")
-                    self.state.add_message("You weaken from poison." if _is_player else f"{entity.name} weakens ({poison_name}).", is_danger=_is_player)
+                    self.state.add_message(
+                        "You weaken from poison."
+                        if _is_player
+                        else f"{entity.name} weakens ({poison_name}).",
+                        is_danger=_is_player,
+                    )
                 turns -= 1
                 if turns <= 0:
                     entity.statuses.pop("poisoned", None)
@@ -1633,13 +1898,24 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
     def _apply_tile_entry(self, entity: Entity) -> None:
         tile = self.tile_at(entity.x, entity.y)
         is_player = entity.id == self.state.player_id
-        trap_tag = next((tag for tag in self.tile_tags_at(entity.x, entity.y) if tag in TRAP_SPECS), None)
+        trap_tag = next(
+            (tag for tag in self.tile_tags_at(entity.x, entity.y) if tag in TRAP_SPECS),
+            None,
+        )
         if trap_tag is not None:
             spec = TRAP_SPECS[trap_tag]
             self.damage_entity(entity, spec["damage"], spec["damage_type"])
             if entity.alive:
-                entity.statuses[spec["status"]] = max(status_duration(entity.statuses.get(spec["status"])), spec["duration"])
-            self.state.add_message(spec["message"] if is_player else spec["message_other"].format(name=entity.name), is_danger=is_player)
+                entity.statuses[spec["status"]] = max(
+                    status_duration(entity.statuses.get(spec["status"])),
+                    spec["duration"],
+                )
+            self.state.add_message(
+                spec["message"]
+                if is_player
+                else spec["message_other"].format(name=entity.name),
+                is_danger=is_player,
+            )
             self.set_tile(entity.x, entity.y, RUBBLE)
             self.state.tile_tags.pop(self.tile_key(entity.x, entity.y), None)
             tile = RUBBLE
@@ -1650,22 +1926,46 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             tile = OPEN_DOOR
         if tile == FIRE:
             self.damage_entity(entity, 1, "fire")
-            entity.statuses["burning"] = max(status_duration(entity.statuses.get("burning")), 2)
-            self.state.add_message("You step into wild fire." if is_player else f"{entity.name} steps into wild fire.", is_danger=is_player)
+            entity.statuses["burning"] = max(
+                status_duration(entity.statuses.get("burning")), 2
+            )
+            self.state.add_message(
+                "You step into wild fire."
+                if is_player
+                else f"{entity.name} steps into wild fire.",
+                is_danger=is_player,
+            )
         elif tile == POISON_CLOUD:
             self.damage_entity(entity, 1, "poison")
-            entity.statuses["poisoned"] = max(status_duration(entity.statuses.get("poisoned")), 2)
-            self.state.add_message("You inhale a poison cloud." if is_player else f"{entity.name} inhales a poison cloud.", is_danger=is_player)
+            entity.statuses["poisoned"] = max(
+                status_duration(entity.statuses.get("poisoned")), 2
+            )
+            self.state.add_message(
+                "You inhale a poison cloud."
+                if is_player
+                else f"{entity.name} inhales a poison cloud.",
+                is_danger=is_player,
+            )
         elif tile == SLICK_ICE:
-            entity.statuses["slowed"] = max(status_duration(entity.statuses.get("slowed")), 1)
-            self.state.add_message("You skid on slick ice." if is_player else f"{entity.name} skids on slick ice.")
+            entity.statuses["slowed"] = max(
+                status_duration(entity.statuses.get("slowed")), 1
+            )
+            self.state.add_message(
+                "You skid on slick ice."
+                if is_player
+                else f"{entity.name} skids on slick ice."
+            )
         elif tile == WATER and "burning" in entity.statuses:
             entity.statuses.pop("burning")
             if entity.id == self.state.player_id:
                 self.state.add_message("The water extinguishes your flames.")
             else:
                 self.state.add_message(f"{entity.name} is doused.")
-        if tile == VINES and "rooted" not in entity.statuses and "webbed" not in entity.statuses:
+        if (
+            tile == VINES
+            and "rooted" not in entity.statuses
+            and "webbed" not in entity.statuses
+        ):
             entity.statuses["rooted"] = 2
             if entity.id == self.state.player_id:
                 self.state.add_message("Vines coil around your feet!")
@@ -1679,7 +1979,10 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             self.damage_entity(entity, 1, "blood")
             if entity.hp > 0:
                 bleed_name = entity.status_display.get("bleeding", "bleeding")
-                self.state.add_message("You bleed." if _sp else f"{entity.name} bleeds ({bleed_name}).", is_danger=_sp)
+                self.state.add_message(
+                    "You bleed." if _sp else f"{entity.name} bleeds ({bleed_name}).",
+                    is_danger=_sp,
+                )
             turns -= 1
             if turns <= 0:
                 entity.statuses.pop("bleeding", None)
@@ -1693,8 +1996,14 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             if entity.hp < entity.max_hp:
                 entity.hp += 1
                 if _sp:
-                    regen_name = entity.status_display.get("regenerating", "regenerating")
-                    self.state.add_message(f"You regenerate ({regen_name})." if regen_name != "regenerating" else "You regenerate.")
+                    regen_name = entity.status_display.get(
+                        "regenerating", "regenerating"
+                    )
+                    self.state.add_message(
+                        f"You regenerate ({regen_name})."
+                        if regen_name != "regenerating"
+                        else "You regenerate."
+                    )
             turns -= 1
             if turns <= 0:
                 entity.statuses.pop("regenerating", None)
@@ -1779,7 +2088,9 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         self.state.event_timers = remaining
 
     def _trigger_event(self, event: dict[str, Any]) -> None:
-        event_type = str(event.get("event_type") or event.get("type") or "message").lower()
+        event_type = str(
+            event.get("event_type") or event.get("type") or "message"
+        ).lower()
         # Timers are the temporal executor of the Promise Ledger, the way zone
         # generation is its spatial one: a timer carrying a promise_id settles
         # that promise when it fires (e.g. the debt collector arriving).
@@ -1787,12 +2098,18 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         if promise_id:
             self.fulfill_promise(promise_id, realized_in=f"turn {self.state.turn}")
         if event_type == "message":
-            text = str(event.get("text") or event.get("message") or "Something promised arrives late.")
+            text = str(
+                event.get("text")
+                or event.get("message")
+                or "Something promised arrives late."
+            )
             self.state.add_message(text)
         elif event_type in {"summon", "spawn"}:
             player = self.state.player
             x, y = self.find_open_tile_near(player.x, player.y)
-            faction = normalize_faction(event.get("faction"), default="ally", neutral_is_ally=True)
+            faction = normalize_faction(
+                event.get("faction"), default="ally", neutral_is_ally=True
+            )
             name = str(event.get("name") or "summoned creature")
             count = clamp_int(event.get("count") or event.get("quantity") or 1, 1, 6)
             for _ in range(count):
@@ -1803,7 +2120,8 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                 self.spawn_actor(
                     name,
                     str(event.get("char") or ("a" if faction == "ally" else "d"))[:1],
-                    x, y,
+                    x,
+                    y,
                     clamp_int(event.get("hp") or 6, 1, 30),
                     clamp_int(event.get("attack") or 2, 0, 10),
                     clamp_int(event.get("defense") or 0, 0, 8),
@@ -1813,19 +2131,35 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                 )
             self.state.add_message(f"{name} arrives.")
         elif event_type == "conjure":
-            self._apply_effect({"type": "conjure_creature", **event, "event_type": None})
+            self._apply_effect(
+                {"type": "conjure_creature", **event, "event_type": None}
+            )
         elif event_type in {"damage", "area_damage"}:
             player = self.state.player
-            self._apply_effect({"type": event_type, "target": "player", **event, "event_type": None})
+            self._apply_effect(
+                {"type": event_type, "target": "player", **event, "event_type": None}
+            )
         elif event_type in {"heal", "restore_mana"}:
-            self._apply_effect({"type": event_type, "target": "player", **event, "event_type": None})
+            self._apply_effect(
+                {"type": event_type, "target": "player", **event, "event_type": None}
+            )
         elif event_type in {"status", "add_status"}:
-            self._apply_effect({"type": "add_status", "target": "player", **event, "event_type": None})
+            self._apply_effect(
+                {"type": "add_status", "target": "player", **event, "event_type": None}
+            )
         elif event_type == "flood":
             tile = str(event.get("tile") or "water")
             radius = clamp_int(event.get("radius") or 3, 0, 99)
             player = self.state.player
-            self._apply_effect({"type": "create_tiles", "target": "player", "tile": tile, "radius": radius, "event_type": None})
+            self._apply_effect(
+                {
+                    "type": "create_tiles",
+                    "target": "player",
+                    "tile": tile,
+                    "radius": radius,
+                    "event_type": None,
+                }
+            )
             self.state.add_message(f"{TILE_NAMES.get(tile, tile)} floods the area.")
         elif event_type == "curse":
             self._apply_cost({"type": "curse", **event})
@@ -1862,7 +2196,12 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         amount: int,
         damage_type: str,
     ) -> None:
-        event = {"target": target, "source": source, "amount": amount, "damage_type": damage_type}
+        event = {
+            "target": target,
+            "source": source,
+            "amount": amount,
+            "damage_type": damage_type,
+        }
         names = ["on_damaged", "on_actor_damaged"]
         if target.id == self.state.player_id:
             names.extend(["on_player_damaged", "on_player_hit"])
@@ -1877,7 +2216,12 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         previous_hp: int,
         damage_type: str,
     ) -> None:
-        event = {"target": target, "source": source, "amount": previous_hp, "damage_type": damage_type}
+        event = {
+            "target": target,
+            "source": source,
+            "amount": previous_hp,
+            "damage_type": damage_type,
+        }
         names = ["on_death", "on_actor_death"]
         if target.id == self.state.player_id:
             names.append("on_player_death")
@@ -1885,7 +2229,9 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             names.append("on_enemy_death")
         self._fire_triggers(names, event)
 
-    def _fire_triggers(self, names: str | list[str], event: dict[str, Any] | None = None) -> list[str]:
+    def _fire_triggers(
+        self, names: str | list[str], event: dict[str, Any] | None = None
+    ) -> list[str]:
         if isinstance(names, str):
             wanted = {normalize_trigger_name(names)}
         else:
@@ -1896,8 +2242,12 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         original_triggers = list(self.state.triggers)
         self.state.triggers = []
         for trigger in original_triggers:
-            trigger_name = normalize_trigger_name(str(trigger.get("trigger") or trigger.get("on") or ""))
-            if trigger_name not in wanted or not self._trigger_matches_target(trigger, event):
+            trigger_name = normalize_trigger_name(
+                str(trigger.get("trigger") or trigger.get("on") or "")
+            )
+            if trigger_name not in wanted or not self._trigger_matches_target(
+                trigger, event
+            ):
                 remaining.append(trigger)
                 continue
             name = str(trigger.get("name") or "A waiting spell").strip()
@@ -1920,7 +2270,9 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         self.state.triggers = remaining + self.state.triggers
         return messages
 
-    def _trigger_matches_target(self, trigger: dict[str, Any], event: dict[str, Any]) -> bool:
+    def _trigger_matches_target(
+        self, trigger: dict[str, Any], event: dict[str, Any]
+    ) -> bool:
         raw_target = trigger.get("target")
         if raw_target in {None, "", "any"}:
             return True
@@ -1935,9 +2287,15 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             return target.faction == "enemy"
         if trigger_target in {"source", "attacker", "caster"}:
             return isinstance(source, Entity)
-        return target.id == trigger_target or trigger_target in target.tags or trigger_target in normalize_id(target.name).split("_")
+        return (
+            target.id == trigger_target
+            or trigger_target in target.tags
+            or trigger_target in normalize_id(target.name).split("_")
+        )
 
-    def _fill_trigger_effect_defaults(self, effect: dict[str, Any], event: dict[str, Any]) -> None:
+    def _fill_trigger_effect_defaults(
+        self, effect: dict[str, Any], event: dict[str, Any]
+    ) -> None:
         target = event.get("target")
         source = event.get("source")
         if not isinstance(target, Entity):
@@ -1953,11 +2311,9 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         elif effect.get("origin") == "trigger_source" and isinstance(source, Entity):
             effect["origin"] = source.id
 
-
         # Disciplined troops hold their post rather than break formation to wander.
 
     _SUMMONER_MINIONS = ["bog whelp", "carrion sprite", "husk crawler"]
-
 
     def _regenerate_player(self) -> None:
         player = self.state.player
@@ -1968,8 +2324,16 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         if not target_id or target_id in {"player", "self", "@", "you", "me"}:
             return self.state.player
         if target_id in {
-            "nearest_enemy", "nearest enemy", "enemy", "nearest_foe", "nearest_entity",
-            "nearest_target", "closest_enemy", "target", "foe", "nearest_actor",
+            "nearest_enemy",
+            "nearest enemy",
+            "enemy",
+            "nearest_foe",
+            "nearest_entity",
+            "nearest_target",
+            "closest_enemy",
+            "target",
+            "foe",
+            "nearest_actor",
         }:
             return self.nearest_enemy()
         return self.state.entities.get(target_id)
@@ -1977,14 +2341,27 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
     def resolve_target_group(self, target_id: str | None) -> list[Entity]:
         target = normalize_id(str(target_id or ""))
         if target in {"all", "everyone", "all_entities", "all_nearby", "everything"}:
-            return [entity for entity in self.state.entities.values() if entity.kind in {"actor", "npc"} and entity.hp > 0]
-        if target in {"all_enemies", "enemies", "all_foes", "all_hostiles", "nearby_enemies", "every_enemy"}:
+            return [
+                entity
+                for entity in self.state.entities.values()
+                if entity.kind in {"actor", "npc"} and entity.hp > 0
+            ]
+        if target in {
+            "all_enemies",
+            "enemies",
+            "all_foes",
+            "all_hostiles",
+            "nearby_enemies",
+            "every_enemy",
+        }:
             return self.living_enemies()
         if target in {"allies", "all_allies", "friends", "friendlies"}:
             return [
                 entity
                 for entity in self.state.entities.values()
-                if entity.kind in {"actor", "npc"} and entity.hp > 0 and entity.faction in {"ally", "player"}
+                if entity.kind in {"actor", "npc"}
+                and entity.hp > 0
+                and entity.faction in {"ally", "player"}
             ]
         singular = singular_target_tag(target)
         if not singular:
@@ -1995,7 +2372,10 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             if entity.kind in {"actor", "npc"}
             and entity.hp > 0
             and entity.id != self.state.player_id
-            and (singular in entity.tags or singular in normalize_id(entity.name).split("_"))
+            and (
+                singular in entity.tags
+                or singular in normalize_id(entity.name).split("_")
+            )
         ]
 
     def _verb(self, entity: Entity, second_person: str, third_person: str) -> str:
@@ -2030,9 +2410,16 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         ]
         anchors: list[tuple[int, dict[str, Any]]] = []
         for entity in self.state.entities.values():
-            if entity.kind != "prop" or not entity.alive or not self.is_visible(entity.x, entity.y):
+            if (
+                entity.kind != "prop"
+                or not entity.alive
+                or not self.is_visible(entity.x, entity.y)
+            ):
                 continue
-            if abs(entity.x - player.x) > self.state.fov_radius or abs(entity.y - player.y) > self.state.fov_radius:
+            if (
+                abs(entity.x - player.x) > self.state.fov_radius
+                or abs(entity.y - player.y) > self.state.fov_radius
+            ):
                 continue
             tags = sorted(entity.tags)
             name_terms = set(normalize_id(entity.name).split("_"))
@@ -2052,9 +2439,28 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                 affordances = list(_PROP_GENERIC_AFFORDANCES)
             distance = abs(entity.x - player.x) + abs(entity.y - player.y)
             reactive_tags = {
-                "magic", "ritual", "fire", "hot", "water", "liquid", "lightning", "toxic",
-                "acid", "cursed", "death", "blood", "bone", "crystal", "glass", "fragile",
-                "mechanical", "snaring", "trap", "empire", "holy", "music",
+                "magic",
+                "ritual",
+                "fire",
+                "hot",
+                "water",
+                "liquid",
+                "lightning",
+                "toxic",
+                "acid",
+                "cursed",
+                "death",
+                "blood",
+                "bone",
+                "crystal",
+                "glass",
+                "fragile",
+                "mechanical",
+                "snaring",
+                "trap",
+                "empire",
+                "holy",
+                "music",
             }
             priority = distance
             if matched_terms:
@@ -2118,8 +2524,13 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                 terrain_tile = "rubble"
 
             if visible_enemies:
-                nearest_enemy = min(visible_enemies, key=lambda enemy: abs(enemy.x - entity.x) + abs(enemy.y - entity.y))
-                enemy_distance = abs(nearest_enemy.x - entity.x) + abs(nearest_enemy.y - entity.y)
+                nearest_enemy = min(
+                    visible_enemies,
+                    key=lambda enemy: abs(enemy.x - entity.x) + abs(enemy.y - entity.y),
+                )
+                enemy_distance = abs(nearest_enemy.x - entity.x) + abs(
+                    nearest_enemy.y - entity.y
+                )
                 anchor["nearest_visible_enemy"] = {
                     "id": nearest_enemy.id,
                     "name": nearest_enemy.name,
@@ -2131,7 +2542,11 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                         "on the enemy, or a create_tiles line/beam from this prop toward nearest_enemy"
                     )
                     anchor["recommended_effect_patterns"] = [
-                        {"type": "damage", "target": nearest_enemy.id, "damage_type": damage_type},
+                        {
+                            "type": "damage",
+                            "target": nearest_enemy.id,
+                            "damage_type": damage_type,
+                        },
                         {
                             "type": "create_tiles",
                             "shape": "line",
@@ -2154,7 +2569,13 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                     ]
             else:
                 anchor["recommended_effect_patterns"] = [
-                    {"type": "create_tiles", "target": entity.id, "radius": 1, "tile": terrain_tile, "duration": 4}
+                    {
+                        "type": "create_tiles",
+                        "target": entity.id,
+                        "radius": 1,
+                        "tile": terrain_tile,
+                        "duration": 4,
+                    }
                 ]
             anchors.append((priority, anchor))
         anchors.sort(key=lambda item: (item[0], item[1]["distance"], item[1]["name"]))
@@ -2174,8 +2595,16 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             and abs(entity.y - player.y) <= self.state.fov_radius
         ]
         floor_items = [
-            {"id": e.id, "name": e.name, "item_type": e.item_type, "material": e.material,
-             "quantity": e.quantity, "x": e.x, "y": e.y, "tags": sorted(e.tags)}
+            {
+                "id": e.id,
+                "name": e.name,
+                "item_type": e.item_type,
+                "material": e.material,
+                "quantity": e.quantity,
+                "x": e.x,
+                "y": e.y,
+                "tags": sorted(e.tags),
+            }
             for e in self.state.entities.values()
             if e.kind == "item"
             and self.is_visible(e.x, e.y)
@@ -2206,7 +2635,10 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             "floor_items": floor_items,
             "nearby_map": self.nearby_map_strings(radius=9),
             "nearby_tile_details": self.nearby_tile_details(radius=5),
-            "tile_legend": {tile: {"name": name, "tags": sorted(TILE_TAGS.get(tile, set()))} for tile, name in TILE_NAMES.items()},
+            "tile_legend": {
+                tile: {"name": name, "tags": sorted(TILE_TAGS.get(tile, set()))}
+                for tile, name in TILE_NAMES.items()
+            },
             "supported_effects": [
                 "damage",
                 "area_damage",
@@ -2236,7 +2668,15 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                 "create_trigger",
                 "message",
             ],
-            "supported_costs": ["mana", "health", "max_health", "max_mana", "item", "status", "curse"],
+            "supported_costs": [
+                "mana",
+                "health",
+                "max_health",
+                "max_mana",
+                "item",
+                "status",
+                "curse",
+            ],
             "supported_statuses": sorted(MECHANICAL_STATUSES),
             "conjuration_templates": {
                 "items": item_template_ids(),
@@ -2279,7 +2719,11 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                         None,
                     )
                     tile = self.tile_at(x, y)
-                    chars.append(item.char if item else (tile if self.is_visible(x, y) else tile.lower()))
+                    chars.append(
+                        item.char
+                        if item
+                        else (tile if self.is_visible(x, y) else tile.lower())
+                    )
             rows.append("".join(chars))
         return rows
 

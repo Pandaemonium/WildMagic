@@ -29,11 +29,17 @@ DEFAULT_MODELS = [
 PROMPTS = [
     ("Old Maren", "Evening. Is it safe to stay here tonight?"),
     ("Old Maren", "What do you really think of the Empire?"),
-    ("Quill Hatchet", "I found a strange brass moth in the dungeon. Is it worth anything?"),
+    (
+        "Quill Hatchet",
+        "I found a strange brass moth in the dungeon. Is it worth anything?",
+    ),
     ("Quill Hatchet", "Tell me a rumor that would get someone in trouble."),
     ("Sister Wren", "The dead below are restless. What should I listen for?"),
     ("Sister Wren", "Do the old saints hate wild magic?"),
-    ("Captain Ressa Vane", "I can help defend Hollowmere, but my magic is not chartered."),
+    (
+        "Captain Ressa Vane",
+        "I can help defend Hollowmere, but my magic is not chartered.",
+    ),
     ("Captain Ressa Vane", "If Imperial soldiers come for me, will you turn me over?"),
 ]
 
@@ -97,13 +103,17 @@ def _score_reply(message: str, reply: str, context: dict[str, Any]) -> dict[str,
     }
 
 
-def run_dialogue_eval(models: list[str], output_path: Path, seed: int) -> dict[str, Any]:
+def run_dialogue_eval(
+    models: list[str], output_path: Path, seed: int
+) -> dict[str, Any]:
     os.environ.setdefault("WILDMAGIC_DIALOGUE_PROVIDER", "ollama")
     rows: list[dict[str, Any]] = []
     for model in models:
         provider = OllamaDialogueProvider(model=model)
         for npc_name, message in PROMPTS:
-            session = GameSession(seed=seed, scenario="town", dialogue_provider=provider)
+            session = GameSession(
+                seed=seed, scenario="town", dialogue_provider=provider
+            )
             npc = _npc_by_name(session, npc_name)
             context = session.engine.dialogue_context_for_llm(npc, message)
             started = time.perf_counter()
@@ -126,7 +136,9 @@ def run_dialogue_eval(models: list[str], output_path: Path, seed: int) -> dict[s
 
     report = {"seed": seed, "models": models, "rows": rows}
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8")
+    output_path.write_text(
+        json.dumps(report, indent=2, ensure_ascii=False), encoding="utf-8"
+    )
     return report
 
 
@@ -143,9 +155,14 @@ def print_summary(report: dict[str, Any]) -> None:
         avg_score = sum(row["score"] for row in model_rows) / len(model_rows)
         avg_latency = sum(row["latency_s"] for row in model_rows) / len(model_rows)
         flags = Counter(flag for row in model_rows for flag in row["flags"])
-        flag_text = ", ".join(f"{flag} x{count}" for flag, count in flags.most_common()) or "none"
+        flag_text = (
+            ", ".join(f"{flag} x{count}" for flag, count in flags.most_common())
+            or "none"
+        )
         print(f"{model}")
-        print(f"  avg_score={avg_score:.2f}/12  avg_latency={avg_latency:.2f}s  failures={failures}")
+        print(
+            f"  avg_score={avg_score:.2f}/12  avg_latency={avg_latency:.2f}s  failures={failures}"
+        )
         print(f"  flags: {flag_text}")
         for row in model_rows:
             preview = row["reply"].replace("\n", " ")[:150]
@@ -155,7 +172,9 @@ def print_summary(report: dict[str, Any]) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--model", action="append", dest="models", help="Ollama model tag; repeatable")
+    parser.add_argument(
+        "--model", action="append", dest="models", help="Ollama model tag; repeatable"
+    )
     parser.add_argument("--seed", type=int, default=7)
     parser.add_argument("--output", default="logs/dialogue_eval/report.json")
     args = parser.parse_args(argv)

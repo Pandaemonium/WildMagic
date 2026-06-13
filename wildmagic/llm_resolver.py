@@ -20,11 +20,15 @@ def _write_jsonl_audit(audit_path: Path, record: dict[str, Any]) -> str | None:
     return str(audit_path)
 
 
-def should_retry_resolution(resolved_provider_name: str, attempt: int, max_attempts: int) -> bool:
+def should_retry_resolution(
+    resolved_provider_name: str, attempt: int, max_attempts: int
+) -> bool:
     return resolved_provider_name == "ollama" and attempt + 1 < max_attempts
 
 
-def retry_context(context: dict[str, Any], raw_response: str | None, error: str) -> dict[str, Any]:
+def retry_context(
+    context: dict[str, Any], raw_response: str | None, error: str
+) -> dict[str, Any]:
     updated = dict(context)
     updated["retry_after_invalid_resolution"] = {
         "error": error,

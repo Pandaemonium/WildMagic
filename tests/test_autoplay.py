@@ -60,9 +60,13 @@ def test_agent_command_validation_rejects_literal_placeholders() -> None:
         try:
             validate_agent_command(command)
         except ValueError as exc:
-            assert "placeholder text" in str(exc) or "do not copy spell instructions" in str(exc)
+            assert "placeholder text" in str(
+                exc
+            ) or "do not copy spell instructions" in str(exc)
         else:
-            raise AssertionError(f"placeholder command should fail validation: {command}")
+            raise AssertionError(
+                f"placeholder command should fail validation: {command}"
+            )
 
 
 def test_invariant_checker_contract_violations() -> None:
@@ -93,8 +97,12 @@ def test_invariant_checker_contract_violations() -> None:
         technical_findings = checker.check(session, technical, episode=1)
         rejected_findings = checker.check(session, rejected, episode=1)
 
-        assert any(f.kind == "technical_failure_consumed_turn" for f in technical_findings)
-        assert any(f.kind == "rejected_spell_did_not_consume_turn" for f in rejected_findings)
+        assert any(
+            f.kind == "technical_failure_consumed_turn" for f in technical_findings
+        )
+        assert any(
+            f.kind == "rejected_spell_did_not_consume_turn" for f in rejected_findings
+        )
     finally:
         session.close()
 
@@ -129,9 +137,13 @@ def test_action_messages_survive_message_log_cap() -> None:
         for index in range(200):
             state.add_message(f"filler message {index}")
 
-        result = session.execute_command("cast bind the nearest enemy in sticky blue webbing")
+        result = session.execute_command(
+            "cast bind the nearest enemy in sticky blue webbing"
+        )
 
-        assert result.messages, "command messages must not vanish once the 80-entry log cap is reached"
+        assert result.messages, (
+            "command messages must not vanish once the 80-entry log cap is reached"
+        )
         assert all("filler message" not in message for message in result.messages)
     finally:
         session.close()
@@ -167,7 +179,11 @@ def test_agent_observation_compacts_long_messages_and_exposes_decision_hints() -
             "east": {"status": "open", "suggested_command": "move east"},
         },
         recent_commands=["move north", "move north"],
-        last_result={"command": "move north", "success": False, "messages": ["wall blocks the way."]},
+        last_result={
+            "command": "move north",
+            "success": False,
+            "messages": ["wall blocks the way."],
+        },
         avoid_commands=["move north"],
         expedition_direction="east",
         spell_focus="terrain or battlefield reshaping",
@@ -177,10 +193,21 @@ def test_agent_observation_compacts_long_messages_and_exposes_decision_hints() -
 
     assert len(payload["new_messages"][0]) < 380
     assert "persona_guidance" in payload
-    assert any("Useful directions" in hint and "east" in hint for hint in payload["decision_hints"])
-    assert any("Do not choose" in hint and "move north" in hint for hint in payload["decision_hints"])
-    assert any("Run heading is east" in hint and "move east" in hint for hint in payload["decision_hints"])
-    assert any("Current spell focus: terrain" in hint for hint in payload["decision_hints"])
+    assert any(
+        "Useful directions" in hint and "east" in hint
+        for hint in payload["decision_hints"]
+    )
+    assert any(
+        "Do not choose" in hint and "move north" in hint
+        for hint in payload["decision_hints"]
+    )
+    assert any(
+        "Run heading is east" in hint and "move east" in hint
+        for hint in payload["decision_hints"]
+    )
+    assert any(
+        "Current spell focus: terrain" in hint for hint in payload["decision_hints"]
+    )
 
 
 def test_agent_observation_warns_empty_mana_casting_costs_health() -> None:
@@ -321,7 +348,9 @@ def test_adjacent_options_and_recent_failure_avoidance() -> None:
         assert set(options) == {"north", "south", "east", "west"}
         assert options["east"]["status"] == "door"
         assert options["east"]["suggested_command"] == "open"
-        assert "move north" in avoid_commands_from_history(["move north"], recent, "move north", 1)
+        assert "move north" in avoid_commands_from_history(
+            ["move north"], recent, "move north", 1
+        )
     finally:
         session.close()
 
@@ -366,7 +395,10 @@ def test_finding_spell_reads_wild_magic_evidence() -> None:
 def test_campaign_writes_regression_seeds_for_serious_findings(tmp_path) -> None:
     config = CampaignConfig(episodes=1, out=tmp_path, run_id="regression_test")
     runner = CampaignRunner(config)
-    runner.regression_entries[(7, "dungeon")] = {"unhandled_exception", "possible_softlock"}
+    runner.regression_entries[(7, "dungeon")] = {
+        "unhandled_exception",
+        "possible_softlock",
+    }
 
     runner.write_regression_seeds()
     content = runner.regression_path.read_text(encoding="utf-8")
@@ -396,11 +428,15 @@ def test_campaign_runner_with_stub_agent_writes_artifacts(tmp_path) -> None:
     assert report_path.exists()
     assert (run_dir / "episode_001.jsonl").exists()
     assert (run_dir / "episode_001.replay.json").exists()
-    assert (run_dir / "episode_001.commands.txt").read_text(encoding="utf-8").splitlines() == [
+    assert (run_dir / "episode_001.commands.txt").read_text(
+        encoding="utf-8"
+    ).splitlines() == [
         "inspect",
         "wait",
         "quit",
     ]
-    replay = json.loads((run_dir / "episode_001.replay.json").read_text(encoding="utf-8"))
+    replay = json.loads(
+        (run_dir / "episode_001.replay.json").read_text(encoding="utf-8")
+    )
     assert replay["seed"] == 7
     assert replay["scenario"] == "test_chamber"

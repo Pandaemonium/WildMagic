@@ -49,29 +49,31 @@ def ensure_ollama_running(base_url: str) -> bool:
     import subprocess
     import time
     from urllib.parse import urlparse
-    
+
     parsed = urlparse(base_url)
     host = parsed.hostname or "localhost"
     port = parsed.port or 11434
-    
+
     try:
         with socket.create_connection((host, port), timeout=1):
             return True
     except (OSError, ConnectionRefusedError):
         pass
-        
+
     if not ollama_autostart_enabled():
         print(f"Ollama server not detected at {base_url}. Autostart is disabled.")
         return False
 
-    print(f"Ollama server not detected at {base_url}. Attempting to start 'ollama serve' in the background...")
+    print(
+        f"Ollama server not detected at {base_url}. Attempting to start 'ollama serve' in the background..."
+    )
     try:
         creationflags = 0
         if os.name == "nt":
             creationflags = 0x08000000  # CREATE_NO_WINDOW
         child_env = os.environ.copy()
         child_env["OLLAMA_HOST"] = base_url
-            
+
         subprocess.Popen(
             ["ollama", "serve"],
             stdout=subprocess.DEVNULL,
@@ -83,7 +85,7 @@ def ensure_ollama_running(base_url: str) -> bool:
     except FileNotFoundError:
         print("Ollama command-line tool not found on PATH. Cannot auto-start server.")
         return False
-        
+
     for attempt in range(1, 13):
         time.sleep(1.0)
         try:
@@ -92,16 +94,20 @@ def ensure_ollama_running(base_url: str) -> bool:
                 req = urllib.request.Request(f"{base_url}/api/tags")
                 with urllib.request.urlopen(req, timeout=1) as resp:
                     if resp.status == 200:
-                        print(f"Ollama server successfully started and responsive after {attempt}s.")
+                        print(
+                            f"Ollama server successfully started and responsive after {attempt}s."
+                        )
                         return True
         except Exception:
             pass
-            
+
     print("Ollama server failed to start or respond within 12 seconds.")
     return False
 
 
-def _post_ollama_chat(base_url: str, payload: dict[str, Any], timeout_seconds: float) -> dict[str, Any]:
+def _post_ollama_chat(
+    base_url: str, payload: dict[str, Any], timeout_seconds: float
+) -> dict[str, Any]:
     """Shared low-level Ollama /api/chat POST, used by every Ollama-backed provider
     (wild magic resolution, NPC dialogue, and any future LLM-driven subsystem) so
     that swapping models per-purpose never requires duplicating HTTP plumbing."""
@@ -122,7 +128,9 @@ def _post_ollama_chat(base_url: str, payload: dict[str, Any], timeout_seconds: f
 
 
 def strip_thinking(raw: str) -> str:
-    return re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL | re.IGNORECASE).strip()
+    return re.sub(
+        r"<think>.*?</think>", "", raw, flags=re.DOTALL | re.IGNORECASE
+    ).strip()
 
 
 def extract_thinking(raw: str) -> str | None:
@@ -142,7 +150,9 @@ def normalize_ollama_url(value: str) -> str:
     return url
 
 
-def fetch_ollama_models(base_url: str | None = None, purpose: str | None = "wild") -> list[str]:
+def fetch_ollama_models(
+    base_url: str | None = None, purpose: str | None = "wild"
+) -> list[str]:
     """Return sorted list of model names available from Ollama. Empty list on failure."""
     url = normalize_ollama_url(base_url) if base_url else ollama_host(purpose)
     ensure_ollama_running(url)

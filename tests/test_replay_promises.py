@@ -1,4 +1,4 @@
-﻿"""Replay contract for the Promise Ledger: promises are injected at the recorded apply
+"""Replay contract for the Promise Ledger: promises are injected at the recorded apply
 point (the command boundary where the background lore drain landed), so zones generated
 between the dialogue and the drain see the same reservations live and on replay."""
 

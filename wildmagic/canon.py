@@ -3,6 +3,7 @@
 Canon records are per-run generated descriptions that have become true in the
 current world. The engine supplies the facts; the provider supplies wording only.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -63,8 +64,7 @@ class CanonResolution:
 class CanonProvider(Protocol):
     name: str
 
-    def materialize(self, context: dict[str, Any]) -> str:
-        ...
+    def materialize(self, context: dict[str, Any]) -> str: ...
 
 
 class OllamaCanonProvider:
@@ -74,6 +74,7 @@ class OllamaCanonProvider:
     model/base_url overrides pointing at the background channel instead."""
 
     name = "ollama"
+
     def __init__(
         self,
         model: str | None = None,
@@ -83,21 +84,34 @@ class OllamaCanonProvider:
     ) -> None:
         self.purpose = purpose
         self._model_override = model
-        self.model = model or (get_background_canon_model() if purpose == "lore" else get_canon_model())
-        self.base_url = normalize_ollama_url(base_url) if base_url else ollama_host(self.purpose)
-        self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds(self.purpose)
+        self.model = model or (
+            get_background_canon_model() if purpose == "lore" else get_canon_model()
+        )
+        self.base_url = (
+            normalize_ollama_url(base_url) if base_url else ollama_host(self.purpose)
+        )
+        self.timeout_seconds = (
+            timeout_seconds
+            if timeout_seconds is not None
+            else ollama_timeout_seconds(self.purpose)
+        )
 
     def materialize(self, context: dict[str, Any]) -> str:
         # engine_private carries bookkeeping (tile coordinates, ids) the model
         # must never see — it leaks into prose as "at position nine" otherwise.
-        prompt_context = {key: value for key, value in context.items() if key != "engine_private"}
+        prompt_context = {
+            key: value for key, value in context.items() if key != "engine_private"
+        }
         payload = {
             "model": self._model_override or get_canon_model(),
             "stream": False,
             "think": ollama_thinking_enabled(self.purpose),
             "messages": [
                 {"role": "system", "content": CANON_SYSTEM_PROMPT},
-                {"role": "user", "content": json.dumps(prompt_context, ensure_ascii=True)},
+                {
+                    "role": "user",
+                    "content": json.dumps(prompt_context, ensure_ascii=True),
+                },
             ],
             "options": {
                 "temperature": ollama_canon_temperature(),
@@ -113,7 +127,10 @@ class OllamaCanonProvider:
         try:
             data = _post_ollama_chat(self.base_url, payload, self.timeout_seconds)
         except ValueError as exc:
-            if "Unexpected empty grammar stack" not in str(exc) or "format" not in payload:
+            if (
+                "Unexpected empty grammar stack" not in str(exc)
+                or "format" not in payload
+            ):
                 raise
             retry_payload = dict(payload)
             retry_payload.pop("format", None)
@@ -137,7 +154,11 @@ class MockCanonProvider:
             return self._materialize_investigation(context)
         if kind in {"object_detail", "npc_detail", "creature_detail"}:
             return self._materialize_detail(context)
-        room = context.get("subject", {}).get("room", {}) if isinstance(context.get("subject"), dict) else {}
+        room = (
+            context.get("subject", {}).get("room", {})
+            if isinstance(context.get("subject"), dict)
+            else {}
+        )
         room_type = str(room.get("type") or "room")
         era = str(room.get("era") or "old")
         condition = str(room.get("condition") or "strange")
@@ -158,26 +179,48 @@ class MockCanonProvider:
         )
 
     def _materialize_detail(self, context: dict[str, Any]) -> str:
-        subject = context.get("subject") if isinstance(context.get("subject"), dict) else {}
-        engine_choices = context.get("engine_choices") if isinstance(context.get("engine_choices"), dict) else {}
+        subject = (
+            context.get("subject") if isinstance(context.get("subject"), dict) else {}
+        )
+        engine_choices = (
+            context.get("engine_choices")
+            if isinstance(context.get("engine_choices"), dict)
+            else {}
+        )
         name = str(subject.get("name") or "the thing")
         band = str(subject.get("distance_band") or "adjacent")
         sentences = []
         if band == "adjacent":
-            sentences.append(f"Up close, {name} shows its grain: wear in the places hands go, age in the places they don't.")
+            sentences.append(
+                f"Up close, {name} shows its grain: wear in the places hands go, age in the places they don't."
+            )
         else:
-            sentences.append(f"From {band.replace('_', ' ')}, {name} gives away only outline and bearing.")
-        hint = engine_choices.get("weakness_hint") if isinstance(engine_choices.get("weakness_hint"), dict) else None
+            sentences.append(
+                f"From {band.replace('_', ' ')}, {name} gives away only outline and bearing."
+            )
+        hint = (
+            engine_choices.get("weakness_hint")
+            if isinstance(engine_choices.get("weakness_hint"), dict)
+            else None
+        )
         if hint:
             if hint.get("kind") == "mechanical":
-                sentences.append(f"It carries itself carefully around any suggestion of {hint.get('damage_type')}, the way wounded things avoid a remembered hurt.")
+                sentences.append(
+                    f"It carries itself carefully around any suggestion of {hint.get('damage_type')}, the way wounded things avoid a remembered hurt."
+                )
             else:
-                sentences.append(f"Something in its posture flinches at {hint.get('hint')}.")
+                sentences.append(
+                    f"Something in its posture flinches at {hint.get('hint')}."
+                )
         if engine_choices.get("secret_present"):
             anchor = str(engine_choices.get("anchor_name") or name)
             style = str(engine_choices.get("clue_style") or "scratches")
-            sentences.append(f"{style.capitalize()} ring {anchor}, too deliberate to be accident.")
-        person = subject.get("person") if isinstance(subject.get("person"), dict) else None
+            sentences.append(
+                f"{style.capitalize()} ring {anchor}, too deliberate to be accident."
+            )
+        person = (
+            subject.get("person") if isinstance(subject.get("person"), dict) else None
+        )
         if person and person.get("appearance"):
             sentences.append(str(person["appearance"]))
         return json.dumps(
@@ -191,8 +234,14 @@ class MockCanonProvider:
         )
 
     def _materialize_investigation(self, context: dict[str, Any]) -> str:
-        engine_choices = context.get("engine_choices") if isinstance(context.get("engine_choices"), dict) else {}
-        subject = context.get("subject") if isinstance(context.get("subject"), dict) else {}
+        engine_choices = (
+            context.get("engine_choices")
+            if isinstance(context.get("engine_choices"), dict)
+            else {}
+        )
+        subject = (
+            context.get("subject") if isinstance(context.get("subject"), dict) else {}
+        )
         room = subject.get("room") if isinstance(subject.get("room"), dict) else {}
         room_type = str(room.get("type") or "room")
         if engine_choices.get("secret_present"):
@@ -245,8 +294,12 @@ class MockCanonProvider:
             info["genre"],
         )
         author = info["preview_author"] or self._mock_author(info["author_role"])
-        threads = context.get("threads") if isinstance(context.get("threads"), dict) else {}
-        promises = threads.get("promises") if isinstance(threads.get("promises"), list) else []
+        threads = (
+            context.get("threads") if isinstance(context.get("threads"), dict) else {}
+        )
+        promises = (
+            threads.get("promises") if isinstance(threads.get("promises"), list) else []
+        )
         thread_line = ""
         if promises and isinstance(promises[0], dict) and promises[0].get("text"):
             thread_line = f" In the margin, another hand: '{promises[0]['text']}'"
@@ -274,13 +327,19 @@ class MockCanonProvider:
                     f"{thread_line}"
                 ),
                 "tags": ["book", "lore"],
-                "llm_choices": {"author": author, "voice": info["stance"], "genre": info["genre"]},
+                "llm_choices": {
+                    "author": author,
+                    "voice": info["stance"],
+                    "genre": info["genre"],
+                },
             }
         )
 
     def _materialize_book_preview(self, context: dict[str, Any]) -> str:
         info = self._book_seed_info(context)
-        title = self._mock_book_title(info["title_shape"], info["topic"], info["secondary"], info["genre"])
+        title = self._mock_book_title(
+            info["title_shape"], info["topic"], info["secondary"], info["genre"]
+        )
         author = self._mock_author(info["author_role"])
         return json.dumps(
             {
@@ -291,12 +350,18 @@ class MockCanonProvider:
                 ),
                 "text": f"Preview: {title}, by {author}.",
                 "tags": ["book", "lore", "book_preview"],
-                "llm_choices": {"author": author, "voice": info["stance"], "genre": info["genre"]},
+                "llm_choices": {
+                    "author": author,
+                    "voice": info["stance"],
+                    "genre": info["genre"],
+                },
             }
         )
 
     def _book_seed_info(self, context: dict[str, Any]) -> dict[str, str]:
-        subject = context.get("subject") if isinstance(context.get("subject"), dict) else {}
+        subject = (
+            context.get("subject") if isinstance(context.get("subject"), dict) else {}
+        )
         book = subject.get("book") if isinstance(subject.get("book"), dict) else {}
         catalog = book.get("catalog") if isinstance(book.get("catalog"), dict) else {}
         book_name = str(book.get("name") or "untitled volume")
@@ -305,7 +370,11 @@ class MockCanonProvider:
             topic_words = [w for w in book_name.split() if len(w) > 3][-2:]
             topic = " ".join(topic_words) or "small weather"
         preview = book.get("preview") if isinstance(book.get("preview"), dict) else {}
-        llm_choices = preview.get("llm_choices") if isinstance(preview.get("llm_choices"), dict) else {}
+        llm_choices = (
+            preview.get("llm_choices")
+            if isinstance(preview.get("llm_choices"), dict)
+            else {}
+        )
         return {
             "topic": topic,
             "secondary": str(catalog.get("secondary_topic") or "ordinary grief"),
@@ -321,7 +390,9 @@ class MockCanonProvider:
             "preview_author": str(llm_choices.get("author") or ""),
         }
 
-    def _mock_book_title(self, shape: str, topic: str, secondary: str, genre: str) -> str:
+    def _mock_book_title(
+        self, shape: str, topic: str, secondary: str, genre: str
+    ) -> str:
         if "complaint" in shape:
             return f"Complaint Against the Keepers of {topic.title()}"
         if "confession" in shape:
@@ -401,20 +472,37 @@ def resolve_canon(provider: CanonProvider, context: dict[str, Any]) -> CanonReso
     return resolution
 
 
-def _resolve_canon_once(provider: CanonProvider, context: dict[str, Any]) -> CanonResolution:
+def _resolve_canon_once(
+    provider: CanonProvider, context: dict[str, Any]
+) -> CanonResolution:
     resolved_provider_name = _canon_provider_name(provider)
     raw: str | None = None
     try:
         raw = provider.materialize(context)
         data = parse_canon_json(raw)
         record = normalize_canon_record(data, context)
-        audit_path = _write_canon_audit(provider, context, raw, record, False, None, resolved_provider_name)
-        return CanonResolution(record, False, None, resolved_provider_name, raw, audit_path)
-    except (OSError, TimeoutError, urllib.error.URLError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        audit_path = _write_canon_audit(
+            provider, context, raw, record, False, None, resolved_provider_name
+        )
+        return CanonResolution(
+            record, False, None, resolved_provider_name, raw, audit_path
+        )
+    except (
+        OSError,
+        TimeoutError,
+        urllib.error.URLError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as exc:
         resolved_provider_name = _canon_provider_name(provider)
         error = str(exc)
-        audit_path = _write_canon_audit(provider, context, raw, None, True, error, resolved_provider_name)
-        return CanonResolution(None, True, error, resolved_provider_name, raw, audit_path)
+        audit_path = _write_canon_audit(
+            provider, context, raw, None, True, error, resolved_provider_name
+        )
+        return CanonResolution(
+            None, True, error, resolved_provider_name, raw, audit_path
+        )
 
 
 def parse_canon_json(raw: str) -> dict[str, Any]:
@@ -431,11 +519,17 @@ def parse_canon_json(raw: str) -> dict[str, Any]:
     return parsed
 
 
-def normalize_canon_record(data: dict[str, Any], context: dict[str, Any]) -> CanonRecord:
+def normalize_canon_record(
+    data: dict[str, Any], context: dict[str, Any]
+) -> CanonRecord:
     subject = context.get("subject") if isinstance(context.get("subject"), dict) else {}
-    attachment = subject.get("attachment") if isinstance(subject.get("attachment"), dict) else {}
+    attachment = (
+        subject.get("attachment") if isinstance(subject.get("attachment"), dict) else {}
+    )
     kind = normalize_id(str(context.get("kind") or data.get("kind") or "room_flavor"))
-    record_id = normalize_id(str(context.get("record_id") or data.get("id") or "canon_record"))
+    record_id = normalize_id(
+        str(context.get("record_id") or data.get("id") or "canon_record")
+    )
     if kind == "book":
         text = _clean_body(data.get("text"), _BOOK_TEXT_LIMIT)
     else:
@@ -443,11 +537,20 @@ def normalize_canon_record(data: dict[str, Any], context: dict[str, Any]) -> Can
     if not text:
         raise ValueError("canon response did not include text")
     title = _clean_text(data.get("title"), _TEXT_LIMITS["title"]) or None
-    summary = _clean_text(data.get("summary"), _TEXT_LIMITS["summary"]) or text[:_TEXT_LIMITS["summary"]]
-    allowed_tags = {normalize_id(str(tag)) for tag in context.get("allowed_tags", []) if str(tag).strip()}
+    summary = (
+        _clean_text(data.get("summary"), _TEXT_LIMITS["summary"])
+        or text[: _TEXT_LIMITS["summary"]]
+    )
+    allowed_tags = {
+        normalize_id(str(tag))
+        for tag in context.get("allowed_tags", [])
+        if str(tag).strip()
+    }
     tags = [normalize_id(str(tag)) for tag in data.get("tags", []) if str(tag).strip()]
     tags.extend(str(tag) for tag in context.get("base_tags", []) if str(tag).strip())
-    normalized_tags = sorted({tag for tag in tags if tag and (not allowed_tags or tag in allowed_tags)})
+    normalized_tags = sorted(
+        {tag for tag in tags if tag and (not allowed_tags or tag in allowed_tags)}
+    )
     llm_choices = {
         str(key): _clean_text(value, 60)
         for key, value in (data.get("llm_choices") or {}).items()
@@ -507,7 +610,9 @@ def _write_canon_audit(
     resolved_provider_name: str,
 ) -> str | None:
     audit_path = audit_dir() / "canon_audit.jsonl"
-    prompt_context = {key: value for key, value in context.items() if key != "engine_private"}
+    prompt_context = {
+        key: value for key, value in context.items() if key != "engine_private"
+    }
     prompt_messages = [
         {"role": "system", "content": CANON_SYSTEM_PROMPT},
         {"role": "user", "content": json.dumps(prompt_context, ensure_ascii=True)},

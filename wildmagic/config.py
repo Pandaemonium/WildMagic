@@ -127,7 +127,9 @@ def _first_config_value(keys: list[str], default: str) -> str:
     return default
 
 
-def _scoped_int(purpose: str | None, suffix: str, default: int, minimum: int, maximum: int) -> int:
+def _scoped_int(
+    purpose: str | None, suffix: str, default: int, minimum: int, maximum: int
+) -> int:
     value = _first_config_value(_scoped_keys(purpose, suffix), str(default))
     try:
         parsed = int(value)
@@ -136,7 +138,9 @@ def _scoped_int(purpose: str | None, suffix: str, default: int, minimum: int, ma
     return max(minimum, min(maximum, parsed))
 
 
-def _scoped_float(purpose: str | None, suffix: str, default: float, minimum: float, maximum: float) -> float:
+def _scoped_float(
+    purpose: str | None, suffix: str, default: float, minimum: float, maximum: float
+) -> float:
     value = _first_config_value(_scoped_keys(purpose, suffix), str(default))
     try:
         parsed = float(value)
@@ -146,7 +150,11 @@ def _scoped_float(purpose: str | None, suffix: str, default: float, minimum: flo
 
 
 def _scoped_bool(purpose: str | None, suffix: str, default: bool) -> bool:
-    value = _first_config_value(_scoped_keys(purpose, suffix), "1" if default else "0").lower().strip()
+    value = (
+        _first_config_value(_scoped_keys(purpose, suffix), "1" if default else "0")
+        .lower()
+        .strip()
+    )
     if value in _TRUE_VALUES or value == "json":
         return True
     if value in _FALSE_VALUES:
@@ -191,27 +199,39 @@ def get_agent_model() -> str:
 
 
 def get_wild_magic_provider() -> str:
-    return (get_config_value("WILDMAGIC_PROVIDER", DEFAULT_PROVIDER) or DEFAULT_PROVIDER).lower()
+    return (
+        get_config_value("WILDMAGIC_PROVIDER", DEFAULT_PROVIDER) or DEFAULT_PROVIDER
+    ).lower()
 
 
 def get_dialogue_provider() -> str:
-    return (get_config_value("WILDMAGIC_DIALOGUE_PROVIDER") or get_wild_magic_provider()).lower()
+    return (
+        get_config_value("WILDMAGIC_DIALOGUE_PROVIDER") or get_wild_magic_provider()
+    ).lower()
 
 
 def get_trade_provider() -> str:
-    return (get_config_value("WILDMAGIC_TRADE_PROVIDER") or get_dialogue_provider()).lower()
+    return (
+        get_config_value("WILDMAGIC_TRADE_PROVIDER") or get_dialogue_provider()
+    ).lower()
 
 
 def get_town_provider() -> str:
-    return (get_config_value("WILDMAGIC_TOWN_PROVIDER") or get_wild_magic_provider()).lower()
+    return (
+        get_config_value("WILDMAGIC_TOWN_PROVIDER") or get_wild_magic_provider()
+    ).lower()
 
 
 def get_lore_provider() -> str:
-    return (get_config_value("WILDMAGIC_LORE_PROVIDER") or get_wild_magic_provider()).lower()
+    return (
+        get_config_value("WILDMAGIC_LORE_PROVIDER") or get_wild_magic_provider()
+    ).lower()
 
 
 def get_canon_provider() -> str:
-    return (get_config_value("WILDMAGIC_CANON_PROVIDER") or get_wild_magic_provider()).lower()
+    return (
+        get_config_value("WILDMAGIC_CANON_PROVIDER") or get_wild_magic_provider()
+    ).lower()
 
 
 def ollama_host(purpose: str | None = None) -> str:

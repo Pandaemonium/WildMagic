@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from wildmagic.actions import describe_state, summarize_state
 from wildmagic.actions import GameSession
@@ -24,8 +24,14 @@ def test_room_profiles_feed_context_and_headless_inspect() -> None:
     assert any(room["id"] == current_room.id for room in context["nearby_rooms"])
 
     inspect_lines = describe_state(engine)
-    assert any(line.startswith("Current room:") and current_room.room_type in line for line in inspect_lines)
-    assert any(line.startswith("Visible rooms:") and current_room.room_type in line for line in inspect_lines)
+    assert any(
+        line.startswith("Current room:") and current_room.room_type in line
+        for line in inspect_lines
+    )
+    assert any(
+        line.startswith("Visible rooms:") and current_room.room_type in line
+        for line in inspect_lines
+    )
 
 
 def test_canon_records_are_retrieved_by_room_threads_and_summarized() -> None:
@@ -59,7 +65,10 @@ def test_canon_records_are_retrieved_by_room_threads_and_summarized() -> None:
 
 def test_room_profiles_survive_dungeon_floor_snapshots() -> None:
     engine = GameEngine(seed=11, scenario="dungeon")
-    before = {room_id: room.to_public_dict() for room_id, room in engine.state.room_profiles.items()}
+    before = {
+        room_id: room.to_public_dict()
+        for room_id, room in engine.state.room_profiles.items()
+    }
     assert before
 
     engine._save_dungeon_floor(engine.state.depth)
@@ -67,9 +76,14 @@ def test_room_profiles_survive_dungeon_floor_snapshots() -> None:
     engine.state.tile_rooms.clear()
     engine._load_dungeon_floor(engine.state.depth, STAIRS_DOWN)
 
-    after = {room_id: room.to_public_dict() for room_id, room in engine.state.room_profiles.items()}
+    after = {
+        room_id: room.to_public_dict()
+        for room_id, room in engine.state.room_profiles.items()
+    }
     assert after == before
-    assert engine.room_profile_at(engine.state.player.x, engine.state.player.y) is not None
+    assert (
+        engine.room_profile_at(engine.state.player.x, engine.state.player.y) is not None
+    )
 
 
 def test_realized_promise_flesh_writes_canon_records(monkeypatch) -> None:
@@ -109,8 +123,14 @@ def test_realized_promise_flesh_writes_canon_records(monkeypatch) -> None:
     assert "chapel" in site.tags
     assert site.seed_packet["promise_id"] == promise.id
 
-    assert any(record.kind == "npc_appearance" and record.title == "Warden Bell" for record in canon.values())
-    assert any(record.kind == "object_detail" and "votive bowl" in record.text for record in canon.values())
+    assert any(
+        record.kind == "npc_appearance" and record.title == "Warden Bell"
+        for record in canon.values()
+    )
+    assert any(
+        record.kind == "object_detail" and "votive bowl" in record.text
+        for record in canon.values()
+    )
 
     assert any(
         record["id"] == "canon_promise_quiet_chapel_site"
@@ -119,7 +139,12 @@ def test_realized_promise_flesh_writes_canon_records(monkeypatch) -> None:
 
 
 def test_examine_materializes_current_room_once() -> None:
-    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    session = GameSession(
+        seed=7,
+        scenario="test_chamber",
+        provider_name="mock",
+        canon_provider_name="mock",
+    )
     try:
         first = session.execute_command("examine")
         assert first.success
@@ -129,10 +154,13 @@ def test_examine_materializes_current_room_once() -> None:
         assert len(session.engine.state.canon_records) == 1
         record = next(iter(session.engine.state.canon_records.values()))
         assert record.kind == "room_flavor"
-        assert record.attachment["room_id"] == session.engine.room_profile_at(
-            session.engine.state.player.x,
-            session.engine.state.player.y,
-        ).id
+        assert (
+            record.attachment["room_id"]
+            == session.engine.room_profile_at(
+                session.engine.state.player.x,
+                session.engine.state.player.y,
+            ).id
+        )
         assert session.records[-1]["canon"]["after"][0]["id"] == record.id
 
         second = session.execute_command("examine")
@@ -146,7 +174,12 @@ def test_examine_materializes_current_room_once() -> None:
 
 
 def test_examine_canon_replays_without_provider_call(tmp_path) -> None:
-    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    session = GameSession(
+        seed=7,
+        scenario="test_chamber",
+        provider_name="mock",
+        canon_provider_name="mock",
+    )
     try:
         result = session.execute_command("examine")
         assert result.success
@@ -162,9 +195,16 @@ def test_examine_canon_replays_without_provider_call(tmp_path) -> None:
 def test_room_prewarm_materializes_current_room_without_turn_cost(monkeypatch) -> None:
     monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_ENABLED", "1")
     monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_LIMIT", "1")
-    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    session = GameSession(
+        seed=7,
+        scenario="test_chamber",
+        provider_name="mock",
+        canon_provider_name="mock",
+    )
     try:
-        room = session.engine.room_profile_at(session.engine.state.player.x, session.engine.state.player.y)
+        room = session.engine.room_profile_at(
+            session.engine.state.player.x, session.engine.state.player.y
+        )
         assert room is not None
         result = session.execute_command("inspect")
         session.drain_canon_prewarm(block=True)
@@ -182,7 +222,12 @@ def test_room_prewarm_materializes_current_room_without_turn_cost(monkeypatch) -
 def test_examine_after_room_prewarm_reuses_room_flavor(monkeypatch) -> None:
     monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_ENABLED", "1")
     monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_LIMIT", "1")
-    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    session = GameSession(
+        seed=7,
+        scenario="test_chamber",
+        provider_name="mock",
+        canon_provider_name="mock",
+    )
     try:
         session.execute_command("inspect")
         session.drain_canon_prewarm(block=True)
@@ -190,7 +235,14 @@ def test_examine_after_room_prewarm_reuses_room_flavor(monkeypatch) -> None:
         assert result.success
         assert not result.consumed_turn
         assert result.canon_materialization["reused"] is True
-        assert sum(1 for record in session.engine.state.canon_records.values() if record.kind == "room_flavor") == 1
+        assert (
+            sum(
+                1
+                for record in session.engine.state.canon_records.values()
+                if record.kind == "room_flavor"
+            )
+            == 1
+        )
     finally:
         session.close()
 
@@ -198,7 +250,12 @@ def test_examine_after_room_prewarm_reuses_room_flavor(monkeypatch) -> None:
 def test_room_prewarm_replays_without_provider_call(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_ENABLED", "1")
     monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_LIMIT", "1")
-    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    session = GameSession(
+        seed=7,
+        scenario="test_chamber",
+        provider_name="mock",
+        canon_provider_name="mock",
+    )
     try:
         session.execute_command("inspect")
         replay_path = tmp_path / "room_prewarm.json"
@@ -208,15 +265,29 @@ def test_room_prewarm_replays_without_provider_call(monkeypatch, tmp_path) -> No
 
     replay_result = run_replay(replay_path)
     assert replay_result.matched
-    assert any(record["kind"] == "room_flavor" for record in replay_result.final_summary["canon_records"])
+    assert any(
+        record["kind"] == "room_flavor"
+        for record in replay_result.final_summary["canon_records"]
+    )
 
 
-def test_entity_detail_prewarm_materializes_far_look_without_turn_cost(monkeypatch) -> None:
+def test_entity_detail_prewarm_materializes_far_look_without_turn_cost(
+    monkeypatch,
+) -> None:
     monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_ENABLED", "1")
     monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_LIMIT", "3")
-    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    session = GameSession(
+        seed=7,
+        scenario="test_chamber",
+        provider_name="mock",
+        canon_provider_name="mock",
+    )
     try:
-        moss = next(entity for entity in session.engine.state.entities.values() if entity.name == "blood moss")
+        moss = next(
+            entity
+            for entity in session.engine.state.entities.values()
+            if entity.name == "blood moss"
+        )
         result = session.execute_command("inspect")
         session.drain_canon_prewarm(block=True)
         assert result.success
@@ -234,7 +305,12 @@ def test_entity_detail_prewarm_materializes_far_look_without_turn_cost(monkeypat
 def test_investigate_after_entity_detail_prewarm_reuses_far_look(monkeypatch) -> None:
     monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_ENABLED", "1")
     monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_LIMIT", "3")
-    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    session = GameSession(
+        seed=7,
+        scenario="test_chamber",
+        provider_name="mock",
+        canon_provider_name="mock",
+    )
     try:
         session.execute_command("open")
         session.drain_canon_prewarm(block=True)
@@ -249,10 +325,17 @@ def test_investigate_after_entity_detail_prewarm_reuses_far_look(monkeypatch) ->
         session.close()
 
 
-def test_entity_detail_prewarm_replays_without_provider_call(monkeypatch, tmp_path) -> None:
+def test_entity_detail_prewarm_replays_without_provider_call(
+    monkeypatch, tmp_path
+) -> None:
     monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_ENABLED", "1")
     monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_LIMIT", "3")
-    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    session = GameSession(
+        seed=7,
+        scenario="test_chamber",
+        provider_name="mock",
+        canon_provider_name="mock",
+    )
     try:
         session.execute_command("inspect")
         replay_path = tmp_path / "entity_detail_prewarm.json"
@@ -262,7 +345,10 @@ def test_entity_detail_prewarm_replays_without_provider_call(monkeypatch, tmp_pa
 
     replay_result = run_replay(replay_path)
     assert replay_result.matched
-    assert any(record["kind"] == "object_detail" for record in replay_result.final_summary["canon_records"])
+    assert any(
+        record["kind"] == "object_detail"
+        for record in replay_result.final_summary["canon_records"]
+    )
 
 
 def test_examine_technical_failure_replays_without_materializing(tmp_path) -> None:
@@ -352,7 +438,12 @@ def test_book_texture_carries_rich_seed_axes() -> None:
 
 
 def test_book_seed_packet_includes_catalog_guidance() -> None:
-    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    session = GameSession(
+        seed=7,
+        scenario="test_chamber",
+        provider_name="mock",
+        canon_provider_name="mock",
+    )
     try:
         book = _chamber_book(session.engine)
         context = session._canon_context_for_book(book, "canon_test_book")
@@ -369,10 +460,18 @@ def test_book_seed_packet_includes_catalog_guidance() -> None:
 
 def test_book_prewarm_is_disabled_by_default(monkeypatch) -> None:
     monkeypatch.delenv("WILDMAGIC_CANON_PREWARM_ENABLED", raising=False)
-    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    session = GameSession(
+        seed=7,
+        scenario="test_chamber",
+        provider_name="mock",
+        canon_provider_name="mock",
+    )
     try:
         session.execute_command("inspect")
-        assert not any(record.kind == "book_preview" for record in session.engine.state.canon_records.values())
+        assert not any(
+            record.kind == "book_preview"
+            for record in session.engine.state.canon_records.values()
+        )
     finally:
         session.close()
 
@@ -380,7 +479,12 @@ def test_book_prewarm_is_disabled_by_default(monkeypatch) -> None:
 def test_book_prewarm_materializes_preview_without_turn_cost(monkeypatch) -> None:
     monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_ENABLED", "1")
     monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_LIMIT", "3")
-    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    session = GameSession(
+        seed=7,
+        scenario="test_chamber",
+        provider_name="mock",
+        canon_provider_name="mock",
+    )
     try:
         book = _chamber_book(session.engine)
         original_name = book.name
@@ -388,7 +492,11 @@ def test_book_prewarm_materializes_preview_without_turn_cost(monkeypatch) -> Non
         session.drain_canon_prewarm(block=True)
         assert result.success
         assert not result.consumed_turn
-        previews = [record for record in session.engine.state.canon_records.values() if record.kind == "book_preview"]
+        previews = [
+            record
+            for record in session.engine.state.canon_records.values()
+            if record.kind == "book_preview"
+        ]
         assert len(previews) == 1
         preview = previews[0]
         assert preview.attachment == {"kind": "prop", "entity_id": book.id}
@@ -402,16 +510,29 @@ def test_book_prewarm_materializes_preview_without_turn_cost(monkeypatch) -> Non
 def test_read_after_book_prewarm_reuses_preview_identity(monkeypatch) -> None:
     monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_ENABLED", "1")
     monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_LIMIT", "3")
-    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    session = GameSession(
+        seed=7,
+        scenario="test_chamber",
+        provider_name="mock",
+        canon_provider_name="mock",
+    )
     try:
         book = _chamber_book(session.engine)
         session.execute_command("inspect")
         session.drain_canon_prewarm(block=True)
-        preview = next(record for record in session.engine.state.canon_records.values() if record.kind == "book_preview")
+        preview = next(
+            record
+            for record in session.engine.state.canon_records.values()
+            if record.kind == "book_preview"
+        )
         result = session.execute_command("read")
         assert result.success
         assert result.consumed_turn
-        full = next(record for record in session.engine.state.canon_records.values() if record.kind == "book")
+        full = next(
+            record
+            for record in session.engine.state.canon_records.values()
+            if record.kind == "book"
+        )
         assert full.title == preview.title
         assert full.llm_choices.get("author") == preview.llm_choices.get("author")
         assert book.name == full.title
@@ -422,7 +543,12 @@ def test_read_after_book_prewarm_reuses_preview_identity(monkeypatch) -> None:
 def test_book_prewarm_replays_without_provider_call(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_ENABLED", "1")
     monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_LIMIT", "3")
-    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    session = GameSession(
+        seed=7,
+        scenario="test_chamber",
+        provider_name="mock",
+        canon_provider_name="mock",
+    )
     try:
         session.execute_command("inspect")
         replay_path = tmp_path / "book_prewarm.json"
@@ -432,11 +558,19 @@ def test_book_prewarm_replays_without_provider_call(monkeypatch, tmp_path) -> No
 
     replay_result = run_replay(replay_path)
     assert replay_result.matched
-    assert any(record["kind"] == "book_preview" for record in replay_result.final_summary["canon_records"])
+    assert any(
+        record["kind"] == "book_preview"
+        for record in replay_result.final_summary["canon_records"]
+    )
 
 
 def test_read_book_materializes_title_pages_and_costs_turn() -> None:
-    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    session = GameSession(
+        seed=7,
+        scenario="test_chamber",
+        provider_name="mock",
+        canon_provider_name="mock",
+    )
     try:
         book = _chamber_book(session.engine)
         first = session.execute_command("read")
@@ -444,7 +578,9 @@ def test_read_book_materializes_title_pages_and_costs_turn() -> None:
         assert first.consumed_turn
         assert first.canon_materialization is not None
         assert first.canon_materialization["technical_failure"] is False
-        record = next(r for r in session.engine.state.canon_records.values() if r.kind == "book")
+        record = next(
+            r for r in session.engine.state.canon_records.values() if r.kind == "book"
+        )
         assert record.attachment == {"kind": "prop", "entity_id": book.id}
         assert record.title
         # Materialized title becomes the book's in-world identity.
@@ -455,7 +591,14 @@ def test_read_book_materializes_title_pages_and_costs_turn() -> None:
         assert second.success
         assert not second.consumed_turn
         assert second.canon_materialization["reused"] is True
-        assert sum(1 for r in session.engine.state.canon_records.values() if r.kind == "book") == 1
+        assert (
+            sum(
+                1
+                for r in session.engine.state.canon_records.values()
+                if r.kind == "book"
+            )
+            == 1
+        )
     finally:
         session.close()
 
@@ -497,7 +640,9 @@ def test_book_pages_feed_lore_extraction_with_book_source() -> None:
         result = session.execute_command("read")
         assert result.success
         session.drain_lore(block=True)
-        book_promises = [p for p in session.engine.state.promises if p.source.startswith("book:")]
+        book_promises = [
+            p for p in session.engine.state.promises if p.source.startswith("book:")
+        ]
         assert book_promises
         assert all(p.source_reply for p in book_promises)
     finally:
@@ -537,7 +682,9 @@ def test_book_claim_quota_clamps_extra_claims() -> None:
         result = session.execute_command("read")
         assert result.success
         session.drain_lore(block=True)
-        book_promises = [p for p in session.engine.state.promises if p.source.startswith("book:")]
+        book_promises = [
+            p for p in session.engine.state.promises if p.source.startswith("book:")
+        ]
         # CONTRACT claim_quota for books is 2; the third claim is dropped by the clamp.
         assert len(book_promises) == 2
     finally:
@@ -562,7 +709,12 @@ def test_room_context_never_exposes_secret_slots() -> None:
 
 
 def test_investigate_clue_then_anchor_opens_secret() -> None:
-    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    session = GameSession(
+        seed=7,
+        scenario="test_chamber",
+        provider_name="mock",
+        canon_provider_name="mock",
+    )
     try:
         slot = _chamber_secret_slot(session.engine)
         turn_before = session.engine.state.turn
@@ -590,7 +742,9 @@ def test_investigate_clue_then_anchor_opens_secret() -> None:
         assert reveal.consumed_turn
         assert slot["status"] == "opened"
         assert session.engine.state.inventory.get(reward_name, 0) >= 1
-        open_record = session.engine.state.canon_records[f"canon_secret_open_{slot['id']}"]
+        open_record = session.engine.state.canon_records[
+            f"canon_secret_open_{slot['id']}"
+        ]
         assert open_record.source == "engine"
         assert reward_name in open_record.text
     finally:
@@ -599,16 +753,27 @@ def test_investigate_clue_then_anchor_opens_secret() -> None:
 
 def test_investigate_without_secret_never_yields_rewards() -> None:
     """Exit gate: where secret_present=false, no investigation can produce loot."""
-    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    session = GameSession(
+        seed=7,
+        scenario="test_chamber",
+        provider_name="mock",
+        canon_provider_name="mock",
+    )
     try:
-        room = session.engine.room_profile_at(session.engine.state.player.x, session.engine.state.player.y)
+        room = session.engine.room_profile_at(
+            session.engine.state.player.x, session.engine.state.player.y
+        )
         room.secret_slots[:] = []  # no secret placed by the engine
         inventory_before = dict(session.engine.state.inventory)
 
         sweep = session.execute_command("investigate")
         assert sweep.success
         assert sweep.consumed_turn
-        record = next(r for r in session.engine.state.canon_records.values() if r.kind == "investigation")
+        record = next(
+            r
+            for r in session.engine.state.canon_records.values()
+            if r.kind == "investigation"
+        )
         assert record.engine_choices["secret_present"] is False
 
         # Spam-focusing every prop in the room yields details at most — never loot.
@@ -645,7 +810,12 @@ def test_investigate_failure_costs_no_turn_and_leaves_secret_hidden() -> None:
 
 
 def test_investigate_full_sequence_replays(tmp_path) -> None:
-    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    session = GameSession(
+        seed=7,
+        scenario="test_chamber",
+        provider_name="mock",
+        canon_provider_name="mock",
+    )
     try:
         slot = _chamber_secret_slot(session.engine)
         assert session.execute_command("investigate").success
@@ -662,13 +832,22 @@ def test_investigate_full_sequence_replays(tmp_path) -> None:
 
 
 def test_targeted_investigate_materializes_detail_tiers() -> None:
-    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    session = GameSession(
+        seed=7,
+        scenario="test_chamber",
+        provider_name="mock",
+        canon_provider_name="mock",
+    )
     try:
         engine = session.engine
         room = engine.room_profile_at(engine.state.player.x, engine.state.player.y)
         room.secret_slots[:] = []  # keep this test about details, not secrets
-        goblin = next(e for e in engine.state.entities.values() if e.name == "test goblin")
-        session.execute_command("open")  # the chamber door hides the goblin until opened
+        goblin = next(
+            e for e in engine.state.entities.values() if e.name == "test goblin"
+        )
+        session.execute_command(
+            "open"
+        )  # the chamber door hides the goblin until opened
 
         far = session.execute_command(f"investigate {goblin.id}")
         assert far.success and far.consumed_turn
@@ -688,13 +867,20 @@ def test_targeted_investigate_materializes_detail_tiers() -> None:
         assert close.success and close.consumed_turn
         assert f"canon_detail_{goblin.id}_close" in engine.state.canon_records
         # Prose reached the message log (display fix).
-        assert any(far_record.text in m for m in [str(m) for m in engine.state.messages])
+        assert any(
+            far_record.text in m for m in [str(m) for m in engine.state.messages]
+        )
     finally:
         session.close()
 
 
 def test_adjacent_prop_study_surfaces_hidden_clue() -> None:
-    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    session = GameSession(
+        seed=7,
+        scenario="test_chamber",
+        provider_name="mock",
+        canon_provider_name="mock",
+    )
     try:
         engine = session.engine
         slot = _chamber_secret_slot(engine)
@@ -712,15 +898,24 @@ def test_adjacent_prop_study_surfaces_hidden_clue() -> None:
 
 
 def test_canon_retells_do_not_flood_the_log() -> None:
-    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    session = GameSession(
+        seed=7,
+        scenario="test_chamber",
+        provider_name="mock",
+        canon_provider_name="mock",
+    )
     try:
         engine = session.engine
         room = engine.room_profile_at(engine.state.player.x, engine.state.player.y)
         room.secret_slots[:] = []
         first = session.execute_command("investigate")
         assert first.success
-        record = next(r for r in engine.state.canon_records.values() if r.kind == "investigation")
-        count_after_first = sum(1 for m in engine.state.messages if str(m) == record.text)
+        record = next(
+            r for r in engine.state.canon_records.values() if r.kind == "investigation"
+        )
+        count_after_first = sum(
+            1 for m in engine.state.messages if str(m) == record.text
+        )
         assert count_after_first == 1
         # Spamming the key retells for free without re-logging the prose.
         for _ in range(5):
@@ -732,7 +927,12 @@ def test_canon_retells_do_not_flood_the_log() -> None:
 
 
 def test_unmatched_target_costs_nothing() -> None:
-    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    session = GameSession(
+        seed=7,
+        scenario="test_chamber",
+        provider_name="mock",
+        canon_provider_name="mock",
+    )
     try:
         result = session.execute_command("investigate the moon")
         assert not result.success
@@ -742,29 +942,44 @@ def test_unmatched_target_costs_nothing() -> None:
 
 
 def test_sweep_decoration_spawns_from_engine_menu() -> None:
-    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    session = GameSession(
+        seed=7,
+        scenario="test_chamber",
+        provider_name="mock",
+        canon_provider_name="mock",
+    )
     try:
         engine = session.engine
         room = engine.room_profile_at(engine.state.player.x, engine.state.player.y)
         room.secret_slots[:] = []
-        props_before = {e.id for e in engine.state.entities.values() if e.kind == "prop"}
+        props_before = {
+            e.id for e in engine.state.entities.values() if e.kind == "prop"
+        }
         result = session.execute_command("investigate")
         assert result.success
-        record = next(r for r in engine.state.canon_records.values() if r.kind == "investigation")
+        record = next(
+            r for r in engine.state.canon_records.values() if r.kind == "investigation"
+        )
         new_props = [
-            e for e in engine.state.entities.values()
+            e
+            for e in engine.state.entities.values()
             if e.kind == "prop" and e.id not in props_before
         ]
         if record.llm_choices.get("decoration_template"):
             assert len(new_props) == 1
-            allowed = {o["template"] for o in record.engine_choices["decoration_options"]}
+            allowed = {
+                o["template"] for o in record.engine_choices["decoration_options"]
+            }
             # The spawned prop came from the engine's menu, at the engine's spot.
             assert new_props[0].x == record.engine_choices["decoration_spot"][0]
             assert new_props[0].y == record.engine_choices["decoration_spot"][1]
             assert allowed
             # Sweeping again never duplicates it.
             session.execute_command("investigate")
-            assert sum(1 for e in engine.state.entities.values() if e.kind == "prop") == len(props_before) + 1
+            assert (
+                sum(1 for e in engine.state.entities.values() if e.kind == "prop")
+                == len(props_before) + 1
+            )
         else:
             assert not new_props
     finally:
@@ -772,13 +987,22 @@ def test_sweep_decoration_spawns_from_engine_menu() -> None:
 
 
 def test_detail_and_decoration_replays(tmp_path) -> None:
-    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    session = GameSession(
+        seed=7,
+        scenario="test_chamber",
+        provider_name="mock",
+        canon_provider_name="mock",
+    )
     try:
         engine = session.engine
-        goblin = next(e for e in engine.state.entities.values() if e.name == "test goblin")
+        goblin = next(
+            e for e in engine.state.entities.values() if e.name == "test goblin"
+        )
         session.execute_command("open")
         assert session.execute_command(f"investigate {goblin.id}").success
-        assert session.execute_command("investigate").success  # clue stage (chamber secret)
+        assert session.execute_command(
+            "investigate"
+        ).success  # clue stage (chamber secret)
         replay_path = tmp_path / "detail.json"
         save_replay(session, replay_path)
     finally:
@@ -789,7 +1013,12 @@ def test_detail_and_decoration_replays(tmp_path) -> None:
 
 
 def test_read_book_replays_without_provider_call(tmp_path) -> None:
-    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock", canon_provider_name="mock")
+    session = GameSession(
+        seed=7,
+        scenario="test_chamber",
+        provider_name="mock",
+        canon_provider_name="mock",
+    )
     try:
         _chamber_book(session.engine)
         result = session.execute_command("read")

@@ -23,7 +23,9 @@ def pytest_configure(config: pytest.Config) -> None:
         os.environ.setdefault("WILDMAGIC_CANON_PREWARM_ENABLED", "0")
 
 
-def pytest_collection_modifyitems(config: pytest.Config, items: list[pytest.Item]) -> None:
+def pytest_collection_modifyitems(
+    config: pytest.Config, items: list[pytest.Item]
+) -> None:
     if config.getoption("--full"):
         return
     skip_full = pytest.mark.skip(reason="requires pytest --full")

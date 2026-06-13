@@ -44,7 +44,13 @@ from .llm_client import (
 )
 from .llm_resolver import _write_jsonl_audit, should_retry_resolution, retry_context
 from .models import MECHANICAL_STATUSES, TILE_ALIASES
-from .prompts import SYSTEM_PROMPT, DIALOGUE_SYSTEM_PROMPT, TRADE_SYSTEM_PROMPT, TOWN_SYSTEM_PROMPT, region_prompt_block
+from .prompts import (
+    SYSTEM_PROMPT,
+    DIALOGUE_SYSTEM_PROMPT,
+    TRADE_SYSTEM_PROMPT,
+    TOWN_SYSTEM_PROMPT,
+    region_prompt_block,
+)
 
 
 def _wild_prompt_messages(context: dict[str, Any]) -> list[dict[str, str]]:
@@ -54,9 +60,14 @@ def _wild_prompt_messages(context: dict[str, Any]) -> list[dict[str, str]]:
     region_style = context.get("region_style")
     payload_context = {k: v for k, v in context.items() if k != "region_style"}
     return [
-        {"role": "system", "content": SYSTEM_PROMPT + region_prompt_block(region_style)},
+        {
+            "role": "system",
+            "content": SYSTEM_PROMPT + region_prompt_block(region_style),
+        },
         {"role": "user", "content": json.dumps(payload_context, ensure_ascii=True)},
     ]
+
+
 from .spell_contract import (
     SPELL_RESPONSE_JSON_SCHEMA,
     STATUS_FLAVOR_ALIASES as _STATUS_FLAVOR_ALIASES,
@@ -79,8 +90,7 @@ class MagicResolution:
 class WildMagicProvider(Protocol):
     name: str
 
-    def resolve(self, spell: str, context: dict[str, Any]) -> str:
-        ...
+    def resolve(self, spell: str, context: dict[str, Any]) -> str: ...
 
 
 class OllamaWildMagicProvider:
@@ -95,8 +105,14 @@ class OllamaWildMagicProvider:
     ) -> None:
         self._model_override = model
         self.model = model or get_wild_magic_model()
-        self.base_url = normalize_ollama_url(base_url) if base_url else ollama_host(self.purpose)
-        self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds(self.purpose)
+        self.base_url = (
+            normalize_ollama_url(base_url) if base_url else ollama_host(self.purpose)
+        )
+        self.timeout_seconds = (
+            timeout_seconds
+            if timeout_seconds is not None
+            else ollama_timeout_seconds(self.purpose)
+        )
 
     def resolve(self, spell: str, context: dict[str, Any]) -> str:
         payload = {
@@ -118,7 +134,10 @@ class OllamaWildMagicProvider:
         try:
             data = self._post_chat(payload)
         except ValueError as exc:
-            if "Unexpected empty grammar stack" not in str(exc) or "format" not in payload:
+            if (
+                "Unexpected empty grammar stack" not in str(exc)
+                or "format" not in payload
+            ):
                 raise
             retry_payload = dict(payload)
             retry_payload.pop("format", None)
@@ -142,7 +161,16 @@ class MockWildMagicProvider:
         py = player["position"]["y"]
         nearest_enemy = _nearest_enemy_id(context)
 
-        if any(word in text for word in ["win game", "infinite", "immortal", "kill everything", "kill all"]):
+        if any(
+            word in text
+            for word in [
+                "win game",
+                "infinite",
+                "immortal",
+                "kill everything",
+                "kill all",
+            ]
+        ):
             return json.dumps(
                 {
                     "accepted": False,
@@ -161,8 +189,18 @@ class MockWildMagicProvider:
                     "severity": "moderate",
                     "outcome_text": "A brittle clatter answers from inside the mouth.",
                     "effects": [
-                        {"type": "damage", "target": nearest_enemy or "nearest_enemy", "amount": 3, "damage_type": "physical"},
-                        {"type": "add_status", "target": nearest_enemy or "nearest_enemy", "status": "bleeding", "duration": 4},
+                        {
+                            "type": "damage",
+                            "target": nearest_enemy or "nearest_enemy",
+                            "amount": 3,
+                            "damage_type": "physical",
+                        },
+                        {
+                            "type": "add_status",
+                            "target": nearest_enemy or "nearest_enemy",
+                            "status": "bleeding",
+                            "duration": 4,
+                        },
                         {
                             "type": "conjure_item",
                             "template": "body_part",
@@ -223,8 +261,13 @@ class MockWildMagicProvider:
                     "accepted": True,
                     "severity": "moderate",
                     "outcome_text": "Space turns sideways.",
-                    "effects": [{"type": "teleport", "target": "player", "x": px + 3, "y": py}],
-                    "costs": [{"type": "mana", "amount": 3}, {"type": "health", "amount": 1}],
+                    "effects": [
+                        {"type": "teleport", "target": "player", "x": px + 3, "y": py}
+                    ],
+                    "costs": [
+                        {"type": "mana", "amount": 3},
+                        {"type": "health", "amount": 1},
+                    ],
                     "rejected_reason": None,
                 }
             )
@@ -235,7 +278,14 @@ class MockWildMagicProvider:
                     "accepted": True,
                     "severity": "minor",
                     "outcome_text": "Frost writes a hard line on the floor.",
-                    "effects": [{"type": "create_tile", "x": px + 1, "y": py, "tile": "ice_wall"}],
+                    "effects": [
+                        {
+                            "type": "create_tile",
+                            "x": px + 1,
+                            "y": py,
+                            "tile": "ice_wall",
+                        }
+                    ],
                     "costs": [{"type": "mana", "amount": 2}],
                     "rejected_reason": None,
                 }
@@ -279,8 +329,19 @@ class MockWildMagicProvider:
                     "severity": "moderate",
                     "outcome_text": "Water remembers it used to be everywhere.",
                     "effects": [
-                        {"type": "create_tiles", "target": "player", "radius": 2, "tile": "water", "duration": 8},
-                        {"type": "push", "target": nearest_enemy or "nearest_enemy", "origin": "player", "distance": 2},
+                        {
+                            "type": "create_tiles",
+                            "target": "player",
+                            "radius": 2,
+                            "tile": "water",
+                            "duration": 8,
+                        },
+                        {
+                            "type": "push",
+                            "target": nearest_enemy or "nearest_enemy",
+                            "origin": "player",
+                            "distance": 2,
+                        },
                     ],
                     "costs": [{"type": "mana", "amount": 3}],
                     "rejected_reason": None,
@@ -302,7 +363,12 @@ class MockWildMagicProvider:
                             "damage_type": "lightning",
                             "include_player": False,
                         },
-                        {"type": "add_status", "target": nearest_enemy or "nearest_enemy", "status": "stunned", "duration": 1},
+                        {
+                            "type": "add_status",
+                            "target": nearest_enemy or "nearest_enemy",
+                            "status": "stunned",
+                            "duration": 1,
+                        },
                     ],
                     "costs": [
                         {"type": "mana", "amount": 6},
@@ -321,8 +387,19 @@ class MockWildMagicProvider:
                     "severity": "moderate",
                     "outcome_text": "A green weather curls low across the stones.",
                     "effects": [
-                        {"type": "create_tiles", "target": nearest_enemy or "nearest_enemy", "radius": 1, "tile": "poison_cloud", "duration": 4},
-                        {"type": "add_status", "target": nearest_enemy or "nearest_enemy", "status": "poisoned", "duration": 3},
+                        {
+                            "type": "create_tiles",
+                            "target": nearest_enemy or "nearest_enemy",
+                            "radius": 1,
+                            "tile": "poison_cloud",
+                            "duration": 4,
+                        },
+                        {
+                            "type": "add_status",
+                            "target": nearest_enemy or "nearest_enemy",
+                            "status": "poisoned",
+                            "duration": 3,
+                        },
                     ],
                     "costs": [{"type": "health", "amount": 2}],
                     "rejected_reason": None,
@@ -336,8 +413,19 @@ class MockWildMagicProvider:
                     "severity": "minor",
                     "outcome_text": "The floor grows hands.",
                     "effects": [
-                        {"type": "create_tiles", "target": nearest_enemy or "nearest_enemy", "radius": 1, "tile": "vines", "duration": 5},
-                        {"type": "add_status", "target": nearest_enemy or "nearest_enemy", "status": "rooted", "duration": 3},
+                        {
+                            "type": "create_tiles",
+                            "target": nearest_enemy or "nearest_enemy",
+                            "radius": 1,
+                            "tile": "vines",
+                            "duration": 5,
+                        },
+                        {
+                            "type": "add_status",
+                            "target": nearest_enemy or "nearest_enemy",
+                            "status": "rooted",
+                            "duration": 3,
+                        },
                     ],
                     "costs": [{"type": "mana", "amount": 3}],
                     "rejected_reason": None,
@@ -351,8 +439,16 @@ class MockWildMagicProvider:
                     "severity": "major",
                     "outcome_text": "A hostile thought changes its coat.",
                     "effects": [
-                        {"type": "change_faction", "target": nearest_enemy or "nearest_enemy", "faction": "ally"},
-                        {"type": "add_tag", "target": nearest_enemy or "nearest_enemy", "tag": "oath_bound"},
+                        {
+                            "type": "change_faction",
+                            "target": nearest_enemy or "nearest_enemy",
+                            "faction": "ally",
+                        },
+                        {
+                            "type": "add_tag",
+                            "target": nearest_enemy or "nearest_enemy",
+                            "tag": "oath_bound",
+                        },
                     ],
                     "costs": [
                         {
@@ -373,9 +469,24 @@ class MockWildMagicProvider:
                     "severity": "moderate",
                     "outcome_text": "A thin law wraps itself around your skin.",
                     "effects": [
-                        {"type": "add_status", "target": "player", "status": "warded", "duration": 6},
-                        {"type": "add_resistance", "target": "player", "damage_type": "fire", "amount": 25},
-                        {"type": "add_resistance", "target": "player", "damage_type": "poison", "amount": 25},
+                        {
+                            "type": "add_status",
+                            "target": "player",
+                            "status": "warded",
+                            "duration": 6,
+                        },
+                        {
+                            "type": "add_resistance",
+                            "target": "player",
+                            "damage_type": "fire",
+                            "amount": 25,
+                        },
+                        {
+                            "type": "add_resistance",
+                            "target": "player",
+                            "damage_type": "poison",
+                            "amount": 25,
+                        },
                     ],
                     "costs": [{"type": "item", "item": "grave salt", "amount": 1}],
                     "rejected_reason": None,
@@ -388,7 +499,16 @@ class MockWildMagicProvider:
                     "accepted": True,
                     "severity": "minor",
                     "outcome_text": "The chalk turns to glass.",
-                    "effects": [{"type": "transform_item", "target": "inventory", "item": "chalk", "new_item_type": "glass chalk", "material": "glass", "tags": ["fragile"]}],
+                    "effects": [
+                        {
+                            "type": "transform_item",
+                            "target": "inventory",
+                            "item": "chalk",
+                            "new_item_type": "glass chalk",
+                            "material": "glass",
+                            "tags": ["fragile"],
+                        }
+                    ],
                     "costs": [{"type": "mana", "amount": 2}],
                     "rejected_reason": None,
                 }
@@ -413,7 +533,12 @@ class MockWildMagicProvider:
                             "material": "glass",
                             "tags": ["glass", "brittle"],
                         },
-                        {"type": "modify_inventory", "item": "glass shard", "mode": "add", "amount": 1},
+                        {
+                            "type": "modify_inventory",
+                            "item": "glass shard",
+                            "mode": "add",
+                            "amount": 1,
+                        },
                     ],
                     "costs": [{"type": "max_health", "amount": 1}],
                     "rejected_reason": None,
@@ -451,7 +576,12 @@ class MockWildMagicProvider:
                     "severity": "minor",
                     "outcome_text": "An invisible hand shoves the target.",
                     "effects": [
-                        {"type": "damage", "target": nearest_enemy or "nearest_enemy", "amount": 2, "damage_type": "force"}
+                        {
+                            "type": "damage",
+                            "target": nearest_enemy or "nearest_enemy",
+                            "amount": 2,
+                            "damage_type": "force",
+                        }
                     ],
                     "costs": [{"type": "mana", "amount": 2}],
                     "rejected_reason": None,
@@ -464,7 +594,16 @@ class MockWildMagicProvider:
                     "accepted": True,
                     "severity": "minor",
                     "outcome_text": "The ground shimmers.",
-                    "effects": [{"type": "transform_item", "target": "nearest_item", "item": "potion", "new_item_type": "poison flask", "material": "glass", "tags": ["toxic"]}],
+                    "effects": [
+                        {
+                            "type": "transform_item",
+                            "target": "nearest_item",
+                            "item": "potion",
+                            "new_item_type": "poison flask",
+                            "material": "glass",
+                            "tags": ["toxic"],
+                        }
+                    ],
                     "costs": [{"type": "mana", "amount": 2}],
                     "rejected_reason": None,
                 }
@@ -477,7 +616,12 @@ class MockWildMagicProvider:
                     "severity": "minor",
                     "outcome_text": "Acid splashes the target.",
                     "effects": [
-                        {"type": "damage", "target": nearest_enemy or "nearest_enemy", "amount": 6, "damage_type": "acid"}
+                        {
+                            "type": "damage",
+                            "target": nearest_enemy or "nearest_enemy",
+                            "amount": 6,
+                            "damage_type": "acid",
+                        }
                     ],
                     "costs": [{"type": "mana", "amount": 3}],
                     "rejected_reason": None,
@@ -497,10 +641,23 @@ class MockWildMagicProvider:
                 "severity": "minor",
                 "outcome_text": outcome_text,
                 "effects": [
-                    {"type": "damage", "target": nearest_enemy or "nearest_enemy", "amount": 6, "damage_type": damage_type},
-                    {"type": "add_status", "target": nearest_enemy or "nearest_enemy", "status": "burning", "duration": 2}
+                    {
+                        "type": "damage",
+                        "target": nearest_enemy or "nearest_enemy",
+                        "amount": 6,
+                        "damage_type": damage_type,
+                    },
+                    {
+                        "type": "add_status",
+                        "target": nearest_enemy or "nearest_enemy",
+                        "status": "burning",
+                        "duration": 2,
+                    }
                     if damage_type == "fire"
-                    else {"type": "message", "text": "A coin somewhere lands on its edge."},
+                    else {
+                        "type": "message",
+                        "text": "A coin somewhere lands on its edge.",
+                    },
                 ],
                 "costs": [{"type": "mana", "amount": 3}],
                 "rejected_reason": None,
@@ -545,7 +702,6 @@ def make_provider(provider_name: str | None = None) -> WildMagicProvider:
 # ----------------------------------------------------------------------
 
 
-
 @dataclass
 class DialogueResolution:
     reply: str | None
@@ -559,8 +715,7 @@ class DialogueResolution:
 class DialogueProvider(Protocol):
     name: str
 
-    def reply(self, message: str, context: dict[str, Any]) -> str:
-        ...
+    def reply(self, message: str, context: dict[str, Any]) -> str: ...
 
 
 class OllamaDialogueProvider:
@@ -575,8 +730,14 @@ class OllamaDialogueProvider:
     ) -> None:
         self._model_override = model
         self.model = model or get_dialogue_model()
-        self.base_url = normalize_ollama_url(base_url) if base_url else ollama_host(self.purpose)
-        self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds(self.purpose)
+        self.base_url = (
+            normalize_ollama_url(base_url) if base_url else ollama_host(self.purpose)
+        )
+        self.timeout_seconds = (
+            timeout_seconds
+            if timeout_seconds is not None
+            else ollama_timeout_seconds(self.purpose)
+        )
 
     def reply(self, message: str, context: dict[str, Any]) -> str:
         payload = {
@@ -612,10 +773,15 @@ class MockDialogueProvider:
         text = message.lower().strip()
         if not text:
             return "Lost for words, are you?"
-        if any(word in text for word in ("hello", "hi", "greetings", "hail", "morning", "evening")):
+        if any(
+            word in text
+            for word in ("hello", "hi", "greetings", "hail", "morning", "evening")
+        ):
             return f"Well met, traveler. Not many stop to talk to a {role} like me."
         if "?" in text:
-            return "Hard to say, honestly. I keep my head down and mind my own business."
+            return (
+                "Hard to say, honestly. I keep my head down and mind my own business."
+            )
         if any(word in text for word in ("thank", "thanks")):
             return "No need for that. Just doing what I do."
         return "Mm. If you say so."
@@ -719,8 +885,20 @@ def resolve_dialogue(
             raw = provider.reply(message, active_context)
         except (OSError, TimeoutError, urllib.error.URLError, ValueError) as exc:
             error = str(exc)
-            audit_path = write_dialogue_audit_log(provider, npc_name, message, active_context, raw, None, True, error, resolved_provider_name)
-            return DialogueResolution(None, True, error, resolved_provider_name, raw, audit_path)
+            audit_path = write_dialogue_audit_log(
+                provider,
+                npc_name,
+                message,
+                active_context,
+                raw,
+                None,
+                True,
+                error,
+                resolved_provider_name,
+            )
+            return DialogueResolution(
+                None, True, error, resolved_provider_name, raw, audit_path
+            )
 
         reply = strip_thinking(raw).strip().strip('"').strip()
         if not reply:
@@ -730,12 +908,34 @@ def resolve_dialogue(
         elif _is_self_repetition(reply, active_context):
             problem = "repeated its own last line verbatim"
         else:
-            audit_path = write_dialogue_audit_log(provider, npc_name, message, active_context, raw, reply, False, None, resolved_provider_name)
-            return DialogueResolution(reply, False, None, resolved_provider_name, raw, audit_path)
+            audit_path = write_dialogue_audit_log(
+                provider,
+                npc_name,
+                message,
+                active_context,
+                raw,
+                reply,
+                False,
+                None,
+                resolved_provider_name,
+            )
+            return DialogueResolution(
+                reply, False, None, resolved_provider_name, raw, audit_path
+            )
 
         can_retry = attempt == 0 and resolved_provider_name == "ollama"
         if can_retry:
-            write_dialogue_audit_log(provider, npc_name, message, active_context, raw, reply or None, True, f"{problem}; retrying once", resolved_provider_name)
+            write_dialogue_audit_log(
+                provider,
+                npc_name,
+                message,
+                active_context,
+                raw,
+                reply or None,
+                True,
+                f"{problem}; retrying once",
+                resolved_provider_name,
+            )
             active_context = _dialogue_retry_context(
                 context,
                 "Your last reply was unusable - it was empty, just repeated the player's words "
@@ -745,8 +945,20 @@ def resolve_dialogue(
             )
             continue
 
-        audit_path = write_dialogue_audit_log(provider, npc_name, message, active_context, raw, reply or None, True, problem, resolved_provider_name)
-        return DialogueResolution(None, True, problem, resolved_provider_name, raw, audit_path)
+        audit_path = write_dialogue_audit_log(
+            provider,
+            npc_name,
+            message,
+            active_context,
+            raw,
+            reply or None,
+            True,
+            problem,
+            resolved_provider_name,
+        )
+        return DialogueResolution(
+            None, True, problem, resolved_provider_name, raw, audit_path
+        )
 
     raise AssertionError("unreachable")
 
@@ -799,7 +1011,6 @@ def write_dialogue_audit_log(
 # ----------------------------------------------------------------------
 
 
-
 @dataclass
 class TradeResolution:
     data: dict[str, Any] | None
@@ -813,8 +1024,7 @@ class TradeResolution:
 class TradeProvider(Protocol):
     name: str
 
-    def propose(self, context: dict[str, Any]) -> str:
-        ...
+    def propose(self, context: dict[str, Any]) -> str: ...
 
 
 class OllamaTradeProvider:
@@ -829,8 +1039,14 @@ class OllamaTradeProvider:
     ) -> None:
         self._model_override = model
         self.model = model or get_trade_model()
-        self.base_url = normalize_ollama_url(base_url) if base_url else ollama_host(self.purpose)
-        self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds(self.purpose)
+        self.base_url = (
+            normalize_ollama_url(base_url) if base_url else ollama_host(self.purpose)
+        )
+        self.timeout_seconds = (
+            timeout_seconds
+            if timeout_seconds is not None
+            else ollama_timeout_seconds(self.purpose)
+        )
 
     def propose(self, context: dict[str, Any]) -> str:
         payload = {
@@ -855,7 +1071,10 @@ class OllamaTradeProvider:
         try:
             data = _post_ollama_chat(self.base_url, payload, self.timeout_seconds)
         except ValueError as exc:
-            if "Unexpected empty grammar stack" not in str(exc) or "format" not in payload:
+            if (
+                "Unexpected empty grammar stack" not in str(exc)
+                or "format" not in payload
+            ):
                 raise
             retry_payload = dict(payload)
             retry_payload.pop("format", None)
@@ -977,7 +1196,9 @@ def validate_trade_resolution(data: dict[str, Any]) -> str | None:
     return None
 
 
-def _trade_retry_context(context: dict[str, Any], raw_response: str | None, error: str) -> dict[str, Any]:
+def _trade_retry_context(
+    context: dict[str, Any], raw_response: str | None, error: str
+) -> dict[str, Any]:
     updated = dict(context)
     updated["retry_after_invalid_resolution"] = {
         "error": error,
@@ -989,7 +1210,9 @@ def _trade_retry_context(context: dict[str, Any], raw_response: str | None, erro
     return updated
 
 
-def resolve_trade_proposal(provider: TradeProvider, npc_name: str, context: dict[str, Any]) -> TradeResolution:
+def resolve_trade_proposal(
+    provider: TradeProvider, npc_name: str, context: dict[str, Any]
+) -> TradeResolution:
     """Ask the trade provider whether the exchange just displayed amounts to a real
     trade and, if so, structure exactly what's proposed. Mirrors resolve_spell's
     parse -> validate -> retry-once-on-ollama -> clean technical_failure shape, minus
@@ -1004,8 +1227,19 @@ def resolve_trade_proposal(provider: TradeProvider, npc_name: str, context: dict
         except (OSError, TimeoutError, urllib.error.URLError, ValueError) as exc:
             error = str(exc)
             resolved_provider_name = _trade_provider_name(provider)
-            audit_path = write_trade_audit_log(provider, npc_name, active_context, raw, None, True, error, resolved_provider_name)
-            return TradeResolution(None, True, error, resolved_provider_name, raw, audit_path)
+            audit_path = write_trade_audit_log(
+                provider,
+                npc_name,
+                active_context,
+                raw,
+                None,
+                True,
+                error,
+                resolved_provider_name,
+            )
+            return TradeResolution(
+                None, True, error, resolved_provider_name, raw, audit_path
+            )
 
         resolved_provider_name = _trade_provider_name(provider)
         try:
@@ -1016,17 +1250,48 @@ def resolve_trade_proposal(provider: TradeProvider, npc_name: str, context: dict
             error = str(exc)
 
         if error is None:
-            audit_path = write_trade_audit_log(provider, npc_name, active_context, raw, parsed, False, None, resolved_provider_name)
-            return TradeResolution(parsed, False, None, resolved_provider_name, raw, audit_path)
+            audit_path = write_trade_audit_log(
+                provider,
+                npc_name,
+                active_context,
+                raw,
+                parsed,
+                False,
+                None,
+                resolved_provider_name,
+            )
+            return TradeResolution(
+                parsed, False, None, resolved_provider_name, raw, audit_path
+            )
 
         can_retry = attempt == 0 and resolved_provider_name == "ollama"
         if can_retry:
-            write_trade_audit_log(provider, npc_name, active_context, raw, parsed, True, f"{error}; retrying once", resolved_provider_name)
+            write_trade_audit_log(
+                provider,
+                npc_name,
+                active_context,
+                raw,
+                parsed,
+                True,
+                f"{error}; retrying once",
+                resolved_provider_name,
+            )
             active_context = _trade_retry_context(context, raw, error)
             continue
 
-        audit_path = write_trade_audit_log(provider, npc_name, active_context, raw, parsed, True, error, resolved_provider_name)
-        return TradeResolution(None, True, error, resolved_provider_name, raw, audit_path)
+        audit_path = write_trade_audit_log(
+            provider,
+            npc_name,
+            active_context,
+            raw,
+            parsed,
+            True,
+            error,
+            resolved_provider_name,
+        )
+        return TradeResolution(
+            None, True, error, resolved_provider_name, raw, audit_path
+        )
 
     raise AssertionError("unreachable")
 
@@ -1065,7 +1330,9 @@ def write_trade_audit_log(
     return _write_jsonl_audit(audit_path, record)
 
 
-def resolve_spell(provider: WildMagicProvider, spell: str, context: dict[str, Any]) -> MagicResolution:
+def resolve_spell(
+    provider: WildMagicProvider, spell: str, context: dict[str, Any]
+) -> MagicResolution:
     provider_name = getattr(provider, "name", "unknown")
     raw: str | None = None
     parsed_data: dict[str, Any] | None = None
@@ -1081,8 +1348,19 @@ def resolve_spell(provider: WildMagicProvider, spell: str, context: dict[str, An
             error = str(exc)
             technical_failure = True
             resolved_provider_name = _provider_name(provider)
-            audit_path = write_audit_log(provider, spell, active_context, raw, None, technical_failure, error, resolved_provider_name)
-            return MagicResolution(None, True, error, resolved_provider_name, raw, audit_path)
+            audit_path = write_audit_log(
+                provider,
+                spell,
+                active_context,
+                raw,
+                None,
+                technical_failure,
+                error,
+                resolved_provider_name,
+            )
+            return MagicResolution(
+                None, True, error, resolved_provider_name, raw, audit_path
+            )
 
         try:
             parsed_data = parse_resolution_json(raw)
@@ -1090,7 +1368,9 @@ def resolve_spell(provider: WildMagicProvider, spell: str, context: dict[str, An
             resolved_provider_name = _provider_name(provider)
             if error:
                 technical_failure = True
-                if should_retry_resolution(resolved_provider_name, attempt, max_attempts):
+                if should_retry_resolution(
+                    resolved_provider_name, attempt, max_attempts
+                ):
                     write_audit_log(
                         provider,
                         spell,
@@ -1103,10 +1383,32 @@ def resolve_spell(provider: WildMagicProvider, spell: str, context: dict[str, An
                     )
                     active_context = retry_context(context, raw, error)
                     continue
-                audit_path = write_audit_log(provider, spell, active_context, raw, parsed_data, technical_failure, error, resolved_provider_name)
-                return MagicResolution(None, True, error, resolved_provider_name, raw, audit_path)
-            audit_path = write_audit_log(provider, spell, active_context, raw, parsed_data, False, None, resolved_provider_name)
-            return MagicResolution(parsed_data, False, None, resolved_provider_name, raw, audit_path)
+                audit_path = write_audit_log(
+                    provider,
+                    spell,
+                    active_context,
+                    raw,
+                    parsed_data,
+                    technical_failure,
+                    error,
+                    resolved_provider_name,
+                )
+                return MagicResolution(
+                    None, True, error, resolved_provider_name, raw, audit_path
+                )
+            audit_path = write_audit_log(
+                provider,
+                spell,
+                active_context,
+                raw,
+                parsed_data,
+                False,
+                None,
+                resolved_provider_name,
+            )
+            return MagicResolution(
+                parsed_data, False, None, resolved_provider_name, raw, audit_path
+            )
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
             error = str(exc)
             technical_failure = True
@@ -1124,7 +1426,9 @@ def resolve_spell(provider: WildMagicProvider, spell: str, context: dict[str, An
                 )
                 active_context = retry_context(context, raw, error)
                 continue
-            fallback = fallback_resolution_from_spell(spell) if fallbacks_enabled() else None
+            fallback = (
+                fallback_resolution_from_spell(spell) if fallbacks_enabled() else None
+            )
             if fallback is not None and resolved_provider_name == "ollama":
                 audit_path = write_audit_log(
                     provider,
@@ -1136,11 +1440,33 @@ def resolve_spell(provider: WildMagicProvider, spell: str, context: dict[str, An
                     f"{error}; used local fallback",
                     resolved_provider_name,
                 )
-                return MagicResolution(fallback, False, None, resolved_provider_name, raw, audit_path)
-            audit_path = write_audit_log(provider, spell, active_context, raw, parsed_data, technical_failure, error, resolved_provider_name)
-            return MagicResolution(None, True, error, resolved_provider_name, raw, audit_path)
+                return MagicResolution(
+                    fallback, False, None, resolved_provider_name, raw, audit_path
+                )
+            audit_path = write_audit_log(
+                provider,
+                spell,
+                active_context,
+                raw,
+                parsed_data,
+                technical_failure,
+                error,
+                resolved_provider_name,
+            )
+            return MagicResolution(
+                None, True, error, resolved_provider_name, raw, audit_path
+            )
 
-    audit_path = write_audit_log(provider, spell, active_context, raw, parsed_data, True, error, resolved_provider_name)
+    audit_path = write_audit_log(
+        provider,
+        spell,
+        active_context,
+        raw,
+        parsed_data,
+        True,
+        error,
+        resolved_provider_name,
+    )
     return MagicResolution(None, True, error, resolved_provider_name, raw, audit_path)
 
 
@@ -1264,7 +1590,10 @@ def _normalize_create_tiles_tile(e: dict[str, Any]) -> dict[str, Any]:
     if tile_val in _KNOWN_TILE_NAMES:
         return e
     _raw_tags = e.get("tags") or []
-    tags = [str(t).lower() for t in (_raw_tags if isinstance(_raw_tags, list) else [_raw_tags])]
+    tags = [
+        str(t).lower()
+        for t in (_raw_tags if isinstance(_raw_tags, list) else [_raw_tags])
+    ]
     name_fields = [
         str(e.get("name") or ""),
         str(e.get("terrain_type") or ""),
@@ -1272,21 +1601,57 @@ def _normalize_create_tiles_tile(e: dict[str, Any]) -> dict[str, Any]:
         str(e.get("material") or ""),
     ]
     ctx = " ".join(tags + name_fields + [tile_val]).lower()
-    if any(w in ctx for w in ("fire", "lava", "magma", "flame", "ignite", "burn", "scorch", "incinerate")):
+    if any(
+        w in ctx
+        for w in (
+            "fire",
+            "lava",
+            "magma",
+            "flame",
+            "ignite",
+            "burn",
+            "scorch",
+            "incinerate",
+        )
+    ):
         inferred = "fire"
     elif any(w in ctx for w in ("slick", "ice_floor", "frost_floor")):
         inferred = "slick_ice"
-    elif any(w in ctx for w in ("poison", "acid", "toxic", "fume", "vapor", "gas", "venom")):
+    elif any(
+        w in ctx for w in ("poison", "acid", "toxic", "fume", "vapor", "gas", "venom")
+    ):
         inferred = "poison_cloud"
     elif any(w in ctx for w in ("smoke", "fog", "mist", "haze", "cloud", "steam")):
         inferred = "mist"
-    elif any(w in ctx for w in ("vine", "web", "thorn", "net", "caltrop", "snare", "entangle", "trip", "hazard", "spike", "trap")):
+    elif any(
+        w in ctx
+        for w in (
+            "vine",
+            "web",
+            "thorn",
+            "net",
+            "caltrop",
+            "snare",
+            "entangle",
+            "trip",
+            "hazard",
+            "spike",
+            "trap",
+        )
+    ):
         inferred = "vines"
-    elif any(w in ctx for w in ("rubble", "debris", "stone", "rock", "ruin", "bone", "gravel")):
+    elif any(
+        w in ctx
+        for w in ("rubble", "debris", "stone", "rock", "ruin", "bone", "gravel")
+    ):
         inferred = "rubble"
-    elif any(w in ctx for w in ("ice_wall", "wall_ice", "barrier", "block", "iron", "bars")):
+    elif any(
+        w in ctx for w in ("ice_wall", "wall_ice", "barrier", "block", "iron", "bars")
+    ):
         inferred = "ice_wall"
-    elif any(w in ctx for w in ("water", "flood", "swamp", "mud", "pool", "liquid", "puddle")):
+    elif any(
+        w in ctx for w in ("water", "flood", "swamp", "mud", "pool", "liquid", "puddle")
+    ):
         inferred = "water"
     elif any(w in ctx for w in ("ice", "frost", "frozen", "cold", "chill", "freeze")):
         inferred = "slick_ice"
@@ -1300,7 +1665,11 @@ def _normalize_create_tiles_tile(e: dict[str, Any]) -> dict[str, Any]:
 def _infer_effect_from_fields(e: dict[str, Any]) -> dict[str, Any] | None:
     """When effect type is unparseable natural language, infer the effect type from other keys."""
     result = dict(e)
-    if "damage_type" in e or (isinstance(e.get("amount"), (int, float)) and "tile" not in e and "status" not in e):
+    if "damage_type" in e or (
+        isinstance(e.get("amount"), (int, float))
+        and "tile" not in e
+        and "status" not in e
+    ):
         result["type"] = "damage"
         result.setdefault("target", "nearest_enemy")
         result.setdefault("amount", 5)
@@ -1327,7 +1696,9 @@ def _trigger_is_once(obj: dict[str, Any]) -> bool:
         return True
     for key in ("condition", "conditions"):
         cond = obj.get(key)
-        if isinstance(cond, dict) and str(cond.get("type") or "").lower().startswith("once"):
+        if isinstance(cond, dict) and str(cond.get("type") or "").lower().startswith(
+            "once"
+        ):
             return True
         if isinstance(cond, str) and cond.lower().startswith("once"):
             return True
@@ -1337,18 +1708,61 @@ def _trigger_is_once(obj: dict[str, Any]) -> bool:
 def _infer_trigger_action(text: str) -> dict[str, Any] | None:
     """Convert a natural-language trigger action string to a structured effect dict."""
     t = text.lower()
-    if any(w in t for w in ("fire", "flame", "burn", "blaze", "ignite", "scorch", "incinerate")):
-        return {"type": "damage", "target": "trigger_source", "amount": 5, "damage_type": "fire"}
+    if any(
+        w in t
+        for w in ("fire", "flame", "burn", "blaze", "ignite", "scorch", "incinerate")
+    ):
+        return {
+            "type": "damage",
+            "target": "trigger_source",
+            "amount": 5,
+            "damage_type": "fire",
+        }
     if any(w in t for w in ("ice", "frost", "freeze", "cold", "chill", "frozen")):
-        return {"type": "damage", "target": "trigger_source", "amount": 5, "damage_type": "frost"}
-    if any(w in t for w in ("lightning", "thunder", "electric", "shock", "spark", "volt")):
-        return {"type": "damage", "target": "trigger_source", "amount": 5, "damage_type": "lightning"}
+        return {
+            "type": "damage",
+            "target": "trigger_source",
+            "amount": 5,
+            "damage_type": "frost",
+        }
+    if any(
+        w in t for w in ("lightning", "thunder", "electric", "shock", "spark", "volt")
+    ):
+        return {
+            "type": "damage",
+            "target": "trigger_source",
+            "amount": 5,
+            "damage_type": "lightning",
+        }
     if any(w in t for w in ("poison", "toxic", "venom", "acid")):
-        return {"type": "damage", "target": "trigger_source", "amount": 5, "damage_type": "poison"}
+        return {
+            "type": "damage",
+            "target": "trigger_source",
+            "amount": 5,
+            "damage_type": "poison",
+        }
     if any(w in t for w in ("heal", "restore", "mend", "recover", "regenerate")):
         return {"type": "heal", "target": "player", "amount": 5}
-    if any(w in t for w in ("retaliate", "counter", "reflect", "strike", "attack", "damage", "hit", "hurt", "wound")):
-        return {"type": "damage", "target": "trigger_source", "amount": 5, "damage_type": "physical"}
+    if any(
+        w in t
+        for w in (
+            "retaliate",
+            "counter",
+            "reflect",
+            "strike",
+            "attack",
+            "damage",
+            "hit",
+            "hurt",
+            "wound",
+        )
+    ):
+        return {
+            "type": "damage",
+            "target": "trigger_source",
+            "amount": 5,
+            "damage_type": "physical",
+        }
     return None
 
 
@@ -1388,7 +1802,10 @@ def _normalize_resolution(data: dict[str, Any]) -> dict[str, Any]:
         data["costs"] = []
 
     # Provide a default rejected_reason when accepted is False but no reason given.
-    if data.get("accepted") is False and not str(data.get("rejected_reason") or "").strip():
+    if (
+        data.get("accepted") is False
+        and not str(data.get("rejected_reason") or "").strip()
+    ):
         data = dict(data)
         data["rejected_reason"] = "The wild magic refuses."
 
@@ -1401,8 +1818,23 @@ def _normalize_resolution(data: dict[str, Any]) -> dict[str, Any]:
                 break
     # Strip non-prose outcome texts (single-word status words from a poorly-behaved LLM).
     _JUNK_OUTCOMES = {
-        "success", "ok", "okay", "done", "accepted", "yes", "no", "null", "none",
-        "true", "false", "error", "failed", "failure", "reject", "rejected", "completed",
+        "success",
+        "ok",
+        "okay",
+        "done",
+        "accepted",
+        "yes",
+        "no",
+        "null",
+        "none",
+        "true",
+        "false",
+        "error",
+        "failed",
+        "failure",
+        "reject",
+        "rejected",
+        "completed",
     }
     if isinstance(data.get("outcome_text"), str):
         _ot = data["outcome_text"].strip().rstrip(".!?").lower()
@@ -1451,15 +1883,33 @@ def _normalize_resolution(data: dict[str, Any]) -> dict[str, Any]:
 
     # Rescue trigger-shaped responses where top-level "effects" is intended as the
     # trigger payload instead of the resolution's effect list.
-    top_effect_type = str(data.get("effect") or data.get("effect_type") or data.get("type") or "").lower().strip()
-    if top_effect_type in {"create_trigger", "trigger", "ward", "reaction", "contingency", "delayed_reaction"} and isinstance(data.get("effects"), list):
+    top_effect_type = (
+        str(data.get("effect") or data.get("effect_type") or data.get("type") or "")
+        .lower()
+        .strip()
+    )
+    if top_effect_type in {
+        "create_trigger",
+        "trigger",
+        "ward",
+        "reaction",
+        "contingency",
+        "delayed_reaction",
+    } and isinstance(data.get("effects"), list):
         trigger_effect = {
             "type": _EFFECT_TYPE_ALIASES.get(top_effect_type, top_effect_type),
             "effects": data["effects"],
         }
         for key in {
-            "target", "trigger", "on", "charges", "duration", "turns", "name",
-            "display_name", "expiry_text",
+            "target",
+            "trigger",
+            "on",
+            "charges",
+            "duration",
+            "turns",
+            "name",
+            "display_name",
+            "expiry_text",
         }:
             if key in data:
                 trigger_effect[key] = data[key]
@@ -1480,19 +1930,60 @@ def _normalize_resolution(data: dict[str, Any]) -> dict[str, Any]:
                         if k not in effect_obj:
                             effect_obj[k] = v
             else:
-                effect_obj = _effect_from_text(str(effect_raw)) or {"type": str(effect_raw)}
+                effect_obj = _effect_from_text(str(effect_raw)) or {
+                    "type": str(effect_raw)
+                }
                 # Merge safe top-level fields into the effect so that patterns like
                 # {"effect":"area_status","target":"all enemies","status":"slowed",...}
                 # produce a complete effect object.
                 _EFFECT_TOP_FIELDS = {
-                    "target", "status", "duration", "radius", "tile", "amount",
-                    "damage_type", "x", "y", "name", "faction", "template", "hp",
-                    "max_hp", "attack", "defense", "char", "count", "tags",
-                    "hollow", "ring", "perimeter", "include_player", "affects",
-                    "display_name", "expiry_text", "item", "material", "quantity",
-                    "dx", "dy", "distance", "positions", "tiles", "creature",
-                    "trigger", "on", "effects", "effect", "action", "charges", "shape",
-                    "pattern", "width", "length", "from", "to",
+                    "target",
+                    "status",
+                    "duration",
+                    "radius",
+                    "tile",
+                    "amount",
+                    "damage_type",
+                    "x",
+                    "y",
+                    "name",
+                    "faction",
+                    "template",
+                    "hp",
+                    "max_hp",
+                    "attack",
+                    "defense",
+                    "char",
+                    "count",
+                    "tags",
+                    "hollow",
+                    "ring",
+                    "perimeter",
+                    "include_player",
+                    "affects",
+                    "display_name",
+                    "expiry_text",
+                    "item",
+                    "material",
+                    "quantity",
+                    "dx",
+                    "dy",
+                    "distance",
+                    "positions",
+                    "tiles",
+                    "creature",
+                    "trigger",
+                    "on",
+                    "effects",
+                    "effect",
+                    "action",
+                    "charges",
+                    "shape",
+                    "pattern",
+                    "width",
+                    "length",
+                    "from",
+                    "to",
                 }
                 for _k in _EFFECT_TOP_FIELDS:
                     if _k in data and _k not in effect_obj:
@@ -1500,8 +1991,14 @@ def _normalize_resolution(data: dict[str, Any]) -> dict[str, Any]:
             details = data.get("details")
             if isinstance(details, dict):
                 for k, v in details.items():
-                    if k not in {"costs", "cost", "rules_applied", "supported_effects_used",
-                                 "supported_costs_used", "description"}:
+                    if k not in {
+                        "costs",
+                        "cost",
+                        "rules_applied",
+                        "supported_effects_used",
+                        "supported_costs_used",
+                        "description",
+                    }:
                         effect_obj[k] = v
                 # Rescue costs nested inside details if not already at top level.
                 if not data.get("costs") and isinstance(details.get("costs"), dict):
@@ -1516,11 +2013,13 @@ def _normalize_resolution(data: dict[str, Any]) -> dict[str, Any]:
                             except (TypeError, ValueError):
                                 pass
                         elif key == "item":
-                            rescued.append({
-                                "type": "item",
-                                "item": str(val),
-                                "amount": int(details.get("quantity", 1)),
-                            })
+                            rescued.append(
+                                {
+                                    "type": "item",
+                                    "item": str(val),
+                                    "amount": int(details.get("quantity", 1)),
+                                }
+                            )
                     if rescued:
                         data = dict(data)
                         data["costs"] = rescued
@@ -1624,7 +2123,9 @@ def _normalize_resolution(data: dict[str, Any]) -> dict[str, Any]:
                         e["amount"] = 5
                 # Normalize flavor status names in add_status / area_status effects.
                 if et in {"add_status", "area_status"}:
-                    raw_status = str(e.get("status") or "").strip().lower().replace(" ", "_")
+                    raw_status = (
+                        str(e.get("status") or "").strip().lower().replace(" ", "_")
+                    )
                     if raw_status and raw_status not in MECHANICAL_STATUSES:
                         canonical = _STATUS_FLAVOR_ALIASES.get(raw_status)
                         if canonical:
@@ -1634,8 +2135,8 @@ def _normalize_resolution(data: dict[str, Any]) -> dict[str, Any]:
                             e["status"] = canonical
                 # Ensure add_status effects that inferred status from regen/type have a target.
                 if et == "add_status" and "target" not in e:
-                        e = dict(e)
-                        e["target"] = "player"
+                    e = dict(e)
+                    e["target"] = "player"
                 if "target" in e:
                     e = dict(e)
                     e["target"] = _normalize_target_text(e["target"])
@@ -1652,7 +2153,9 @@ def _normalize_resolution(data: dict[str, Any]) -> dict[str, Any]:
                                 if _ck not in e:
                                     e[_ck] = _cv
                 # Normalize "positions" array → "tiles" array for create_tiles.
-                if et in {"conjure_item", "spawn_item"} and isinstance(e.get("item"), dict):
+                if et in {"conjure_item", "spawn_item"} and isinstance(
+                    e.get("item"), dict
+                ):
                     e = dict(e)
                     item_data = e.pop("item")
                     for _ik, _iv in item_data.items():
@@ -1665,17 +2168,24 @@ def _normalize_resolution(data: dict[str, Any]) -> dict[str, Any]:
                     e = dict(e)
                     # LLM sometimes nests the whole trigger config under "trigger"
                     # (or "on") as a dict.
-                    if isinstance(e.get("on"), dict) and not isinstance(e.get("trigger"), dict):
+                    if isinstance(e.get("on"), dict) and not isinstance(
+                        e.get("trigger"), dict
+                    ):
                         e["trigger"] = e.pop("on")
                     if isinstance(e.get("trigger"), dict):
                         trigger_obj = e.pop("trigger")
                         trigger_str = str(
-                            trigger_obj.get("type") or trigger_obj.get("trigger")
-                            or trigger_obj.get("on") or trigger_obj.get("event") or "on_next_spell"
+                            trigger_obj.get("type")
+                            or trigger_obj.get("trigger")
+                            or trigger_obj.get("on")
+                            or trigger_obj.get("event")
+                            or "on_next_spell"
                         )
                         e["trigger"] = trigger_str
                         if not e.get("effects"):
-                            nested = trigger_obj.get("effects") or trigger_obj.get("effect")
+                            nested = trigger_obj.get("effects") or trigger_obj.get(
+                                "effect"
+                            )
                             action = trigger_obj.get("action")
                             if isinstance(nested, list):
                                 e["effects"] = nested
@@ -1709,11 +2219,19 @@ def _normalize_resolution(data: dict[str, Any]) -> dict[str, Any]:
                 # For create_tiles: infer tile from tags/name when tile is unrecognized.
                 if et in {"create_tiles", "create_tile", "set_tile"}:
                     e = _normalize_create_tiles_tile(e)
-                if et in {"create_tiles", "create_tile", "set_tile"} and "positions" in e and "tiles" not in e:
+                if (
+                    et in {"create_tiles", "create_tile", "set_tile"}
+                    and "positions" in e
+                    and "tiles" not in e
+                ):
                     e = dict(e)
                     raw_tile = str(e.get("tile") or ".").lower()
                     e["tiles"] = [
-                        {"x": p.get("x", 0), "y": p.get("y", 0), "tile": str(p.get("tile") or raw_tile)}
+                        {
+                            "x": p.get("x", 0),
+                            "y": p.get("y", 0),
+                            "tile": str(p.get("tile") or raw_tile),
+                        }
                         for p in e.pop("positions")
                         if isinstance(p, dict)
                     ]
@@ -1725,12 +2243,16 @@ def _normalize_resolution(data: dict[str, Any]) -> dict[str, Any]:
     effects = data.get("effects")
     if isinstance(effects, list):
         data = dict(data)
-        data["effects"] = [_flatten_nested_effect(e) if isinstance(e, dict) else e for e in effects]
+        data["effects"] = [
+            _flatten_nested_effect(e) if isinstance(e, dict) else e for e in effects
+        ]
 
     costs = data.get("costs")
     if isinstance(costs, list):
         data = dict(data)
-        data["costs"] = [_flatten_nested_effect(c) if isinstance(c, dict) else c for c in costs]
+        data["costs"] = [
+            _flatten_nested_effect(c) if isinstance(c, dict) else c for c in costs
+        ]
 
     # Rescue cost entries whose type is actually a known effect type. The LLM sometimes
     # expresses a spell's mechanical consequence (e.g. "the wraith becomes weak to
@@ -1741,7 +2263,9 @@ def _normalize_resolution(data: dict[str, Any]) -> dict[str, Any]:
         rescued_effects: list[dict[str, Any]] = []
         remaining_costs: list[Any] = []
         for c in costs:
-            c_type = str(c.get("type") or "").lower().strip() if isinstance(c, dict) else ""
+            c_type = (
+                str(c.get("type") or "").lower().strip() if isinstance(c, dict) else ""
+            )
             if c_type in SUPPORTED_EFFECTS and c_type not in SUPPORTED_COSTS:
                 rescued = dict(c)
                 if "target" in rescued:
@@ -1769,11 +2293,19 @@ def _coerce_cost_dict(raw_dict: dict[str, Any]) -> list[dict[str, Any]]:
             try:
                 amount = int(val)
                 if amount > 0:
-                    coerced.append({"type": "health" if key == "hp" else key, "amount": amount})
+                    coerced.append(
+                        {"type": "health" if key == "hp" else key, "amount": amount}
+                    )
             except (TypeError, ValueError):
                 pass
         elif key == "item":
-                coerced.append({"type": "item", "item": str(val), "amount": int(raw_dict.get("quantity", 1))})
+            coerced.append(
+                {
+                    "type": "item",
+                    "item": str(val),
+                    "amount": int(raw_dict.get("quantity", 1)),
+                }
+            )
     return coerced
 
 
@@ -1797,9 +2329,14 @@ def _effect_from_text(text: str) -> dict[str, Any] | None:
             "nine": 9,
             "ten": 10,
         }
-        word_turns = re.search(r"\b(?:in|after)\s+(one|two|three|four|five|six|seven|eight|nine|ten)\s+turn", normalized)
+        word_turns = re.search(
+            r"\b(?:in|after)\s+(one|two|three|four|five|six|seven|eight|nine|ten)\s+turn",
+            normalized,
+        )
         turns = word_numbers.get(word_turns.group(1), 3) if word_turns else 3
-    if not any(word in normalized for word in ["arrive", "appears", "appear", "summon"]):
+    if not any(
+        word in normalized for word in ["arrive", "appears", "appear", "summon"]
+    ):
         return None
 
     name = "summoned creature"
@@ -1814,7 +2351,14 @@ def _effect_from_text(text: str) -> dict[str, Any] | None:
             if candidate:
                 name = candidate[:40]
                 break
-    faction = "ally" if not any(word in normalized for word in ["hostile", "enemy", "foe", "threat", "collector"]) else "enemy"
+    faction = (
+        "ally"
+        if not any(
+            word in normalized
+            for word in ["hostile", "enemy", "foe", "threat", "collector"]
+        )
+        else "enemy"
+    )
     return {
         "type": "schedule_event",
         "turns": turns,
@@ -1845,12 +2389,33 @@ def _normalize_schedule_event(effect: dict[str, Any]) -> dict[str, Any]:
             entity = nested_data["entity"]
             normalized["entity"] = entity
     if isinstance(entity, dict):
-        for key in ["name", "char", "hp", "max_hp", "attack", "defense", "faction", "tags", "resistances", "weaknesses"]:
+        for key in [
+            "name",
+            "char",
+            "hp",
+            "max_hp",
+            "attack",
+            "defense",
+            "faction",
+            "tags",
+            "resistances",
+            "weaknesses",
+        ]:
             if key in entity and key not in normalized:
                 normalized[key] = entity[key]
-    event_text = str(normalized.get("event") or normalized.get("event_type") or "").lower().strip().replace(" ", "_").replace("-", "_")
+    event_text = (
+        str(normalized.get("event") or normalized.get("event_type") or "")
+        .lower()
+        .strip()
+        .replace(" ", "_")
+        .replace("-", "_")
+    )
     if "event_type" not in normalized:
-        if isinstance(entity, dict) or "arrival" in event_text or "summon" in event_text:
+        if (
+            isinstance(entity, dict)
+            or "arrival" in event_text
+            or "summon" in event_text
+        ):
             normalized["event_type"] = "summon"
         elif any(key in normalized for key in ["amount", "damage_type"]):
             normalized["event_type"] = "damage"
@@ -1889,11 +2454,31 @@ def _normalize_target_text(value: Any) -> Any:
     if normalized in target_aliases:
         return target_aliases[normalized]
     if normalized.startswith("nearest_") and any(
-        word in normalized for word in ["enemy", "foe", "hostile", "monster", "creature", "goblin", "slime", "bat"]
+        word in normalized
+        for word in [
+            "enemy",
+            "foe",
+            "hostile",
+            "monster",
+            "creature",
+            "goblin",
+            "slime",
+            "bat",
+        ]
     ):
         return "nearest_enemy"
     if normalized.startswith("closest_") and any(
-        word in normalized for word in ["enemy", "foe", "hostile", "monster", "creature", "goblin", "slime", "bat"]
+        word in normalized
+        for word in [
+            "enemy",
+            "foe",
+            "hostile",
+            "monster",
+            "creature",
+            "goblin",
+            "slime",
+            "bat",
+        ]
     ):
         return "nearest_enemy"
     return value
@@ -1909,7 +2494,6 @@ def _flatten_nested_effect(effect: dict[str, Any]) -> dict[str, Any]:
     return effect
 
 
-
 def _nearest_enemy_id(context: dict[str, Any]) -> str | None:
     player_position = context["player"]["position"]
     px = player_position["x"]
@@ -1917,11 +2501,17 @@ def _nearest_enemy_id(context: dict[str, Any]) -> str | None:
     enemies = [
         entity
         for entity in context.get("nearby_entities", [])
-        if entity.get("kind") == "actor" and entity.get("faction") == "enemy" and entity.get("hp", 0) > 0
+        if entity.get("kind") == "actor"
+        and entity.get("faction") == "enemy"
+        and entity.get("hp", 0) > 0
     ]
     if not enemies:
         return None
-    enemies.sort(key=lambda entity: abs(entity["position"]["x"] - px) + abs(entity["position"]["y"] - py))
+    enemies.sort(
+        key=lambda entity: (
+            abs(entity["position"]["x"] - px) + abs(entity["position"]["y"] - py)
+        )
+    )
     return str(enemies[0]["id"])
 
 
@@ -1966,6 +2556,7 @@ def write_audit_log(
 # Town generation provider — one JSON call produces a full settlement spec
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class BuildingSpec:
     type: str
@@ -1991,18 +2582,18 @@ class TownSpec:
     npcs: list[NpcSpec]
 
 
-
-
 def _parse_town_spec(raw: str) -> TownSpec:
     """Parse a JSON string from the LLM into a TownSpec, tolerating missing fields."""
     data = json.loads(strip_thinking(raw).strip())
     buildings = []
     for b in data.get("buildings") or []:
         if isinstance(b, dict) and b.get("type"):
-            buildings.append(BuildingSpec(
-                type=str(b["type"]).lower().strip(),
-                name=str(b["name"]).strip() if b.get("name") else None,
-            ))
+            buildings.append(
+                BuildingSpec(
+                    type=str(b["type"]).lower().strip(),
+                    name=str(b["name"]).strip() if b.get("name") else None,
+                )
+            )
     npcs = []
     for n in data.get("npcs") or []:
         if not isinstance(n, dict) or not n.get("name"):
@@ -2010,16 +2601,24 @@ def _parse_town_spec(raw: str) -> TownSpec:
         raw_wares = n.get("wares")
         wares: dict[str, int] | None = None
         if isinstance(raw_wares, dict):
-            wares = {str(k): int(v) for k, v in raw_wares.items() if isinstance(v, (int, float)) and int(v) > 0}
-        npcs.append(NpcSpec(
-            name=str(n["name"]).strip(),
-            role=str(n.get("role") or "resident").strip(),
-            backstory=str(n.get("backstory") or "").strip(),
-            traits=[str(t) for t in (n.get("traits") or []) if t],
-            building=str(n["building"]).lower().strip() if n.get("building") else None,
-            wares=wares or None,
-            appearance=str(n.get("appearance") or "").strip(),
-        ))
+            wares = {
+                str(k): int(v)
+                for k, v in raw_wares.items()
+                if isinstance(v, (int, float)) and int(v) > 0
+            }
+        npcs.append(
+            NpcSpec(
+                name=str(n["name"]).strip(),
+                role=str(n.get("role") or "resident").strip(),
+                backstory=str(n.get("backstory") or "").strip(),
+                traits=[str(t) for t in (n.get("traits") or []) if t],
+                building=str(n["building"]).lower().strip()
+                if n.get("building")
+                else None,
+                wares=wares or None,
+                appearance=str(n.get("appearance") or "").strip(),
+            )
+        )
     return TownSpec(
         town_name=str(data.get("town_name") or "Unnamed Settlement").strip(),
         description=str(data.get("description") or "").strip(),
@@ -2031,8 +2630,7 @@ def _parse_town_spec(raw: str) -> TownSpec:
 class TownProvider(Protocol):
     name: str
 
-    def generate(self, zx: int, zy: int, context: dict[str, Any]) -> TownSpec:
-        ...
+    def generate(self, zx: int, zy: int, context: dict[str, Any]) -> TownSpec: ...
 
 
 class OllamaTownProvider:
@@ -2047,8 +2645,14 @@ class OllamaTownProvider:
     ) -> None:
         self._model_override = model
         self.model = model or get_town_model()
-        self.base_url = normalize_ollama_url(base_url) if base_url else ollama_host(self.purpose)
-        self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds(self.purpose)
+        self.base_url = (
+            normalize_ollama_url(base_url) if base_url else ollama_host(self.purpose)
+        )
+        self.timeout_seconds = (
+            timeout_seconds
+            if timeout_seconds is not None
+            else ollama_timeout_seconds(self.purpose)
+        )
 
     def generate(self, zx: int, zy: int, context: dict[str, Any]) -> TownSpec:
         payload = {
@@ -2074,14 +2678,26 @@ class OllamaTownProvider:
         try:
             data = _post_ollama_chat(self.base_url, payload, self.timeout_seconds)
         except ValueError as exc:
-            if "Unexpected empty grammar stack" not in str(exc) or "format" not in payload:
+            if (
+                "Unexpected empty grammar stack" not in str(exc)
+                or "format" not in payload
+            ):
                 raise
             retry_payload = dict(payload)
             retry_payload.pop("format", None)
             data = _post_ollama_chat(self.base_url, retry_payload, self.timeout_seconds)
         content = data.get("message", {}).get("content")
         if not isinstance(content, str) or not content.strip():
-            _write_town_audit(self, zx, zy, context, raw_response, None, True, "Ollama response did not include message.content")
+            _write_town_audit(
+                self,
+                zx,
+                zy,
+                context,
+                raw_response,
+                None,
+                True,
+                "Ollama response did not include message.content",
+            )
             raise ValueError("Ollama response did not include message.content")
         raw_response = content
         try:
@@ -2131,10 +2747,24 @@ class MockTownProvider:
     name = "mock"
 
     def generate(self, zx: int, zy: int, context: dict[str, Any]) -> TownSpec:
-        names = ["Ashford Crossing", "Saltmarket", "Cinder Vale", "The Waypost", "Brackenmere"]
+        names = [
+            "Ashford Crossing",
+            "Saltmarket",
+            "Cinder Vale",
+            "The Waypost",
+            "Brackenmere",
+        ]
         idx = abs(hash((zx, zy))) % len(names)
-        promise_hooks = context.get("promise_hooks") if isinstance(context, dict) else None
-        hook = promise_hooks[0] if isinstance(promise_hooks, list) and promise_hooks and isinstance(promise_hooks[0], dict) else None
+        promise_hooks = (
+            context.get("promise_hooks") if isinstance(context, dict) else None
+        )
+        hook = (
+            promise_hooks[0]
+            if isinstance(promise_hooks, list)
+            and promise_hooks
+            and isinstance(promise_hooks[0], dict)
+            else None
+        )
         description = "A rough cluster of buildings where the road bends. Travelers stop here to rest; most keep moving."
         britta_backstory = "Has lived here longer than the buildings. Knows every plant in a day's walk."
         if hook:
