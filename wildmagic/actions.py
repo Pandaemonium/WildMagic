@@ -227,7 +227,9 @@ class GameSession:
         canon_before = self._pop_applied_canon() if record else []
         original_command = command.strip()
         turn_before = self.engine.state.turn
-        message_count_before = len(self.engine.state.messages)
+        # state.messages is capped to the last 80 entries, so len() stalls once the
+        # log is full; the monotonic message_count survives the cap.
+        message_count_before = self.engine.state.message_count
         action = "invalid"
         success = False
         technical_failure = False
@@ -434,7 +436,11 @@ class GameSession:
 
         turn_after = self.engine.state.turn
         consumed_turn = turn_after > turn_before
-        messages = explicit_messages if explicit_messages is not None else self.engine.state.messages[message_count_before:]
+        if explicit_messages is not None:
+            messages = explicit_messages
+        else:
+            new_message_count = self.engine.state.message_count - message_count_before
+            messages = self.engine.state.messages[-new_message_count:] if new_message_count > 0 else []
         result = ActionResult(
             command=original_command,
             action=action,

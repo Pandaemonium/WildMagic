@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 from datetime import datetime, timezone
 import json
 import os
@@ -11,7 +12,17 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 
 import pygame
 
-from .actions import ActionResult, GameSession
+from .actions import ActionResult, GameSession, describe_state
+from .autoplay import (
+    AgentObservation,
+    OllamaAgent,
+    adjacent_options,
+    avoid_commands_from_history,
+    compact_messages,
+    local_map_view,
+    result_summary,
+    validate_agent_command,
+)
 from .config import DEFAULT_MODEL, audit_dir, get_config_value, set_config_value
 from .game_data import _TOWN_GEN_TIMEOUT, EQUIPMENT_SPECS
 from .items import infer_equipment_slot
@@ -65,7 +76,7 @@ MODE_COLORS = {"spell": MODE_PURPLE, "talk": MODE_YELLOW, "control": MODE_GREEN,
 CONTROLS_HINT = (
     "Keyboard controls active - arrows/WASD/keypad move, > descend, < ascend, o open, "
     "g pick up, f cast spark, x investigate, j journal, q quests, i inventory, "
-    "period or keypad-5 to wait, Esc back to Wild Spell."
+    "period or keypad-5 to wait, F8 watch AI, F9 pause AI, F10 step AI, Esc back to Wild Spell."
 )
 
 _MOVE_KEY_MAP: dict[int, str] = {
@@ -89,6 +100,233 @@ LLM_AUDIT_FILES = (
     "lore_audit.jsonl",
     "flesh_audit.jsonl",
 )
+
+
+class VisualAutoplayController:
+    """Lets the autoplay command chooser drive the normal pygame command path."""
+
+    def __init__(self, ui: "GameUI", enabled: bool = False) -> None:
+        self.ui = ui
+        self.enabled = False
+        self.paused = False
+        self.step_once = False
+        self.delay_seconds = 1.15
+        self.executor: concurrent.futures.ThreadPoolExecutor | None = None
+        self.future: concurrent.futures.Future | None = None
+        self.agent: OllamaAgent | None = None
+        self.status = "off"
+        self.last_command: str | None = None
+        self.last_note: str | None = None
+        self.last_error: str | None = None
+        self.last_result: dict[str, Any] | None = None
+        self.command_history: list[str] = []
+        self.recent_results: list[dict[str, Any]] = []
+        self.step_index = 0
+        self.last_message_count = 0
+        self.next_command_at = 0.0
+        self.thinking_since: float | None = None
+        self.book_popup_until: float | None = None
+        if enabled:
+            self.start()
+
+    def start(self) -> None:
+        if self.enabled:
+            return
+        self.executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1,
+            thread_name_prefix="wildmagic-ui-autoplay",
+        )
+        self.agent = OllamaAgent()
+        self.enabled = True
+        self.paused = False
+        self.status = "watching"
+        self.last_error = None
+        self.next_command_at = time.monotonic() + 0.2
+
+    def stop(self) -> None:
+        self.enabled = False
+        self.paused = False
+        self.step_once = False
+        self.status = "off"
+        self.future = None
+        self.thinking_since = None
+        if self.executor is not None:
+            self.executor.shutdown(wait=False, cancel_futures=True)
+        self.executor = None
+        self.agent = None
+
+    def close(self) -> None:
+        self.stop()
+
+    def reset_session_state(self) -> None:
+        self.future = None
+        self.last_command = None
+        self.last_note = None
+        self.last_error = None
+        self.last_result = None
+        self.command_history = []
+        self.recent_results = []
+        self.step_index = 0
+        self.last_message_count = 0
+        self.next_command_at = time.monotonic() + 0.2
+        self.book_popup_until = None
+
+    def toggle(self) -> None:
+        if self.enabled:
+            self.stop()
+        else:
+            self.start()
+
+    def toggle_pause(self) -> None:
+        if not self.enabled:
+            self.start()
+        self.paused = not self.paused
+        self.status = "paused" if self.paused else "watching"
+
+    def request_step(self) -> None:
+        if not self.enabled:
+            self.start()
+        self.paused = True
+        self.step_once = True
+        self.next_command_at = 0.0
+        self.status = "stepping"
+
+    def update(self) -> None:
+        if not self.enabled:
+            return
+        now = time.monotonic()
+        if self.book_popup_until is not None and now >= self.book_popup_until:
+            self.ui.book_popup = None
+            self.book_popup_until = None
+        if self.ui.engine.state.game_over:
+            self.paused = True
+            self.status = "game over"
+            return
+        if self.future is not None:
+            if self.future.done():
+                self._finish_future()
+            else:
+                elapsed = now - (self.thinking_since or now)
+                self.status = f"thinking {elapsed:.0f}s"
+            return
+        if self.paused and not self.step_once:
+            self.status = "paused"
+            return
+        if now < self.next_command_at:
+            self.status = "watching"
+            return
+        self._submit_decision()
+
+    def _submit_decision(self) -> None:
+        if self.executor is None or self.agent is None:
+            self.start()
+        if self.executor is None or self.agent is None:
+            return
+        observation = self._observation()
+        self.thinking_since = time.monotonic()
+        self.status = "thinking"
+        self.future = self.executor.submit(self.agent.choose, observation)
+
+    def _finish_future(self) -> None:
+        future = self.future
+        self.future = None
+        self.thinking_since = None
+        command = "wait"
+        note: str | None = None
+        try:
+            decision = future.result() if future is not None else None
+            command = validate_agent_command(str(getattr(decision, "command", "wait")))
+            note = getattr(decision, "note", None)
+            if command.lower() in {"quit", "exit"}:
+                note = "AI chose quit; visual watch mode converted it to wait."
+                command = "wait"
+        except Exception as exc:
+            self.last_error = str(exc)
+            note = "Agent decision failed; visual watch mode waited."
+            command = "wait"
+
+        self.last_command = command
+        self.last_note = note
+        self.command_history.append(command)
+        self.ui.input_text = command
+        self.ui.input_active = False
+        result = self.ui.execute_command(command)
+        if result is not None:
+            summary = result_summary(result)
+            self.last_result = summary
+            self.recent_results.append(summary)
+            self.recent_results = self.recent_results[-8:]
+            if result.action == "read" and result.success and self.ui.book_popup is not None:
+                self.book_popup_until = time.monotonic() + 2.0
+        self.step_index += 1
+        self.next_command_at = time.monotonic() + self.delay_seconds
+        if self.step_once:
+            self.step_once = False
+            self.paused = True
+        self.status = "paused" if self.paused else "watching"
+
+    def _observation(self) -> AgentObservation:
+        session = self.ui.session
+        state = self.ui.engine.state
+        message_count = state.message_count
+        new_count = max(0, message_count - self.last_message_count)
+        if new_count:
+            new_messages = state.messages[-new_count:]
+        else:
+            new_messages = state.messages[-6:]
+        self.last_message_count = message_count
+        repeated_command, repeated_count = self._repeated_tail()
+        avoid = avoid_commands_from_history(
+            self.command_history,
+            self.recent_results,
+            repeated_command,
+            repeated_count,
+        )
+        return AgentObservation(
+            episode=0,
+            seed=session.seed,
+            scenario=session.scenario,
+            persona="visual_watch",
+            theme="live pygame watch mode",
+            step=self.step_index,
+            turn=state.turn,
+            new_messages=compact_messages(new_messages),
+            state_lines=describe_state(self.ui.engine),
+            local_map=local_map_view(session),
+            adjacent=adjacent_options(session),
+            recent_commands=self.command_history[-8:],
+            recent_results=self.recent_results[-6:],
+            last_result=self.last_result,
+            avoid_commands=avoid,
+            nudge=(
+                "You are being watched in the graphical UI. Do not merely wander. Rotate through visible "
+                "systems: inspect/examine/investigate rooms, read books, talk to NPCs, fight or control "
+                "enemies, pick up/use/equip items, and cast varied wild spells that visibly change the scene."
+            ),
+        )
+
+    def _repeated_tail(self) -> tuple[str, int]:
+        if not self.command_history:
+            return "", 0
+        command = self.command_history[-1]
+        count = 0
+        for item in reversed(self.command_history):
+            if item != command:
+                break
+            count += 1
+        return command, count
+
+    def overlay_lines(self) -> list[tuple[str, tuple[int, int, int]]]:
+        if not self.enabled:
+            return [("AI Watch: off   F8 start", MUTED)]
+        lines = [(f"AI Watch: {self.status}   F8 stop  F9 pause  F10 step", ACCENT)]
+        if self.last_command:
+            lines.append((f"> {self.last_command}", TEXT))
+        if self.last_note:
+            lines.append((self.last_note, MUTED))
+        if self.last_error:
+            lines.append((self.last_error, DANGER))
+        return lines[:4]
 
 LLM_CALL_COLORS = {
     "spell": MODE_PURPLE,
@@ -182,7 +420,7 @@ ENTITY_COLORS = {
 
 
 class GameUI:
-    def __init__(self) -> None:
+    def __init__(self, autoplay: bool = False) -> None:
         pygame.init()
         pygame.key.set_repeat(350, 35)
         pygame.display.set_caption("Wild Magic")
@@ -254,6 +492,7 @@ class GameUI:
         self.inventory_left_cursor = 0
         self.inventory_right_cursor = 0
         self.menu_models: list[str] = []   # populated when model page opens
+        self.autoplay = VisualAutoplayController(self, enabled=autoplay)
 
     def _config_value(self, spec: dict) -> str:
         """Current display value for a config spec entry."""
@@ -272,23 +511,37 @@ class GameUI:
 
     def run(self) -> None:
         running = True
-        while running:
-            for event in pygame.event.get():
-                if event.type == pygame.QUIT:
-                    running = False
-                elif event.type in {pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP, pygame.MOUSEMOTION}:
-                    self.handle_mouse(event)
-                elif event.type == pygame.MOUSEWHEEL:
-                    self.handle_mouse_wheel(event)
-                elif event.type == pygame.KEYDOWN:
-                    self.handle_key(event)
-            self.draw()
-            pygame.display.flip()
-            self.clock.tick(30)
-        self.session.close()
-        pygame.quit()
+        try:
+            while running:
+                for event in pygame.event.get():
+                    if event.type == pygame.QUIT:
+                        running = False
+                    elif event.type in {pygame.MOUSEBUTTONDOWN, pygame.MOUSEBUTTONUP, pygame.MOUSEMOTION}:
+                        self.handle_mouse(event)
+                    elif event.type == pygame.MOUSEWHEEL:
+                        self.handle_mouse_wheel(event)
+                    elif event.type == pygame.KEYDOWN:
+                        self.handle_key(event)
+                self.autoplay.update()
+                self.draw()
+                pygame.display.flip()
+                self.clock.tick(30)
+        finally:
+            self.autoplay.close()
+            self.session.close()
+            pygame.quit()
 
     def handle_key(self, event: pygame.event.Event) -> None:
+        if event.key == pygame.K_F8:
+            self.autoplay.toggle()
+            return
+        if event.key == pygame.K_F9:
+            self.autoplay.toggle_pause()
+            return
+        if event.key == pygame.K_F10:
+            self.autoplay.request_step()
+            return
+
         if self.menu_active:
             self._handle_menu_key(event)
             return
@@ -726,7 +979,7 @@ class GameUI:
             set_config_value("WILDMAGIC_MODEL", item["model"])
             self.menu_page = "config"
             self.menu_cursor = 0
-    def execute_command(self, command: str) -> None:
+    def execute_command(self, command: str) -> ActionResult:
         self.log_scroll_offset = 0
         result = self.session.execute_command(command)
         self._refresh_llm_debug_entries()
@@ -743,6 +996,7 @@ class GameUI:
                     "page": 0,
                     "page_count": 1,
                 }
+        return result
 
     # ------------------------------------------------------------------
 
@@ -773,6 +1027,7 @@ class GameUI:
         self.llm_selection_anchor = None
         self.llm_selection_focus = None
         self.dragging_llm_selection = False
+        self.autoplay.reset_session_state()
 
     def log_line_index_at(self, pos: tuple[int, int]) -> int | None:
         if not self.log_area.collidepoint(pos):
@@ -981,12 +1236,37 @@ class GameUI:
         self.draw_llm_panel()
         self.draw_map()
         self.draw_panel()
+        self.draw_autoplay_overlay()
         if self.inspect_tile is not None:
             self.draw_inspect_tooltip()
         if self.menu_active:
             self.draw_menu()
         if self.book_popup is not None:
             self.draw_book_popup()
+
+    def draw_autoplay_overlay(self) -> None:
+        lines = self.autoplay.overlay_lines()
+        if not lines:
+            return
+        wrapped: list[tuple[str, tuple[int, int, int]]] = []
+        for text, color in lines:
+            for line in wrap_text(text, 62):
+                wrapped.append((line, color))
+        line_height = self.small_font.get_linesize() + 2
+        width = MAP_PIXEL_WIDTH - 24
+        height = 16 + len(wrapped) * line_height
+        x = MAP_OFFSET_X + 12
+        y = MAP_PIXEL_HEIGHT + 10
+        if y + height > WINDOW_HEIGHT - 10:
+            y = WINDOW_HEIGHT - height - 10
+        overlay = pygame.Surface((width, height), pygame.SRCALPHA)
+        overlay.fill((17, 19, 24, 222))
+        self.screen.blit(overlay, (x, y))
+        pygame.draw.rect(self.screen, PANEL_EDGE, (x, y, width, height), width=1, border_radius=6)
+        cursor_y = y + 8
+        for text, color in wrapped:
+            self.draw_text(text, x + 10, cursor_y, self.small_font, color)
+            cursor_y += line_height
 
     def draw_inspect_tooltip(self) -> None:
         tx, ty = self.inspect_tile  # type: ignore[misc]
@@ -2491,5 +2771,5 @@ def is_player_damage_message(message: str) -> bool:
     return False
 
 
-def run_game() -> None:
-    GameUI().run()
+def run_game(autoplay: bool = False) -> None:
+    GameUI(autoplay=autoplay).run()
