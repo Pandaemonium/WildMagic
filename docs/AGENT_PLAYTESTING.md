@@ -102,9 +102,39 @@ $env:WILDMAGIC_BACKGROUND_OLLAMA_HOST='http://127.0.0.1:11435'
 $env:WILDMAGIC_BACKGROUND_OLLAMA_NUM_GPU='0'
 ```
 
-Per-purpose overrides are also supported: `WILDMAGIC_WILD_OLLAMA_HOST`, `WILDMAGIC_DIALOGUE_OLLAMA_HOST`, `WILDMAGIC_TRADE_OLLAMA_HOST`, and `WILDMAGIC_TOWN_OLLAMA_HOST`. The same scoped pattern works for `OLLAMA_NUM_CTX`, `OLLAMA_TIMEOUT`, `OLLAMA_NUM_GPU`, `OLLAMA_THINK`, `OLLAMA_FORMAT`, and `OLLAMA_KEEP_ALIVE`.
+Per-purpose overrides are also supported: `WILDMAGIC_WILD_OLLAMA_HOST`, `WILDMAGIC_AGENT_OLLAMA_HOST`, `WILDMAGIC_DIALOGUE_OLLAMA_HOST`, `WILDMAGIC_TRADE_OLLAMA_HOST`, and `WILDMAGIC_TOWN_OLLAMA_HOST`. The same scoped pattern works for `OLLAMA_NUM_CTX`, `OLLAMA_TIMEOUT`, `OLLAMA_NUM_GPU`, `OLLAMA_THINK`, `OLLAMA_FORMAT`, and `OLLAMA_KEEP_ALIVE`.
 
 When you want strict control over manually started servers, set `WILDMAGIC_OLLAMA_AUTOSTART=0`.
+
+## Unattended Playtesting
+
+For long unattended runs, use the autoplay harness instead of driving the CLI by hand
+(see `docs/AUTOPLAY_PLAN.md` for design and `python -m wildmagic.autoplay --help` for flags):
+
+```powershell
+$env:WILDMAGIC_CANON_PREWARM_ENABLED='0'
+$env:WILDMAGIC_MODEL='qwen3.5:9b-q4_K_M'
+$env:WILDMAGIC_AGENT_MODEL='qwen3.5:9b-q4_K_M'
+python -m wildmagic.autoplay --hours 8 --provider ollama --agent ollama --episode-minutes 30
+```
+
+Use the same model for `WILDMAGIC_MODEL` and `WILDMAGIC_AGENT_MODEL` so the GPU never swaps
+models between turns. Each run writes per-episode JSONL logs, replays, `findings.jsonl`,
+`regression_seeds.txt`, and a `report.md` summary under `logs/autoplay/<run_id>/`.
+
+## Visual AI Watch Mode
+
+To watch the autonomous agent play through the same Pygame UI as a human player:
+
+```powershell
+python main.py --autoplay
+```
+
+You can also launch normally with `python main.py` and press `F8` to start or stop AI watch
+mode. `F9` pauses or resumes the agent, and `F10` asks it to take exactly one step while
+paused. The visual watcher uses the `agent` Ollama purpose (`WILDMAGIC_AGENT_MODEL`,
+`WILDMAGIC_AGENT_OLLAMA_NUM_CTX`, and related scoped settings), builds the same compact
+observation as the headless harness, and applies decisions through `GameSession.execute_command`.
 
 ## Command Surface
 

@@ -9,17 +9,26 @@ from mixin modules so each concern lives in its own file.
 ## Entry points
 
 ### `main.py`
-One-liner that calls `wildmagic.ui.run_game()`. The GUI entry point.
+GUI entry point. Launches `wildmagic.ui.run_game()` and accepts `--autoplay` to start the
+graphical UI with AI watch mode already enabled.
 
 ### `wildmagic/ui.py`
 Pygame front-end. Owns the game loop, renders the tile map and side panels, handles keyboard
-input, and routes commands to `GameSession`. Also shows the LLM thinking panel and the model
-selector overlay. Imports from `actions`, `models`, `game_data`, and `wild_magic` (for
-`fetch_ollama_models` and prompt/thinking helpers).
+input, and routes commands to `GameSession`. Also shows the LLM thinking panel, the model
+selector overlay, and a visual AI watch controller that lets the autoplay command chooser
+drive the same command path while the renderer stays responsive.
 
 ### `wildmagic/cli.py`
 Terminal front-end. Parses `--seed`, `--scenario`, `--provider`, `--script`, `--record` flags,
 drives `GameSession` in a readline loop, and optionally saves a replay JSON at exit.
+
+### `wildmagic/autoplay.py`
+Autonomous headless playtesting harness (`python -m wildmagic.autoplay`). Runs sequential
+episodes through `GameSession`, using a stub/random/Ollama command chooser while the
+engine remains authoritative. Writes per-step JSONL, command scripts, replay files,
+findings, and a Markdown report under `logs/autoplay/<run_id>/`. Its invariant checker
+wraps `ActionResult` turn-contract fields, `GameEngine.validate_state()`, and a few
+cross-state consistency checks; agent notes are kept as unverified leads.
 
 ---
 

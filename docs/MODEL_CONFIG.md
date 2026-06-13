@@ -30,6 +30,7 @@ Every LLM call has a **purpose**, and each purpose belongs to a **route**:
 | `dialogue` | NPC conversation | URGENT | `WILDMAGIC_MODEL` |
 | `trade` | trade-offer extraction from dialogue | URGENT | dialogue's model |
 | `canon` | on-demand canon materialization (`examine`, `read`) | URGENT | `WILDMAGIC_MODEL` |
+| `agent` | autonomous playtesting command chooser | URGENT | `WILDMAGIC_MODEL` |
 | `town` | settlement generation (name, buildings, NPCs) | BACKGROUND | `WILDMAGIC_MODEL` |
 | `lore` | rumor/claim extraction, promise flesh | BACKGROUND | `qwen3:1.7b` |
 
@@ -54,7 +55,7 @@ WILDMAGIC_<OPTION>               e.g. WILDMAGIC_OLLAMA_NUM_GPU
 
 Purpose names accept aliases (`SPELL`/`WILD_MAGIC`/`MAGIC` → `WILD`, `NPC_DIALOGUE` →
 `DIALOGUE`, `TOWN_GENERATION` → `TOWN`, `LORE_EXTRACTION` → `LORE`). Routes are
-`URGENT` (wild, dialogue, trade) and `BACKGROUND` (town, lore).
+`URGENT` (wild, dialogue, trade, canon, agent) and `BACKGROUND` (town, lore).
 
 ## Providers
 
@@ -68,16 +69,20 @@ defaults to the master).
 - `auto` — tries Ollama, falls back to mock when `WILDMAGIC_ENABLE_FALLBACKS=1`.
   Avoid for LLM evaluation; it hides provider failures.
 
+Autonomous playtesting has a separate `--agent` flag. `--provider` still selects the game
+resolver, while `--agent ollama` uses the `agent` purpose only to choose CLI commands.
+
 ## Models
 
 | Variable | Default | Notes |
 |---|---|---|
-| `WILDMAGIC_MODEL` | `qwen3.5:9b-q4_K_M` | shared default for wild/dialogue/town |
+| `WILDMAGIC_MODEL` | `qwen3.5:9b-q4_K_M` | shared default for wild/dialogue/town/agent |
 | `WILDMAGIC_WILD_MODEL` | shared | spell resolution |
 | `WILDMAGIC_DIALOGUE_MODEL` | shared | NPC conversation (a chattier finetune works well) |
 | `WILDMAGIC_TRADE_MODEL` | dialogue's | trade extraction |
 | `WILDMAGIC_CANON_MODEL` | shared | examine/read materialization |
 | `WILDMAGIC_BACKGROUND_CANON_MODEL` | lore model | background book previews |
+| `WILDMAGIC_AGENT_MODEL` | shared | autonomous playtesting command chooser |
 | `WILDMAGIC_TOWN_MODEL` | shared | settlement generation |
 | `WILDMAGIC_LORE_MODEL` | `qwen3:1.7b` | extraction/flesh; small is fine for extraction |
 
@@ -101,13 +106,20 @@ ignoring the spell contract in creative ways.
 | `WILDMAGIC_DIALOGUE_TEMPERATURE` | no | 0.7 | dialogue temperature |
 | `WILDMAGIC_TRADE_TEMPERATURE` | no | 0.5 | falls back to the dialogue variable if unset |
 | `WILDMAGIC_CANON_TEMPERATURE` | no | 0.85 | examine/read prose; hot by design so similar seed packets don't yield identical titles |
+| `WILDMAGIC_AGENT_TEMPERATURE` | no | 0.35 | autonomous playtesting command variety |
 | `WILDMAGIC_OLLAMA_NUM_PREDICT` | no | 1024 (128–4096) | wild-magic response budget |
 | `WILDMAGIC_DIALOGUE_NUM_PREDICT` | no | 320 (32–1024) | dialogue budget |
 | `WILDMAGIC_TRADE_NUM_PREDICT` | no | dialogue's | trade budget |
+| `WILDMAGIC_AGENT_NUM_PREDICT` | no | 256 (64-1024) | command-chooser response budget |
 | `WILDMAGIC_TOWN_NUM_PREDICT` | no | 2000 (256–8192) | town generation budget |
 | `WILDMAGIC_LORE_NUM_PREDICT` | no | 700 (64–2048) | lore/flesh budget |
 | `WILDMAGIC_CANON_NUM_PREDICT` | no | 1400 (64–2048) | examine/read budget; sized for compressed book pages |
 | `WILDMAGIC_OLLAMA_RESOLUTION_ATTEMPTS` | no | 2 (1–4) | wild-magic retries on malformed JSON |
+
+For `--agent ollama`, keep `WILDMAGIC_AGENT_OLLAMA_NUM_CTX` aligned with the foreground
+resolver's `num_ctx` when both use the same model tag. The command prompt is compact, but
+matching load-time options prevents Ollama from reloading the model between agent and
+resolver calls.
 
 ## Canon prewarming
 

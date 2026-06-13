@@ -15,8 +15,10 @@ The agent never edits code. It plays, observes, and reports.
    - Tier 2 (trustworthy): aggregate stats from `ActionResult` records and audit logs.
    - Tier 3 (leads only): the agent's freeform notes. Never reported as confirmed bugs.
 2. **Every finding must be reproducible or evidenced.** Each episode records its seed,
-   scenario, full command list, and a replay file. LLM-resolver findings reference
-   `logs/wild_magic_audit.jsonl` records.
+   scenario, full command list, and a replay file. The replay file is the primary
+   reproduction artifact, especially for live-LLM runs where re-running the same commands
+   would ask the resolver for new JSON. LLM-resolver findings reference that episode's
+   audit records.
 3. **The harness never crashes because the model misbehaved.** Malformed agent output,
    timeouts, and hangs are routine events with defined fallbacks.
 
@@ -34,7 +36,9 @@ The agent never edits code. It plays, observes, and reports.
 - `_post_ollama_chat` + purpose-scoped config (`wildmagic/llm_client.py`,
   `wildmagic/config.py`) — the agent becomes a new purpose, `agent`, so
   `WILDMAGIC_AGENT_OLLAMA_HOST`, `WILDMAGIC_AGENT_MODEL`, `WILDMAGIC_AGENT_OLLAMA_TIMEOUT`,
-  etc. work like the existing `wild`/`dialogue`/`trade`/`town` scopes.
+  etc. work like the existing `wild`/`dialogue`/`trade`/`town` scopes. The harness sets
+  `WILDMAGIC_AUDIT_DIR` inside each run directory before provider creation so live
+  resolver audits stay with the episode artifacts.
 
 ## Architecture
 
@@ -54,9 +58,12 @@ Campaign (overnight driver)
 Each turn:
 
 1. Build a compact observation (~1–1.5k tokens):
-   - System prompt: persona + episode objective + command surface + note-taking rules.
-   - User message: new game messages since the last command, plus a condensed `inspect`
-     summary (turn, HP/MP, position, inventory, curses, visible enemies with distances).
+   - System prompt: command surface, note-taking rules, tactical play rules, and explicit
+     loop recovery instructions.
+   - User message: compacted new game messages since the last command, plus a condensed
+     `inspect` summary (turn, HP/MP, position, inventory, curses, visible enemies with
+     distances), a cropped local map, adjacent-direction affordances, recent command
+     outcomes, and commands the agent should avoid repeating.
 2. Call Ollama with `format=json`, requesting:
    ```json
    {"command": "...", "note": "... or null", "bug_suspected": false}
@@ -64,11 +71,16 @@ Each turn:
 3. Validate `command` against the known command surface (`cast`/`talk` accept freeform
    tails; everything else must match a known verb). On parse failure or unknown verb:
    retry once with the error appended; on second failure, fall back to `wait` and log a
-   `agent_parse_failure` event. Three consecutive parse failures end the episode.
+   `agent_parse_failure` event. Three consecutive parse failures end the episode. Full
+   book/canon text is truncated before it reaches the command chooser so it does not swamp
+   tactical context.
 
-Player model = resolver model (qwen3:8b) by default. The game is turn-based so agent and
-resolver calls never overlap — one Ollama server serves both with no contention, and using
-one model avoids VRAM swap thrash on the 8 GB Arc A750.
+Player model = resolver model by default. `--provider` controls the game resolver, while
+`--agent` controls the command chooser (`ollama`, `stub`, or `random`). The first build uses
+a real or stub agent against `--provider mock`; CI uses the stub agent. The harness is sequential,
+but `GameSession` can have background lore/flesh/canon jobs around command boundaries, so
+episodes either drain those jobs before agent calls or route/disable background work when a
+single-GPU run needs strict no-contention behavior.
 
 ### Personas and objectives
 
@@ -93,8 +105,13 @@ After every `execute_command`:
 | `engine.validate_state()` returns errors | existing engine method |
 | `technical_failure=True` but turn advanced | `ActionResult` fields (doc: technical failures must not consume the turn) |
 | Wild spell rejected as overpowered but turn did **not** advance | `wild_magic` record + `consumed_turn` |
-| `consumed_turn=True` but no new messages | `ActionResult.messages` (doc: player must be able to tell what happened) |
+| Alive blocking actor stands on blocking terrain | `engine.tile_at(entity.x, entity.y)` + tile constants |
 | Turn counter decreased or jumped | `turn_before`/`turn_after` |
+
+Heuristic checks are reported separately from tier-1 invariants. For example,
+`consumed_turn=True` with no new messages is useful for casts/dialogue/canon actions, but
+ordinary successful movement can legitimately advance a turn without adding a direct
+message.
 
 On an exception: capture the traceback, seed, persona, and full command history; save the
 replay; end the episode; continue the campaign with the next episode. A crash is a finding,
@@ -123,23 +140,27 @@ implementation, and a game-over/death detection check is needed to end episodes 
 ### CLI
 
 ```powershell
-python -m wildmagic.autoplay --hours 8 --provider ollama --out logs/autoplay
-python -m wildmagic.autoplay --episodes 3 --max-turns 50 --provider mock   # harness shakedown
+python -m wildmagic.autoplay --hours 8 --provider ollama --agent ollama --out logs/autoplay
+python -m wildmagic.autoplay --episodes 3 --max-turns 50 --provider mock --agent stub   # harness shakedown
 ```
 
 Flags: `--episodes`, `--hours`, `--max-turns`, `--scenario` (repeatable; default rotation),
 `--persona` (repeatable; default rotation), `--seed-base`, `--provider` (game resolver:
-mock/ollama), `--out`.
+mock/ollama), `--agent` (command chooser: ollama/stub/random), `--out`.
 
 ### Output layout
 
 ```
 logs/autoplay/<run_id>/
   episode_001.jsonl      # one record per step: command, ActionResult.to_record(),
-                         #   violations, agent note, timing
+                         #   messages, observation, violations, agent note, timing
   episode_001.replay.json
+  episode_001.commands.txt
   findings.jsonl         # tier-1 violations + tier-3 flagged notes, each with
                          #   {tier, episode, seed, turn, evidence, replay_path}
+  regression_seeds.txt   # seed/scenario/finding-kind lines for episodes with
+                         #   tier-1/2 findings, for re-runs after fixes
+  wild_magic_audit.jsonl # live resolver audits, scoped to this run
   report.md              # the morning read
 ```
 
@@ -150,32 +171,33 @@ a report):
 
 1. **Run summary** — episodes, total turns, total casts, deaths, completion reasons.
 2. **Tier 1 findings** — crash signatures deduped by traceback tail, each with a
-   reproduction line (`python -m wildmagic.cli --provider mock --seed S --script ...`);
-   contract violations grouped by type.
+   reproduction line (`python -m wildmagic.replay logs/autoplay/<run>/episode_NNN.replay.json`);
+   command-script paths are included as supporting context; contract violations are grouped
+   by type.
 3. **Stats** — wild-cast technical-failure rate, OP-rejection rate, parse-failure rate of
    the agent itself, deaths per episode, command distribution, per-persona differences.
 4. **Agent notes** — grouped by keyword overlap, each linked to episode/turn/audit record,
    clearly labeled as unverified leads.
 
-## Phases
+## Build order
 
-**Phase 1 — harness against mock resolver.** Build `autoplay.py` end to end: PlayerAgent
-(real LLM), EpisodeRunner, InvariantChecker, logs, report. Run with `--provider mock` so
-the game side is fast and deterministic while harness bugs get shaken out.
-*Milestone: 3 episodes × 50 turns complete unattended; report.md is readable; a manually
+**Harness against mock resolver.** Build `autoplay.py` end to end: PlayerAgent
+(stub/random first, Ollama once the loop is stable), EpisodeRunner, InvariantChecker, logs,
+report. Run with `--provider mock` so the game side is fast and deterministic while harness
+bugs get shaken out.
+*Target: 3 episodes × 50 turns complete unattended; report.md is readable; a manually
 injected invariant violation shows up correctly in findings.*
 
-**Phase 2 — live resolver, first overnight run.** Switch to `--provider ollama`, run 1–2
+**Live resolver, first overnight run.** Switch to `--provider ollama`, run 1–2
 hours supervised, tune observation size, loop detection thresholds, and per-call timeouts;
 then a full overnight run.
-*Milestone: 8-hour run completes without harness intervention; morning report contains
+*Target: 8-hour run completes without harness intervention; morning report contains
 tier-1 findings with working reproduction commands.*
 
-**Phase 3 — triage quality.** Cross-reference findings with `wild_magic_audit.jsonl`
-records automatically; promote recurring agent notes into the regression list in
-`AGENT_PLAYTESTING.md`; maintain a `regression_seeds.txt` of seeds that produced findings
-for re-runs after fixes.
-*Milestone: a finding from a nightly run gets fixed and verified by replaying its seed.*
+**Triage quality.** Cross-reference findings with audit records automatically;
+emit candidate regression notes and seed lists for human review; maintain a
+`regression_seeds.txt` of seeds that produced findings for re-runs after fixes.
+*Target: a finding from a nightly run gets fixed and verified by replaying its seed.*
 
 ## Testing
 
@@ -184,13 +206,32 @@ for re-runs after fixes.
 - Integration smoke: one short episode with `--provider mock` and a **stub agent** (a fake
   LLM returning a fixed command script) so CI exercises the full episode loop with no
   Ollama dependency.
-- `python -m wildmagic.smoke_test` must stay green; the harness adds no imports to game
-  modules (autoplay imports the game, never the reverse).
+- `python -m wildmagic.smoke_test` must stay green. The headless harness stays independent;
+  the graphical UI may import the command chooser for visual watch mode, but command
+  application still goes through `GameSession`.
 
 ## Non-goals
 
 - The agent does not modify code, delete logs, or write outside `logs/autoplay/`.
 - No fun/balance verdicts from the agent are reported as facts — tier 3 is always labeled.
-- No graphical UI testing; CLI surface only.
+- No duplicate graphical client; visual watch mode reuses the normal Pygame UI.
 - No multi-process parallelism in v1 (one GPU, sequential turns; parallel episodes would
   thrash the model cache for little gain).
+
+## Monitoring
+
+- To check if autoplay is running:
+Get-CimInstance Win32_Process |
+  Where-Object { $_.CommandLine -match 'wildmagic\.autoplay' } |
+  Select-Object ProcessId,CreationDate,CommandLine
+
+- To check if it is actively producing data:
+Get-ChildItem logs/autoplay -Recurse -File |
+  Sort-Object LastWriteTime -Descending |
+  Select-Object -First 20 FullName,Length,LastWriteTime
+
+- To watch a running episode live:
+Get-Content logs/autoplay/<run_id>/episode_001.jsonl -Wait
+
+- A real long run would look something like:
+python -m wildmagic.autoplay --hours 8 --provider ollama --agent ollama --out logs/autoplay --run-id overnight_001

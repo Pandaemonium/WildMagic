@@ -37,6 +37,11 @@ def set_config_value(key: str, value: str) -> None:
     os.environ[key] = normalized
 
 
+def set_runtime_config_value(key: str, value: str) -> None:
+    """Update this process only, without writing machine-local run state to .env."""
+    os.environ[key] = str(value).strip()
+
+
 def _float_value(key: str, default: float, minimum: float, maximum: float) -> float:
     value = get_config_value(key)
     try:
@@ -95,7 +100,7 @@ def _route_key(purpose: str | None) -> str | None:
     # CANON is on-demand materialization (examine/read): the player is blocked
     # waiting on it, so it routes URGENT. Background prewarming jobs construct
     # their provider with lore-scope overrides instead.
-    if key in {"WILD", "DIALOGUE", "TRADE", "CANON"}:
+    if key in {"WILD", "DIALOGUE", "TRADE", "CANON", "AGENT"}:
         return "URGENT"
     if key in {"TOWN", "LORE"}:
         return "BACKGROUND"
@@ -179,6 +184,10 @@ def get_canon_model() -> str:
 
 def get_background_canon_model() -> str:
     return get_config_value("WILDMAGIC_BACKGROUND_CANON_MODEL") or get_lore_model()
+
+
+def get_agent_model() -> str:
+    return get_config_value("WILDMAGIC_AGENT_MODEL") or _shared_model()
 
 
 def get_wild_magic_provider() -> str:
@@ -278,6 +287,14 @@ def ollama_canon_temperature() -> float:
     """Creative prose wants heat; the wild-magic default (0.25) produces
     near-identical titles and passages for similar seed packets."""
     return _float_value("WILDMAGIC_CANON_TEMPERATURE", 0.85, 0.0, 1.5)
+
+
+def ollama_agent_temperature() -> float:
+    return _float_value("WILDMAGIC_AGENT_TEMPERATURE", 0.35, 0.0, 1.5)
+
+
+def ollama_agent_num_predict() -> int:
+    return _int_value("WILDMAGIC_AGENT_NUM_PREDICT", 256, 64, 1024)
 
 
 def ollama_num_gpu(purpose: str | None = None) -> int:
