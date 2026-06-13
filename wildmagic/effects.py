@@ -36,6 +36,18 @@ from .spell_contract import STATUS_FLAVOR_ALIASES, validate_resolution
 from .templates import creature_template, item_template
 
 
+def _positive_cost_amount(value: Any, maximum: int, default: int = 1) -> int:
+    """A cost magnitude. The model occasionally emits a negative number when it
+    means a cost of that size (e.g. -5 for "lose 5"), so take the absolute value,
+    and clamp to [1, maximum] so any emitted cost actually bites at least 1 — a
+    0/missing/negative amount must never resolve to a free cost."""
+    try:
+        amount = abs(int(value))
+    except (TypeError, ValueError):
+        amount = default
+    return max(1, min(maximum, amount))
+
+
 class _EffectsMixin:
     """Effect/cost application and placement helpers extracted from GameEngine."""
 
@@ -142,12 +154,15 @@ class _EffectsMixin:
             self.damage_entity(player, amount, "blood")
             return None
         if cost_type == "max_health":
-            amount = clamp_int(cost.get("amount"), 0, 10)
+            # abs()+floor-of-1: a max-stat cost the model bothered to emit must bite.
+            # The old 0 floor let a missing/negative amount clamp to 0 and silently do
+            # nothing while still printing a cost line.
+            amount = _positive_cost_amount(cost.get("amount"), 10)
             player.max_hp = max(1, player.max_hp - amount)
             player.hp = min(player.hp, player.max_hp)
             return f"Cost: {amount} maximum health."
         if cost_type == "max_mana":
-            amount = clamp_int(cost.get("amount"), 0, 10)
+            amount = _positive_cost_amount(cost.get("amount"), 10)
             player.max_mana = max(0, player.max_mana - amount)
             player.mana = min(player.mana, player.max_mana)
             return f"Cost: {amount} maximum mana."
@@ -826,6 +841,11 @@ class _EffectsMixin:
         if effect_type == "add_curse":
             message = self._apply_cost({"type": "curse", **effect})
             return [message] if message else []
+        if effect_type == "possess":
+            target = self.resolve_target(str(effect.get("target") or "nearest_enemy"))
+            if not target or target.kind in {"item", "prop"}:
+                return ["The possession finds no one to inhabit."]
+            return self.swap_control_to(target.id)
         if effect_type == "message":
             text = str(effect.get("text") or "").strip()
             return [text] if text else []
