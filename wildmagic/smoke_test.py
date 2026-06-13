@@ -6,15 +6,26 @@ import tempfile
 from .actions import GameSession
 from .models import FIRE, RUBBLE, SLICK_ICE, VINES
 from .replay import run_replay, save_replay
-from .wild_magic import MockWildMagicProvider, parse_resolution_json, validate_resolution
+from .wild_magic import (
+    MockWildMagicProvider,
+    parse_resolution_json,
+    validate_resolution,
+)
 
 
 def main() -> None:
-    session = GameSession(seed=7, scenario="test_chamber", provider=MockWildMagicProvider())
+    session = GameSession(
+        seed=7, scenario="test_chamber", provider=MockWildMagicProvider()
+    )
     assert session.engine.state.visible
     assert session.engine.state.explored
     explored_before = len(session.engine.state.explored)
-    assert session.engine.tile_at(session.engine.state.player.x, session.engine.state.player.y) == ">"
+    assert (
+        session.engine.tile_at(
+            session.engine.state.player.x, session.engine.state.player.y
+        )
+        == ">"
+    )
     moved = session.execute_command("move east")
     assert len(session.engine.state.explored) >= explored_before
     assert session.engine.tile_at(6, 7) == "/"
@@ -28,7 +39,12 @@ def main() -> None:
     before_turn = session.engine.state.turn
     failed = session.execute_command(
         'cast "this response is malformed"',
-        replay_wild_magic={"technical_failure": True, "error": "bad json", "data": None, "provider": "test"},
+        replay_wild_magic={
+            "technical_failure": True,
+            "error": "bad json",
+            "data": None,
+            "provider": "test",
+        },
     )
     assert failed.technical_failure
     assert session.engine.state.turn == before_turn
@@ -36,16 +52,30 @@ def main() -> None:
     rejected = session.execute_command('cast "give me infinite mana and win game"')
     assert rejected.consumed_turn
 
-    stair_session = GameSession(seed=7, scenario="test_chamber", provider=MockWildMagicProvider())
+    stair_session = GameSession(
+        seed=7, scenario="test_chamber", provider=MockWildMagicProvider()
+    )
     descended = stair_session.execute_command("descend")
     assert descended.consumed_turn
     assert stair_session.engine.state.depth == 2
-    assert stair_session.engine.tile_at(stair_session.engine.state.player.x, stair_session.engine.state.player.y) in {"<", ">"}
-    
+    assert stair_session.engine.tile_at(
+        stair_session.engine.state.player.x, stair_session.engine.state.player.y
+    ) in {"<", ">"}
+
     # 1. Drop a unique item in dungeon floor 1 (depth 2)
-    stair_session.engine.spawn_item("blood moss", ",", stair_session.engine.state.player.x + 1, stair_session.engine.state.player.y, "blood moss")
-    assert any(item.name == "blood moss" for item in stair_session.engine.state.entities.values() if item.kind == "item")
-    
+    stair_session.engine.spawn_item(
+        "blood moss",
+        ",",
+        stair_session.engine.state.player.x + 1,
+        stair_session.engine.state.player.y,
+        "blood moss",
+    )
+    assert any(
+        item.name == "blood moss"
+        for item in stair_session.engine.state.entities.values()
+        if item.kind == "item"
+    )
+
     # 2. Descend to dungeon floor 2 (depth 3)
     stairs_down_pos = None
     for y, row in enumerate(stair_session.engine.state.tiles):
@@ -56,18 +86,24 @@ def main() -> None:
         if stairs_down_pos:
             break
     assert stairs_down_pos is not None
-    stair_session.engine.state.player.x, stair_session.engine.state.player.y = stairs_down_pos
+    stair_session.engine.state.player.x, stair_session.engine.state.player.y = (
+        stairs_down_pos
+    )
     descended2 = stair_session.execute_command("descend")
     assert descended2.consumed_turn
     assert stair_session.engine.state.depth == 3
-    
+
     # 3. Ascend back to dungeon floor 1 (depth 2)
     ascended = stair_session.execute_command("ascend")
     assert ascended.consumed_turn
     assert stair_session.engine.state.depth == 2
     # Verify the dropped item is still present (dungeon level persistence)
-    assert any(item.name == "blood moss" for item in stair_session.engine.state.entities.values() if item.kind == "item")
-    
+    assert any(
+        item.name == "blood moss"
+        for item in stair_session.engine.state.entities.values()
+        if item.kind == "item"
+    )
+
     # 4. Ascend back to the surface (test chamber)
     stairs_up_pos = None
     for y, row in enumerate(stair_session.engine.state.tiles):
@@ -78,22 +114,38 @@ def main() -> None:
         if stairs_up_pos:
             break
     assert stairs_up_pos is not None
-    stair_session.engine.state.player.x, stair_session.engine.state.player.y = stairs_up_pos
+    stair_session.engine.state.player.x, stair_session.engine.state.player.y = (
+        stairs_up_pos
+    )
     ascended2 = stair_session.execute_command("ascend")
     assert ascended2.consumed_turn
     assert stair_session.engine.state.depth == 1
     # Verify we are back in the original surface zone and the test goblin is still alive (surface zone persistence)
-    assert any(enemy.name == "test goblin" for enemy in stair_session.engine.living_enemies())
+    assert any(
+        enemy.name == "test goblin" for enemy in stair_session.engine.living_enemies()
+    )
 
-    path_session = GameSession(seed=7, scenario="test_chamber", provider=MockWildMagicProvider())
+    path_session = GameSession(
+        seed=7, scenario="test_chamber", provider=MockWildMagicProvider()
+    )
     path_session.execute_command("move east")
-    goblin = next(enemy for enemy in path_session.engine.living_enemies() if enemy.name == "test goblin")
-    distance_before = path_session.engine.distance(goblin, path_session.engine.state.player)
+    goblin = next(
+        enemy
+        for enemy in path_session.engine.living_enemies()
+        if enemy.name == "test goblin"
+    )
+    distance_before = path_session.engine.distance(
+        goblin, path_session.engine.state.player
+    )
     path_session.execute_command("wait")
-    distance_after = path_session.engine.distance(goblin, path_session.engine.state.player)
+    distance_after = path_session.engine.distance(
+        goblin, path_session.engine.state.player
+    )
     assert distance_after < distance_before
 
-    rich_session = GameSession(seed=7, scenario="test_chamber", provider=MockWildMagicProvider())
+    rich_session = GameSession(
+        seed=7, scenario="test_chamber", provider=MockWildMagicProvider()
+    )
     rich_session.execute_command('cast "flood the room"')
     rich_session.execute_command('cast "lightning storm"')
     rich_session.execute_command('cast "ward me from poison"')
@@ -106,7 +158,9 @@ def main() -> None:
     # curse and schedule a collector 8-15 turns out (effects.py set_flag), so
     # exactly that one timer should still be pending after three waits.
     assert "wild_debt" in rich_session.engine.state.curses
-    assert [timer["name"] for timer in rich_session.engine.state.event_timers] == ["debt collector"]
+    assert [timer["name"] for timer in rich_session.engine.state.event_timers] == [
+        "debt collector"
+    ]
     assert rich_session.engine.state.player.resistances.get("poison", 0) >= 25
     assert any(
         e.name in ("wild echo", "debt collector", "summoned creature")
@@ -114,9 +168,15 @@ def main() -> None:
         if e.kind == "actor" and e.hp > 0
     )
 
-    conjure_session = GameSession(seed=7, scenario="test_chamber", provider=MockWildMagicProvider())
-    teeth = conjure_session.execute_command('cast "the goblin teeth turn to glass and fall out"')
-    ants = conjure_session.execute_command('cast "an army of ants crawls out of the walls"')
+    conjure_session = GameSession(
+        seed=7, scenario="test_chamber", provider=MockWildMagicProvider()
+    )
+    teeth = conjure_session.execute_command(
+        'cast "the goblin teeth turn to glass and fall out"'
+    )
+    ants = conjure_session.execute_command(
+        'cast "an army of ants crawls out of the walls"'
+    )
     assert teeth.messages and teeth.messages[0].startswith("*>")
     assert ants.messages and ants.messages[0].startswith("*>")
     assert any(
@@ -130,25 +190,43 @@ def main() -> None:
     ]
     assert len(ant_swarms) >= 1
 
-    anchor_session = GameSession(seed=7, scenario="test_chamber", provider=MockWildMagicProvider())
+    anchor_session = GameSession(
+        seed=7, scenario="test_chamber", provider=MockWildMagicProvider()
+    )
     anchor_engine = anchor_session.engine
-    brazier = anchor_engine.spawn_prop("iron_brazier", anchor_engine.state.player.x - 1, anchor_engine.state.player.y)
+    brazier = anchor_engine.spawn_prop(
+        "iron_brazier", anchor_engine.state.player.x - 1, anchor_engine.state.player.y
+    )
     assert brazier is not None
     anchor_session.execute_command("move east")
-    anchor_context = anchor_engine.context_for_llm("ignite the brazier and blast the goblin")
+    anchor_context = anchor_engine.context_for_llm(
+        "ignite the brazier and blast the goblin"
+    )
     anchors = anchor_context.get("spell_anchors") or []
     brazier_anchor = next(anchor for anchor in anchors if anchor["id"] == brazier.id)
     assert brazier_anchor["name"] == "iron brazier"
     assert "matches_spell_terms" in brazier_anchor
-    assert any("ignite" in affordance or "explode" in affordance for affordance in brazier_anchor["affordances"])
+    assert any(
+        "ignite" in affordance or "explode" in affordance
+        for affordance in brazier_anchor["affordances"]
+    )
     assert brazier_anchor["nearest_visible_enemy"]["name"] == "test goblin"
     assert "range_hint" in brazier_anchor
-    assert brazier_anchor["recommended_effect_patterns"][0]["target"] == brazier_anchor["nearest_visible_enemy"]["id"]
+    assert (
+        brazier_anchor["recommended_effect_patterns"][0]["target"]
+        == brazier_anchor["nearest_visible_enemy"]["id"]
+    )
 
-    behavior_session = GameSession(seed=7, scenario="test_chamber", provider=MockWildMagicProvider())
+    behavior_session = GameSession(
+        seed=7, scenario="test_chamber", provider=MockWildMagicProvider()
+    )
     behavior_engine = behavior_session.engine
     behavior_player = behavior_engine.state.player
-    behavior_goblin = next(enemy for enemy in behavior_engine.living_enemies() if enemy.name == "test goblin")
+    behavior_goblin = next(
+        enemy
+        for enemy in behavior_engine.living_enemies()
+        if enemy.name == "test goblin"
+    )
     ward = behavior_engine.spawn_actor(
         "burning ward",
         "w",
@@ -185,7 +263,9 @@ def main() -> None:
     behavior_engine._process_entity_behaviors()
     assert "poisoned" in behavior_player.statuses
 
-    line_session = GameSession(seed=7, scenario="test_chamber", provider=MockWildMagicProvider())
+    line_session = GameSession(
+        seed=7, scenario="test_chamber", provider=MockWildMagicProvider()
+    )
     line_engine = line_session.engine
     line_engine.apply_wild_magic_resolution(
         {
@@ -208,7 +288,9 @@ def main() -> None:
     )
     assert line_engine.tile_at(6, 7) == SLICK_ICE
 
-    shape_session = GameSession(seed=7, scenario="test_chamber", provider=MockWildMagicProvider())
+    shape_session = GameSession(
+        seed=7, scenario="test_chamber", provider=MockWildMagicProvider()
+    )
     shape_engine = shape_session.engine
     shape_engine.apply_wild_magic_resolution(
         {
@@ -216,9 +298,29 @@ def main() -> None:
             "severity": "minor",
             "outcome_text": "Shapes learn to hold terrain.",
             "effects": [
-                {"type": "create_tiles", "shape": "wall", "target": "nearest_enemy", "tile": "rubble", "radius": 2},
-                {"type": "create_tiles", "shape": "cone", "origin": "player", "target": "nearest_enemy", "tile": "fire", "radius": 3},
-                {"type": "create_tiles", "shape": "scatter", "target": "nearest_enemy", "tile": "vines", "radius": 4, "count": 3},
+                {
+                    "type": "create_tiles",
+                    "shape": "wall",
+                    "target": "nearest_enemy",
+                    "tile": "rubble",
+                    "radius": 2,
+                },
+                {
+                    "type": "create_tiles",
+                    "shape": "cone",
+                    "origin": "player",
+                    "target": "nearest_enemy",
+                    "tile": "fire",
+                    "radius": 3,
+                },
+                {
+                    "type": "create_tiles",
+                    "shape": "scatter",
+                    "target": "nearest_enemy",
+                    "tile": "vines",
+                    "radius": 4,
+                    "count": 3,
+                },
             ],
             "costs": [],
             "rejected_reason": None,
@@ -229,9 +331,15 @@ def main() -> None:
     assert flattened_tiles.count(FIRE) >= 1
     assert flattened_tiles.count(VINES) >= 1
 
-    trigger_session = GameSession(seed=7, scenario="test_chamber", provider=MockWildMagicProvider())
+    trigger_session = GameSession(
+        seed=7, scenario="test_chamber", provider=MockWildMagicProvider()
+    )
     trigger_engine = trigger_session.engine
-    trigger_goblin = next(enemy for enemy in trigger_engine.living_enemies() if enemy.name == "test goblin")
+    trigger_goblin = next(
+        enemy
+        for enemy in trigger_engine.living_enemies()
+        if enemy.name == "test goblin"
+    )
     trigger_engine.apply_wild_magic_resolution(
         {
             "accepted": True,
@@ -246,8 +354,18 @@ def main() -> None:
                     "charges": 1,
                     "duration": 6,
                     "effects": [
-                        {"type": "damage", "target": "trigger_source", "amount": 4, "damage_type": "physical"},
-                        {"type": "add_status", "target": "trigger_source", "status": "bleeding", "duration": 2},
+                        {
+                            "type": "damage",
+                            "target": "trigger_source",
+                            "amount": 4,
+                            "damage_type": "physical",
+                        },
+                        {
+                            "type": "add_status",
+                            "target": "trigger_source",
+                            "status": "bleeding",
+                            "duration": 2,
+                        },
                     ],
                 }
             ],
@@ -276,7 +394,10 @@ def main() -> None:
         '"effects": [{"type": "create_trigger", "trigger": "on_player_hit", "target": "player"}], '
         '"costs": [{"type": "mana", "amount": 1}]}'
     )
-    assert validate_resolution(empty_trigger_resolution) == "create_trigger effects must be a non-empty list"
+    assert (
+        validate_resolution(empty_trigger_resolution)
+        == "create_trigger effects must be a non-empty list"
+    )
 
     terrain_alias_resolution = parse_resolution_json(
         '{"accepted": true, "severity": "minor", "outcome_text": "x", '
@@ -286,7 +407,9 @@ def main() -> None:
     )
     assert terrain_alias_resolution["effects"][0]["tile"] == "mist"
 
-    invalid_apply_session = GameSession(seed=7, scenario="test_chamber", provider=MockWildMagicProvider())
+    invalid_apply_session = GameSession(
+        seed=7, scenario="test_chamber", provider=MockWildMagicProvider()
+    )
     invalid_apply_engine = invalid_apply_session.engine
     invalid_turn = invalid_apply_engine.state.turn
     invalid_outcome = invalid_apply_engine.apply_wild_magic_resolution(
@@ -303,9 +426,13 @@ def main() -> None:
     assert invalid_apply_engine.state.turn == invalid_turn
     assert not invalid_apply_engine.validate_state()
 
-    trade_session = GameSession(seed=7, scenario="test_chamber", provider=MockWildMagicProvider())
+    trade_session = GameSession(
+        seed=7, scenario="test_chamber", provider=MockWildMagicProvider()
+    )
     trade_engine = trade_session.engine
-    tx, ty = trade_engine.find_open_tile_near(trade_engine.state.player.x, trade_engine.state.player.y)
+    tx, ty = trade_engine.find_open_tile_near(
+        trade_engine.state.player.x, trade_engine.state.player.y
+    )
     trader = trade_engine.spawn_npc(
         "test trader",
         "@",
@@ -341,13 +468,13 @@ def main() -> None:
     # Test player damage flag and UI coloring logic
     from .ui import is_player_damage_message
     from .engine import LogMessage
-    
+
     # 1. Test LogMessage attribute check
     msg_danger = LogMessage("You take some damage.", is_danger=True)
     msg_safe = LogMessage("You take the key.", is_danger=False)
     assert is_player_damage_message(msg_danger) is True
     assert is_player_damage_message(msg_safe) is False
-    
+
     # 2. Test refined substring checks (fallback behavior)
     assert is_player_damage_message("You take 5 physical damage.") is True
     assert is_player_damage_message("You take the golden key.") is False
@@ -357,18 +484,24 @@ def main() -> None:
     assert is_player_damage_message("Cost: 3 mana.") is False
     assert is_player_damage_message("You suffer 4 fire damage.") is True
     assert is_player_damage_message("You die.") is True
-    
+
     # 3. Test that real combat damage log applies correct flags
-    combat_session = GameSession(seed=7, scenario="test_chamber", provider=MockWildMagicProvider())
+    combat_session = GameSession(
+        seed=7, scenario="test_chamber", provider=MockWildMagicProvider()
+    )
     p = combat_session.engine.state.player
-    g = next(enemy for enemy in combat_session.engine.living_enemies() if enemy.name == "test goblin")
-    
+    g = next(
+        enemy
+        for enemy in combat_session.engine.living_enemies()
+        if enemy.name == "test goblin"
+    )
+
     # Player hits goblin - should not be danger
     combat_session.engine.attack(p, g)
     hit_msg = combat_session.engine.state.messages[-1]
     assert "You hit test goblin" in hit_msg
     assert getattr(hit_msg, "is_danger", False) is False
-    
+
     # Goblin hits player - should be danger
     combat_session.engine.attack(g, p)
     hit_msg2 = combat_session.engine.state.messages[-1]
@@ -377,11 +510,11 @@ def main() -> None:
 
     # Test equipment system additions
     from .items import infer_equipment_slot
-    
+
     # 1. Verify player starts with cloak and trousers equipped
     assert p.equipment.get("chest") == "tattered cloak"
     assert p.equipment.get("legs") == "woolen trousers"
-    
+
     # 2. Verify keyword-based slot matching
     assert infer_equipment_slot("cloak of constant darkness") == "chest"
     assert infer_equipment_slot("helmet of iron") == "head"
@@ -392,7 +525,7 @@ def main() -> None:
     assert infer_equipment_slot("golden shield") == "armor"
     assert infer_equipment_slot("greatsword of flames") == "weapon"
     assert infer_equipment_slot("some random junk") is None
-    
+
     # 3. Verify equip/unequip commands
     combat_session.engine.state.inventory["silk robe"] = 1
     # Equipping silk robe should stow the tattered cloak in the inventory
@@ -400,13 +533,13 @@ def main() -> None:
     assert equip_success is True
     assert combat_session.engine.state.player.equipment["chest"] == "silk robe"
     assert combat_session.engine.state.inventory.get("tattered cloak") == 1
-    
+
     # Unequip by slot name
     unequip_success = combat_session.engine.unequip_item("chest")
     assert unequip_success is True
     assert combat_session.engine.state.player.equipment["chest"] is None
     assert combat_session.engine.state.inventory.get("silk robe") == 1
-    
+
     # Equip and unequip by item name
     combat_session.engine.equip_item("silk robe")
     assert combat_session.engine.state.player.equipment["chest"] == "silk robe"

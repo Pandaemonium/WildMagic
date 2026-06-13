@@ -7,15 +7,60 @@ if TYPE_CHECKING:
 
 
 QUEST_ITEMS = {
-    "glass eye of hollowmere": {"char": "u", "item_type": "quest_item", "material": "glass", "tags": {"quest_item", "valuable"}},
-    "amulet of the old saints": {"char": "?", "item_type": "quest_item", "material": "silver", "tags": {"quest_item", "amulet"}},
-    "imperial campaign map": {"char": "?", "item_type": "quest_item", "material": "parchment", "tags": {"quest_item", "map"}},
-    "vial of star dew": {"char": "!", "item_type": "quest_item", "material": "glass", "tags": {"quest_item", "elixir"}},
-    "sunken crown fragment": {"char": "u", "item_type": "quest_item", "material": "gold", "tags": {"quest_item", "relic"}},
-    "stolen silver seal": {"char": "u", "item_type": "quest_item", "material": "silver", "tags": {"quest_item", "seal"}},
-    "dried basilisk eye": {"char": "u", "item_type": "quest_item", "material": "organic", "tags": {"quest_item", "curio"}},
-    "whispering conch": {"char": "?", "item_type": "quest_item", "material": "shell", "tags": {"quest_item", "curio"}},
-    "rusted gate key": {"char": "k", "item_type": "quest_item", "material": "iron", "tags": {"quest_item", "key"}},
+    "glass eye of hollowmere": {
+        "char": "u",
+        "item_type": "quest_item",
+        "material": "glass",
+        "tags": {"quest_item", "valuable"},
+    },
+    "amulet of the old saints": {
+        "char": "?",
+        "item_type": "quest_item",
+        "material": "silver",
+        "tags": {"quest_item", "amulet"},
+    },
+    "imperial campaign map": {
+        "char": "?",
+        "item_type": "quest_item",
+        "material": "parchment",
+        "tags": {"quest_item", "map"},
+    },
+    "vial of star dew": {
+        "char": "!",
+        "item_type": "quest_item",
+        "material": "glass",
+        "tags": {"quest_item", "elixir"},
+    },
+    "sunken crown fragment": {
+        "char": "u",
+        "item_type": "quest_item",
+        "material": "gold",
+        "tags": {"quest_item", "relic"},
+    },
+    "stolen silver seal": {
+        "char": "u",
+        "item_type": "quest_item",
+        "material": "silver",
+        "tags": {"quest_item", "seal"},
+    },
+    "dried basilisk eye": {
+        "char": "u",
+        "item_type": "quest_item",
+        "material": "organic",
+        "tags": {"quest_item", "curio"},
+    },
+    "whispering conch": {
+        "char": "?",
+        "item_type": "quest_item",
+        "material": "shell",
+        "tags": {"quest_item", "curio"},
+    },
+    "rusted gate key": {
+        "char": "k",
+        "item_type": "quest_item",
+        "material": "iron",
+        "tags": {"quest_item", "key"},
+    },
 }
 
 
@@ -52,10 +97,14 @@ def register_heard_quest_item(engine: GameEngine, npc_id: str) -> None:
         description=f"Deliver {profile.wanted_qty} {item_name} to {profile.name} in exchange for a reward.",
         contact=profile.name,
         location=current_loc,
-        objective=Objective("fetch", {"item": item_name, "quantity": profile.wanted_qty}),
+        objective=Objective(
+            "fetch", {"item": item_name, "quantity": profile.wanted_qty}
+        ),
         reward=Reward(
             gold=max(0, int(profile.reward_gold or 0)),
-            items={profile.reward_item.lower(): profile.reward_qty} if profile.reward_item and profile.reward_qty > 0 else {},
+            items={profile.reward_item.lower(): profile.reward_qty}
+            if profile.reward_item and profile.reward_qty > 0
+            else {},
         ),
         source=f"quest:{profile.name}",
         tags=["quest", "fetch", "cache", item_name],
@@ -75,7 +124,9 @@ def generate_npc_quest(engine: GameEngine, rng: Any) -> dict[str, Any] | None:
     reward_item = None
     reward_qty = 0
     if rng.random() < 0.30:
-        reward_item = rng.choice(["blood moss", "lockpick", "smoke vial", "mana crystal", "grave salt"])
+        reward_item = rng.choice(
+            ["blood moss", "lockpick", "smoke vial", "mana crystal", "grave salt"]
+        )
         reward_qty = 1
 
     return {

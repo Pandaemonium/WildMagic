@@ -115,7 +115,9 @@ def test_mana_cost_shortfall_becomes_health_cost() -> None:
     assert outcome.consumed_turn is True
     assert player.mana == 0
     assert player.hp == hp_before - 3
-    assert any("mana shortfall costs 3 health" in message for message in engine.state.messages)
+    assert any(
+        "mana shortfall costs 3 health" in message for message in engine.state.messages
+    )
 
 
 def test_zero_mana_wild_spell_costs_health_instead_of_being_free() -> None:

@@ -28,7 +28,9 @@ class _CombatMixin:
     def effective_defense(self, entity: Entity) -> int:
         return entity.defense + self.equipment_bonus(entity, "defense")
 
-    def calculate_actual_damage(self, entity: Entity, amount: int, damage_type: str) -> int:
+    def calculate_actual_damage(
+        self, entity: Entity, amount: int, damage_type: str
+    ) -> int:
         if entity.kind == "item" or entity.hp <= 0:
             return 0
         damage_type = normalize_id(damage_type)
@@ -36,35 +38,62 @@ class _CombatMixin:
             amount = amount + 2
         if "cursed" in entity.statuses and damage_type not in {"blood"}:
             amount = amount + 1
-        if "warded" in entity.statuses and damage_type not in {"blood"} and self._is_canonical(entity, "warded"):
+        if (
+            "warded" in entity.statuses
+            and damage_type not in {"blood"}
+            and self._is_canonical(entity, "warded")
+        ):
             amount = max(0, amount - 2)
         return self._modified_damage(entity, amount, damage_type)
 
     def attack(self, attacker: Entity, defender: Entity) -> None:
-        base = max(1, self.effective_attack(attacker) - self.effective_defense(defender) + self.rng.randint(0, 2))
-        bonus = 2 if ("berserk" in attacker.statuses or "empowered" in attacker.statuses) else 0
+        base = max(
+            1,
+            self.effective_attack(attacker)
+            - self.effective_defense(defender)
+            + self.rng.randint(0, 2),
+        )
+        bonus = (
+            2
+            if ("berserk" in attacker.statuses or "empowered" in attacker.statuses)
+            else 0
+        )
         amount = base + bonus
         actual = self.calculate_actual_damage(defender, amount, "physical")
-        
+
         # Log combat message only if player is involved or either entity is visible
-        if (attacker.id == self.state.player_id or defender.id == self.state.player_id or 
-                self.is_visible(attacker.x, attacker.y) or self.is_visible(defender.x, defender.y)):
-            is_player_dmg = (defender.id == self.state.player_id and actual > 0)
+        if (
+            attacker.id == self.state.player_id
+            or defender.id == self.state.player_id
+            or self.is_visible(attacker.x, attacker.y)
+            or self.is_visible(defender.x, defender.y)
+        ):
+            is_player_dmg = defender.id == self.state.player_id and actual > 0
             self.state.add_message(
                 f"{attacker.name} {self._verb(attacker, 'hit', 'hits')} {defender.name} for {actual}.",
-                is_danger=is_player_dmg
+                is_danger=is_player_dmg,
             )
-            
+
         self.damage_entity(defender, amount, "physical", source=attacker)
         if "berserk" in attacker.statuses:
             self.damage_entity(attacker, 1, "blood", source=attacker)
         if defender.hp > 0:
             # Spider webs on hit
-            if "spider" in attacker.tags and "webbed" not in defender.statuses and self.rng.random() < 0.5:
+            if (
+                "spider" in attacker.tags
+                and "webbed" not in defender.statuses
+                and self.rng.random() < 0.5
+            ):
                 defender.statuses["webbed"] = 2
-                self.state.add_message(f"{defender.name} {self._verb(defender, 'are', 'is')} webbed!")
+                self.state.add_message(
+                    f"{defender.name} {self._verb(defender, 'are', 'is')} webbed!"
+                )
             # Fungus spreads spores on hit (poisoned)
-            if "fungus" in attacker.tags and "poisoned" not in defender.statuses and self.rng.random() < 0.4:
+            if (
+                "fungus" in attacker.tags
+                and "poisoned" not in defender.statuses
+                and self.rng.random() < 0.4
+            ):
                 defender.statuses["poisoned"] = 3
                 self.state.add_message(f"Fungal spores infect {defender.name}!")
 
@@ -75,18 +104,47 @@ class _CombatMixin:
         if display == status.replace("_", " "):
             return True
         canon_aliases = {
-            "frozen": {"petrified", "stone", "crystallized", "iced", "glaciated", "encased"},
-            "burning": {"aflame", "alight", "on fire", "ignited", "flaming", "ablaze", "smoldering"},
-            "poisoned": {"diseased", "infected", "plagued", "venomous", "toxic", "envenomed", "tainted"},
+            "frozen": {
+                "petrified",
+                "stone",
+                "crystallized",
+                "iced",
+                "glaciated",
+                "encased",
+            },
+            "burning": {
+                "aflame",
+                "alight",
+                "on fire",
+                "ignited",
+                "flaming",
+                "ablaze",
+                "smoldering",
+            },
+            "poisoned": {
+                "diseased",
+                "infected",
+                "plagued",
+                "venomous",
+                "toxic",
+                "envenomed",
+                "tainted",
+            },
             "bleeding": {"lacerated", "wounded", "cut", "hemorrhaging", "bloodied"},
             "warded": {"protected", "shielded", "guarded", "defended"},
         }
         return display.replace(" ", "_") in canon_aliases.get(status, set())
 
-    def damage_entity(self, entity: Entity, amount: int, damage_type: str, source: Entity | None = None) -> int:
+    def damage_entity(
+        self,
+        entity: Entity,
+        amount: int,
+        damage_type: str,
+        source: Entity | None = None,
+    ) -> int:
         if entity.kind == "item" or entity.hp <= 0:
             return 0
-        is_player = (entity.id == self.state.player_id)
+        is_player = entity.id == self.state.player_id
         was_taking_damage = self.state._player_taking_damage
         if is_player:
             self.state._player_taking_damage = True
@@ -102,11 +160,18 @@ class _CombatMixin:
                 self._fire_damage_triggers(entity, source, actual, damage_type)
             if entity.hp <= 0:
                 # Undead entities have a 30% chance to reform at 1 HP rather than dying.
-                if ("undead" in entity.tags and entity.kind == "actor" and entity.id != self.state.player_id
-                        and "slain" not in entity.tags and self.rng.random() < 0.3):
+                if (
+                    "undead" in entity.tags
+                    and entity.kind == "actor"
+                    and entity.id != self.state.player_id
+                    and "slain" not in entity.tags
+                    and self.rng.random() < 0.3
+                ):
                     entity.hp = 1
                     entity.tags.add("slain")
-                    self.state.add_message(f"{entity.name} collapses... but begins to stir again!")
+                    self.state.add_message(
+                        f"{entity.name} collapses... but begins to stir again!"
+                    )
                     return 0
                 entity.hp = 0
                 entity.blocks = False
@@ -120,17 +185,23 @@ class _CombatMixin:
                     # a file; the wild takes you back.
                     if source is not None and "empire" in source.tags:
                         self.state.death_cause = "empire"
-                        self.state.add_message("You die. The squad re-forms and moves on without comment.")
+                        self.state.add_message(
+                            "You die. The squad re-forms and moves on without comment."
+                        )
                         self.state.add_message("Somewhere, a file is stamped CLOSED.")
                     else:
                         self.state.death_cause = "wild"
-                        self.state.add_message("You die. The wild takes its color back, and keeps your echo.")
+                        self.state.add_message(
+                            "You die. The wild takes its color back, and keeps your echo."
+                        )
                 elif entity.kind == "npc":
                     # NPCs have no kill stat, loot table, or victory check of their own --
                     # this is the one piece of feedback the whole "you can lose them, and
                     # it matters" premise depends on, so it gets a message of its own.
                     if source is not None:
-                        self.state.add_message(f"{entity.name} falls before {source.name}!")
+                        self.state.add_message(
+                            f"{entity.name} falls before {source.name}!"
+                        )
                     else:
                         self.state.add_message(f"{entity.name} falls.")
                     self._fire_death_triggers(entity, source, hp_before, damage_type)
@@ -139,7 +210,11 @@ class _CombatMixin:
                     self.state.stats.enemies_killed += 1
                     self._drop_loot(entity)
                     # Slime splits into two smaller ones.
-                    if "slime" in entity.tags and "split" not in entity.tags and entity.max_hp > 2:
+                    if (
+                        "slime" in entity.tags
+                        and "split" not in entity.tags
+                        and entity.max_hp > 2
+                    ):
                         self._split_slime(entity)
                     if not self.living_enemies():
                         self.state.victory = True
@@ -148,26 +223,48 @@ class _CombatMixin:
                     self._on_entity_death(entity)
                     self._fire_death_triggers(entity, source, hp_before, damage_type)
             elif damage_type == "fire":
-                if "bleeding" in entity.statuses and self._is_canonical(entity, "bleeding"):
+                if "bleeding" in entity.statuses and self._is_canonical(
+                    entity, "bleeding"
+                ):
                     entity.statuses.pop("bleeding")
                     entity.hp -= 1
-                    wound_subj = "Your wound is" if entity.id == self.state.player_id else f"{entity.name}'s wound is"
-                    self.state.add_message(f"{wound_subj} cauterized - brutal but effective.")
+                    wound_subj = (
+                        "Your wound is"
+                        if entity.id == self.state.player_id
+                        else f"{entity.name}'s wound is"
+                    )
+                    self.state.add_message(
+                        f"{wound_subj} cauterized - brutal but effective."
+                    )
                 else:
-                    entity.statuses["burning"] = max(status_duration(entity.statuses.get("burning")), 3)
+                    entity.statuses["burning"] = max(
+                        status_duration(entity.statuses.get("burning")), 3
+                    )
                 if self.tile_at(entity.x, entity.y) == SLICK_ICE:
                     self.set_tile(entity.x, entity.y, WATER, duration=4)
-                    self.state.add_message("The ice melts to water beneath you." if entity.id == self.state.player_id else f"The ice melts away beneath {entity.name}.")
+                    self.state.add_message(
+                        "The ice melts to water beneath you."
+                        if entity.id == self.state.player_id
+                        else f"The ice melts away beneath {entity.name}."
+                    )
             elif damage_type == "frost":
                 if self.tile_at(entity.x, entity.y) == WATER:
-                    entity.statuses["frozen"] = max(status_duration(entity.statuses.get("frozen")), 2)
-                    self.state.add_message(f"{'You are' if entity.id == self.state.player_id else entity.name + ' is'} frozen solid in the water!")
+                    entity.statuses["frozen"] = max(
+                        status_duration(entity.statuses.get("frozen")), 2
+                    )
+                    self.state.add_message(
+                        f"{'You are' if entity.id == self.state.player_id else entity.name + ' is'} frozen solid in the water!"
+                    )
                     self.set_tile(entity.x, entity.y, SLICK_ICE, duration=5)
                 else:
-                    entity.statuses["slowed"] = max(status_duration(entity.statuses.get("slowed")), 2)
+                    entity.statuses["slowed"] = max(
+                        status_duration(entity.statuses.get("slowed")), 2
+                    )
             elif damage_type == "lightning":
                 if self.tile_at(entity.x, entity.y) == WATER:
-                    entity.statuses["stunned"] = max(status_duration(entity.statuses.get("stunned")), 2)
+                    entity.statuses["stunned"] = max(
+                        status_duration(entity.statuses.get("stunned")), 2
+                    )
                     self.state.add_message("Lightning courses through the water!")
                     if not self._conducting_lightning:
                         self._conducting_lightning = True
@@ -175,40 +272,76 @@ class _CombatMixin:
                             self._conduct_lightning_through_water(entity)
                         finally:
                             self._conducting_lightning = False
-            elif damage_type == "poison" and "poisoned" in entity.statuses and self._is_canonical(entity, "poisoned"):
-                entity.statuses["poisoned"] = min(99, status_duration(entity.statuses.get("poisoned", 0)) + 2)
+            elif (
+                damage_type == "poison"
+                and "poisoned" in entity.statuses
+                and self._is_canonical(entity, "poisoned")
+            ):
+                entity.statuses["poisoned"] = min(
+                    99, status_duration(entity.statuses.get("poisoned", 0)) + 2
+                )
             elif damage_type == "acid":
                 if "warded" in entity.statuses and self._is_canonical(entity, "warded"):
                     entity.statuses.pop("warded")
-                    name_str = "your" if entity.id == self.state.player_id else f"{entity.name}'s"
+                    name_str = (
+                        "your"
+                        if entity.id == self.state.player_id
+                        else f"{entity.name}'s"
+                    )
                     self.state.add_message(f"Acid dissolves {name_str} ward!")
-                elif "stone" in entity.tags or "metal" in entity.tags or "construct" in entity.tags:
-                    pass # Extra damage handled in _modified_damage
+                elif (
+                    "stone" in entity.tags
+                    or "metal" in entity.tags
+                    or "construct" in entity.tags
+                ):
+                    pass  # Extra damage handled in _modified_damage
                 elif self.rng.random() < 0.5:
-                    entity.statuses["bleeding"] = max(status_duration(entity.statuses.get("bleeding")), 3)
+                    entity.statuses["bleeding"] = max(
+                        status_duration(entity.statuses.get("bleeding")), 3
+                    )
                 for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
                     nx, ny = entity.x + dx, entity.y + dy
-                    if self.in_bounds(nx, ny) and self.tile_at(nx, ny) == WALL and self.rng.random() < 0.15:
+                    if (
+                        self.in_bounds(nx, ny)
+                        and self.tile_at(nx, ny) == WALL
+                        and self.rng.random() < 0.15
+                    ):
                         self.set_tile(nx, ny, RUBBLE)
-                        self.state.add_message("Acid hisses against the stone, eating through the wall.")
+                        self.state.add_message(
+                            "Acid hisses against the stone, eating through the wall."
+                        )
                         break
             elif damage_type == "radiant":
-                entity.statuses["revealed"] = max(status_duration(entity.statuses.get("revealed")), 4)
+                entity.statuses["revealed"] = max(
+                    status_duration(entity.statuses.get("revealed")), 4
+                )
             elif damage_type == "shadow":
-                if "burning" in entity.statuses and self._is_canonical(entity, "burning"):
+                if "burning" in entity.statuses and self._is_canonical(
+                    entity, "burning"
+                ):
                     entity.statuses.pop("burning")
-                    name_str = "your" if entity.id == self.state.player_id else f"{entity.name}'s"
+                    name_str = (
+                        "your"
+                        if entity.id == self.state.player_id
+                        else f"{entity.name}'s"
+                    )
                     self.state.add_message(f"Shadows snuff out {name_str} flames.")
                 if self.tile_at(entity.x, entity.y) == FIRE:
                     self.set_tile(entity.x, entity.y, FLOOR)
-                    self.state.add_message("The shadows smother the flames around you." if entity.id == self.state.player_id else f"The shadows smother the flames around {entity.name}.")
+                    self.state.add_message(
+                        "The shadows smother the flames around you."
+                        if entity.id == self.state.player_id
+                        else f"The shadows smother the flames around {entity.name}."
+                    )
             elif damage_type == "force" and source and source.id != entity.id:
                 dx = sign(entity.x - source.x)
                 dy = sign(entity.y - source.y)
                 if dx or dy:
                     moved = self.push_entity(entity, dx, dy, 1)
                     if moved:
-                        self.state.add_message(f"{entity.name} {self._verb(entity, 'are', 'is')} knocked back!")
+                        self.state.add_message(
+                            f"{entity.name} {self._verb(entity, 'are', 'is')} knocked back!"
+                        )
             return actual
         finally:
             if is_player:
@@ -230,11 +363,21 @@ class _CombatMixin:
                 if self.tile_at(nx, ny) == WATER:
                     queue.append((nx, ny))
         for other in list(self.state.entities.values()):
-            if other.id == origin.id or other.kind not in {"actor", "npc"} or other.hp <= 0:
+            if (
+                other.id == origin.id
+                or other.kind not in {"actor", "npc"}
+                or other.hp <= 0
+            ):
                 continue
             if (other.x, other.y) in water_tiles:
-                is_player_dmg = (other.id == self.state.player_id and self.calculate_actual_damage(other, 2, "lightning") > 0)
-                self.state.add_message(f"The current carries the shock to {other.name}!", is_danger=is_player_dmg)
+                is_player_dmg = (
+                    other.id == self.state.player_id
+                    and self.calculate_actual_damage(other, 2, "lightning") > 0
+                )
+                self.state.add_message(
+                    f"The current carries the shock to {other.name}!",
+                    is_danger=is_player_dmg,
+                )
                 self.damage_entity(other, 2, "lightning", source=origin)
 
     def _modified_damage(self, entity: Entity, amount: int, damage_type: str) -> int:
@@ -244,13 +387,21 @@ class _CombatMixin:
         resistance = clamp_int(entity.resistances.get(damage_type), 0, 95)
         weakness = clamp_int(entity.weaknesses.get(damage_type), 0, 200)
 
-        if damage_type == "acid" and any(t in entity.tags for t in {"metal", "stone", "construct"}):
+        if damage_type == "acid" and any(
+            t in entity.tags for t in {"metal", "stone", "construct"}
+        ):
             weakness += 50
-        elif damage_type == "radiant" and any(t in entity.tags for t in {"undead", "shadow", "spirit"}):
+        elif damage_type == "radiant" and any(
+            t in entity.tags for t in {"undead", "shadow", "spirit"}
+        ):
             weakness += 50
-        elif damage_type == "shadow" and any(t in entity.tags for t in {"radiant", "holy", "celestial"}):
+        elif damage_type == "shadow" and any(
+            t in entity.tags for t in {"radiant", "holy", "celestial"}
+        ):
             weakness += 50
-        elif damage_type == "fire" and any(t in entity.tags for t in {"plant", "wood", "flammable", "web"}):
+        elif damage_type == "fire" and any(
+            t in entity.tags for t in {"plant", "wood", "flammable", "web"}
+        ):
             weakness += 50
 
         multiplier = max(0.05, (100 - resistance + weakness) / 100)
@@ -275,15 +426,22 @@ class _CombatMixin:
             if not self.can_occupy(sx, sy):
                 continue
             self.spawn_actor(
-                f"small {parent.name}", parent.char, sx, sy,
-                hp=split_hp, attack=max(1, parent.attack - 1), defense=0,
+                f"small {parent.name}",
+                parent.char,
+                sx,
+                sy,
+                hp=split_hp,
+                attack=max(1, parent.attack - 1),
+                defense=0,
                 faction=parent.faction,
                 tags=parent.tags | {"split"},
                 ai=parent.ai or "simple",
             )
             spawned += 1
         if spawned:
-            self.state.add_message(f"{parent.name} splits into {spawned} smaller slimes!")
+            self.state.add_message(
+                f"{parent.name} splits into {spawned} smaller slimes!"
+            )
 
     def _drop_loot(self, entity: Entity) -> None:
         tags = entity.tags
@@ -302,7 +460,14 @@ class _CombatMixin:
             if tag in tags:
                 drop_name, drop_char, drop_mat = drop_data
                 break
-        self.spawn_item(drop_name, drop_char, entity.x, entity.y, item_type=drop_name, material=drop_mat)
+        self.spawn_item(
+            drop_name,
+            drop_char,
+            entity.x,
+            entity.y,
+            item_type=drop_name,
+            material=drop_mat,
+        )
         self.state.add_message(f"{entity.name} drops {drop_name}.")
 
     def _on_entity_death(self, entity: Entity) -> None:
@@ -312,20 +477,35 @@ class _CombatMixin:
             is_player_dmg = False
             for t in self.entities_in_radius(entity.x, entity.y, radius):
                 if t.hp > 0 and t.id != entity.id:
-                    if t.id == self.state.player_id and self.calculate_actual_damage(t, 5, "fire") > 0:
+                    if (
+                        t.id == self.state.player_id
+                        and self.calculate_actual_damage(t, 5, "fire") > 0
+                    ):
                         is_player_dmg = True
                     self.damage_entity(t, 5, "fire")
             for tx, ty in self.points_in_radius(entity.x, entity.y, radius):
                 self.set_tile(tx, ty, FIRE, duration=3)
-            self.state.add_message(f"{entity.name} explodes in a gout of flame!", is_danger=is_player_dmg)
-        if "shatter_on_death" in entity.tags or "glass" in entity.tags and "fragile" in entity.tags:
+            self.state.add_message(
+                f"{entity.name} explodes in a gout of flame!", is_danger=is_player_dmg
+            )
+        if (
+            "shatter_on_death" in entity.tags
+            or "glass" in entity.tags
+            and "fragile" in entity.tags
+        ):
             is_player_dmg = False
             for t in self.entities_in_radius(entity.x, entity.y, 2):
                 if t.hp > 0 and t.id != entity.id:
-                    if t.id == self.state.player_id and self.calculate_actual_damage(t, 3, "physical") > 0:
+                    if (
+                        t.id == self.state.player_id
+                        and self.calculate_actual_damage(t, 3, "physical") > 0
+                    ):
                         is_player_dmg = True
                     self.damage_entity(t, 3, "physical")
-            self.state.add_message(f"{entity.name} shatters in a shower of shards!", is_danger=is_player_dmg)
+            self.state.add_message(
+                f"{entity.name} shatters in a shower of shards!",
+                is_danger=is_player_dmg,
+            )
         if "poison_cloud_on_death" in entity.tags or "plague_on_death" in entity.tags:
             for tx, ty in self.points_in_radius(entity.x, entity.y, 3):
                 self.set_tile(tx, ty, POISON_CLOUD, duration=6)
@@ -333,7 +513,9 @@ class _CombatMixin:
         if "freeze_on_death" in entity.tags or "ice_burst_on_death" in entity.tags:
             for t in self.entities_in_radius(entity.x, entity.y, 2):
                 if t.hp > 0 and t.id != entity.id:
-                    t.statuses["frozen"] = max(status_duration(t.statuses.get("frozen")), 3)
+                    t.statuses["frozen"] = max(
+                        status_duration(t.statuses.get("frozen")), 3
+                    )
             for tx, ty in self.points_in_radius(entity.x, entity.y, 2):
                 self.set_tile(tx, ty, SLICK_ICE, duration=5)
             self.state.add_message(f"{entity.name} bursts in a spray of ice!")
@@ -342,10 +524,15 @@ class _CombatMixin:
                 sx, sy = self.find_open_tile_near(entity.x, entity.y)
                 if self.can_occupy(sx, sy):
                     self.spawn_actor(
-                        f"spawn of {entity.name}", "s", sx, sy,
-                        hp=max(1, entity.max_hp // 3), attack=max(1, entity.attack - 1),
-                        defense=0, faction=entity.faction, ai=entity.ai or "simple",
+                        f"spawn of {entity.name}",
+                        "s",
+                        sx,
+                        sy,
+                        hp=max(1, entity.max_hp // 3),
+                        attack=max(1, entity.attack - 1),
+                        defense=0,
+                        faction=entity.faction,
+                        ai=entity.ai or "simple",
                         tags={"summoned"},
                     )
             self.state.add_message(f"{entity.name} bursts open - something crawls out!")
-

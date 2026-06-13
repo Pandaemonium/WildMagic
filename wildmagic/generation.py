@@ -44,7 +44,12 @@ from .models import (
     ZoneSnapshot,
 )
 from .normalize import normalize_id
-from .props import PROP_CATEGORIES, get_all_prop_ids, get_nonblocking_prop_ids, get_prop_template
+from .props import (
+    PROP_CATEGORIES,
+    get_all_prop_ids,
+    get_nonblocking_prop_ids,
+    get_prop_template,
+)
 from .regions import region_for_zone
 
 
@@ -65,7 +70,13 @@ SITE_BLUEPRINTS: dict[str, SiteBlueprint] = {
         id="sacred_site",
         structure="building",
         size=(7, 5),
-        prop_ids=("saint_statue", "votive_candles", "temple_bell", "cracked_font", "offering_bowl"),
+        prop_ids=(
+            "saint_statue",
+            "votive_candles",
+            "temple_bell",
+            "cracked_font",
+            "offering_bowl",
+        ),
         npc_role="site keeper",
         npc_tags=("sacred", "keeper", "promise_bound"),
         npc_wares={"votive candle": 2, "grave salt": 1, "gold": 8},
@@ -187,7 +198,12 @@ ROOM_ARCHETYPES: tuple[RoomArchetype, ...] = (
     RoomArchetype(
         "storeroom",
         "storeroom",
-        ("abandoned provisions", "old trade goods", "broken tools", "mislabeled crates"),
+        (
+            "abandoned provisions",
+            "old trade goods",
+            "broken tools",
+            "mislabeled crates",
+        ),
         ("debris", "wood", "furniture"),
         ("ruined", "furniture", "infrastructure"),
         ("false_bottom", "crate_cache"),
@@ -195,7 +211,12 @@ ROOM_ARCHETYPES: tuple[RoomArchetype, ...] = (
     RoomArchetype(
         "root_choked_room",
         "root-choked room",
-        ("plant omens", "buried wells", "fungal blooms", "things growing through stone"),
+        (
+            "plant omens",
+            "buried wells",
+            "fungal blooms",
+            "things growing through stone",
+        ),
         ("natural", "plant", "fungus"),
         ("natural", "traditions"),
         ("root_gap", "buried_cache"),
@@ -203,8 +224,21 @@ ROOM_ARCHETYPES: tuple[RoomArchetype, ...] = (
 )
 
 
-_ROOM_ERAS = ("pre_charter", "imperial", "abandoned", "wild-touched", "recently disturbed")
-_ROOM_CONDITIONS = ("ransacked", "water-damaged", "smoke-stained", "meticulously arranged", "half-collapsed", "overgrown")
+_ROOM_ERAS = (
+    "pre_charter",
+    "imperial",
+    "abandoned",
+    "wild-touched",
+    "recently disturbed",
+)
+_ROOM_CONDITIONS = (
+    "ransacked",
+    "water-damaged",
+    "smoke-stained",
+    "meticulously arranged",
+    "half-collapsed",
+    "overgrown",
+)
 
 
 # Floor themes (max_depth -> prop category weights) now live on each Region
@@ -277,7 +311,9 @@ class _GenerationMixin:
 
     def _generate_dungeon_floor(self, preserve_player: bool) -> None:
         state = self.state
-        existing_player = state.entities.get(state.player_id) if preserve_player else None
+        existing_player = (
+            state.entities.get(state.player_id) if preserve_player else None
+        )
         state.tiles = [[WALL for _ in range(state.width)] for _ in range(state.height)]
         state.visible.clear()
         state.explored.clear()
@@ -312,7 +348,9 @@ class _GenerationMixin:
         px, py = rooms[0].center
         # Non-blocking themed prop in the starting room for immediate atmosphere.
         _theme_weights = self._floor_theme_weights(self.state.depth)
-        _themed_ids = [pid for cat in _theme_weights for pid in PROP_CATEGORIES.get(cat, [])]
+        _themed_ids = [
+            pid for cat in _theme_weights for pid in PROP_CATEGORIES.get(cat, [])
+        ]
         _nb_pool = [pid for pid in _themed_ids if not get_prop_template(pid).blocks]
         if not _nb_pool:
             _nb_pool = get_nonblocking_prop_ids()
@@ -355,7 +393,9 @@ class _GenerationMixin:
                     template = self.rng.choice(LEGION_ENEMY_TEMPLATES)
                 else:
                     template = self.rng.choice(list(region.enemy_templates))
-                name, char, hp, attack, defense, ai, tags, resistances, weaknesses = template
+                name, char, hp, attack, defense, ai, tags, resistances, weaknesses = (
+                    template
+                )
                 x, y = self._random_open_tile_in_room(room)
                 self.spawn_actor(
                     name,
@@ -465,7 +505,18 @@ class _GenerationMixin:
         state.tiles[7][13] = RUBBLE
         state.tiles[7][5] = STAIRS_DOWN
         state.tiles[7][18] = STAIRS_DOWN
-        self.spawn_actor("test goblin", "g", 10, 7, 8, 3, 0, "enemy", "goblin", tags={"goblin", "flesh"})
+        self.spawn_actor(
+            "test goblin",
+            "g",
+            10,
+            7,
+            8,
+            3,
+            0,
+            "enemy",
+            "goblin",
+            tags={"goblin", "flesh"},
+        )
         self.spawn_actor(
             "patient slime",
             "s",
@@ -485,7 +536,9 @@ class _GenerationMixin:
         test_book = self.spawn_prop("book", 4, 7)
         if test_book is not None:
             test_book.name = "water-stained folio of forbidden saints"
-            test_book.description = "A folio bound in cracked leather. It concerns forbidden saints."
+            test_book.description = (
+                "A folio bound in cracked leather. It concerns forbidden saints."
+            )
             test_book.details["book_seed"] = {
                 "topic": "forbidden saints",
                 "secondary_topic": "devotional practice",
@@ -543,9 +596,39 @@ class _GenerationMixin:
         self._carve_room(courtyard)
 
         garrison_roster = [
-            ("legion spearman", "l", 9, 3, 1, "legion", {"empire", "human", "soldier", "disciplined"}, {"physical": 15}, {}),
-            ("drill initiate", "i", 6, 2, 0, "legion", {"empire", "human", "soldier", "disciplined"}, {}, {"force": 25}),
-            ("iron chaplain", "h", 7, 2, 1, "legion", {"empire", "human", "priest", "disciplined"}, {"radiant": 25}, {"poison": 25}),
+            (
+                "legion spearman",
+                "l",
+                9,
+                3,
+                1,
+                "legion",
+                {"empire", "human", "soldier", "disciplined"},
+                {"physical": 15},
+                {},
+            ),
+            (
+                "drill initiate",
+                "i",
+                6,
+                2,
+                0,
+                "legion",
+                {"empire", "human", "soldier", "disciplined"},
+                {},
+                {"force": 25},
+            ),
+            (
+                "iron chaplain",
+                "h",
+                7,
+                2,
+                1,
+                "legion",
+                {"empire", "human", "priest", "disciplined"},
+                {"radiant": 25},
+                {"poison": 25},
+            ),
         ]
 
         cell_rooms: dict[int, Room] = {}
@@ -554,22 +637,54 @@ class _GenerationMixin:
             self._carve_room_mirrored(cell, axis_x)
             self._carve_corridor_mirrored(courtyard.center, cell.center, axis_x)
             cell_rooms[cell_y] = cell
-            name, char, hp, attack, defense, ai, tags, resistances, weaknesses = self.rng.choice(garrison_roster)
+            name, char, hp, attack, defense, ai, tags, resistances, weaknesses = (
+                self.rng.choice(garrison_roster)
+            )
             ox, oy = self._random_open_tile_in_room(cell)
-            self.spawn_actor(name, char, ox, oy, hp, attack, defense, "enemy", ai,
-                             tags=set(tags), resistances=dict(resistances), weaknesses=dict(weaknesses))
-            self.spawn_actor(name, char, 2 * axis_x - ox, oy, hp, attack, defense, "enemy", ai,
-                             tags=set(tags), resistances=dict(resistances), weaknesses=dict(weaknesses))
+            self.spawn_actor(
+                name,
+                char,
+                ox,
+                oy,
+                hp,
+                attack,
+                defense,
+                "enemy",
+                ai,
+                tags=set(tags),
+                resistances=dict(resistances),
+                weaknesses=dict(weaknesses),
+            )
+            self.spawn_actor(
+                name,
+                char,
+                2 * axis_x - ox,
+                oy,
+                hp,
+                attack,
+                defense,
+                "enemy",
+                ai,
+                tags=set(tags),
+                resistances=dict(resistances),
+                weaknesses=dict(weaknesses),
+            )
 
         for tower_y, partner_cell_y in ((2, 5), (23, 18)):
             tower = Room(axis_x + 14, tower_y, 3, 3)
             self._carve_room_mirrored(tower, axis_x)
-            self._carve_corridor_mirrored(tower.center, cell_rooms[partner_cell_y].center, axis_x)
+            self._carve_corridor_mirrored(
+                tower.center, cell_rooms[partner_cell_y].center, axis_x
+            )
 
         self._place_doors_mirrored(axis_x, count=4)
         archetype = next(a for a in ROOM_ARCHETYPES if a.id == "guardroom")
-        label_rng = random.Random(stable_seed(state.rng_seed, "empire_room_profile", "courtyard"))
-        base_profile = self._profile_from_archetype(courtyard, "empire_compound_courtyard", archetype, label_rng)
+        label_rng = random.Random(
+            stable_seed(state.rng_seed, "empire_room_profile", "courtyard")
+        )
+        base_profile = self._profile_from_archetype(
+            courtyard, "empire_compound_courtyard", archetype, label_rng
+        )
         self._register_room_profile(
             RoomProfile(
                 id=base_profile.id,
@@ -607,12 +722,22 @@ class _GenerationMixin:
         state.entities[player.id] = player
         state.tiles[cy + 2][cx] = STAIRS_DOWN
         self.spawn_actor(
-            "wall sergeant", "m", cx, cy, 10, 3, 2, "enemy", "legion",
+            "wall sergeant",
+            "m",
+            cx,
+            cy,
+            10,
+            3,
+            2,
+            "enemy",
+            "legion",
             tags={"empire", "human", "soldier", "officer", "disciplined"},
             resistances={"physical": 15},
         )
 
-        state.add_message("Stone walls rise in perfect symmetry - the Grand Empire does not build by accident.")
+        state.add_message(
+            "Stone walls rise in perfect symmetry - the Grand Empire does not build by accident."
+        )
         state.add_message("Somewhere ahead, boots strike the ground in unison.")
         self.update_fov()
 
@@ -655,8 +780,12 @@ class _GenerationMixin:
             (gatehouse, "hollowmere_gatehouse", "gatehouse", "guardroom"),
         ):
             archetype = next(a for a in ROOM_ARCHETYPES if a.id == archetype_id)
-            label_rng = random.Random(stable_seed(state.rng_seed, "hollowmere_room_profile", room_id))
-            base_profile = self._profile_from_archetype(room, room_id, archetype, label_rng)
+            label_rng = random.Random(
+                stable_seed(state.rng_seed, "hollowmere_room_profile", room_id)
+            )
+            base_profile = self._profile_from_archetype(
+                room, room_id, archetype, label_rng
+            )
             self._register_room_profile(
                 RoomProfile(
                     id=base_profile.id,
@@ -699,7 +828,9 @@ class _GenerationMixin:
         state.tiles[gy][gx] = STAIRS_DOWN
 
         maren = self.spawn_npc(
-            "Old Maren", "M", *self._random_open_tile_in_room(inn),
+            "Old Maren",
+            "M",
+            *self._random_open_tile_in_room(inn),
             role="innkeeper",
             backstory=(
                 "Has run the Lantern and Bone inn for thirty years, since long before the "
@@ -724,7 +855,9 @@ class _GenerationMixin:
         )
 
         quill = self.spawn_npc(
-            "Quill Hatchet", "Q", *self._random_open_tile_in_room(market),
+            "Quill Hatchet",
+            "Q",
+            *self._random_open_tile_in_room(market),
             role="peddler",
             backstory=(
                 "Travels the frontier roads buying odd curios and reselling them at triple "
@@ -738,7 +871,15 @@ class _GenerationMixin:
             ),
             traits=["chatty", "shrewd", "easily distracted by anything shiny"],
             tags={"human", "hollowmere_townsfolk"},
-            wares={"trinket": 3, "lockpick": 1, "smoke vial": 2, "silk robe": 1, "wizards hat": 1, "leather boots": 1, "gold": 25},
+            wares={
+                "trinket": 3,
+                "lockpick": 1,
+                "smoke vial": 2,
+                "silk robe": 1,
+                "wizards hat": 1,
+                "leather boots": 1,
+                "gold": 25,
+            },
             wanted_item="Imperial Campaign Map",
             wanted_qty=1,
             reward_gold=25,
@@ -750,7 +891,9 @@ class _GenerationMixin:
         )
 
         wren = self.spawn_npc(
-            "Sister Wren", "S", *self._random_open_tile_in_room(temple),
+            "Sister Wren",
+            "S",
+            *self._random_open_tile_in_room(temple),
             role="temple acolyte",
             backstory=(
                 "Tends the small shrine to the old earth-saints, half-forgotten since the "
@@ -777,7 +920,9 @@ class _GenerationMixin:
         # Ressa fights -- she's the one named townsfolk who can actually anchor a
         # defense, with the stats and faction (an ally, not neutral) to back it up.
         ressa = self.spawn_npc(
-            "Captain Ressa Vane", "C", *self._random_open_tile_in_room(gatehouse),
+            "Captain Ressa Vane",
+            "C",
+            *self._random_open_tile_in_room(gatehouse),
             role="town guard captain",
             backstory=(
                 "Commands the dozen guards who keep the peace and watch the old dungeon "
@@ -791,7 +936,10 @@ class _GenerationMixin:
             ),
             traits=["wary", "blunt", "fiercely protective of the town"],
             tags={"human", "hollowmere_townsfolk", "soldier"},
-            hp=20, attack=5, defense=2, faction="ally",
+            hp=20,
+            attack=5,
+            defense=2,
+            faction="ally",
             wanted_item="Stolen Silver Seal",
             wanted_qty=1,
             reward_gold=40,
@@ -808,7 +956,11 @@ class _GenerationMixin:
         # (engine.py) does the rest for free, including the soldiers knowing
         # exactly which doors to make for.
         occupied: set[tuple[int, int]] = {(player.x, player.y)}
-        squad_roster = (LEGION_ENEMY_TEMPLATES[0], LEGION_ENEMY_TEMPLATES[0], LEGION_ENEMY_TEMPLATES[1])
+        squad_roster = (
+            LEGION_ENEMY_TEMPLATES[0],
+            LEGION_ENEMY_TEMPLATES[0],
+            LEGION_ENEMY_TEMPLATES[1],
+        )
         squad_origin = (23, 15)
         for template, (dx, dy) in zip(squad_roster, ((0, 0), (1, 0), (0, 1))):
             spot = (squad_origin[0] + dx, squad_origin[1] + dy)
@@ -820,7 +972,15 @@ class _GenerationMixin:
         spot = self._random_open_ground_tile(zone_rng, occupied)
         if spot is not None:
             self.spawn_actor(
-                "goblin cutpurse", "g", spot[0], spot[1], 8, 3, 0, "enemy", "goblin",
+                "goblin cutpurse",
+                "g",
+                spot[0],
+                spot[1],
+                8,
+                3,
+                0,
+                "enemy",
+                "goblin",
                 tags={"goblin", "humanoid", "flesh"},
             )
             occupied.add(spot)
@@ -829,14 +989,27 @@ class _GenerationMixin:
             if spot is None:
                 break
             self.spawn_actor(
-                "carrion rat", "r", spot[0], spot[1], 4, 2, 0, "enemy", "simple",
-                tags={"beast", "vermin", "scavenger"}, resistances={"poison": 50},
+                "carrion rat",
+                "r",
+                spot[0],
+                spot[1],
+                4,
+                2,
+                0,
+                "enemy",
+                "simple",
+                tags={"beast", "vermin", "scavenger"},
+                resistances={"poison": 50},
             )
             occupied.add(spot)
 
         self._place_books_in_labeled_rooms()
-        state.add_message("Hollowmere clings to the lip of the old dungeon stair, half town and half watchtower.")
-        state.add_message("Steel rings out across the square below - Imperial soldiers are already moving on the town.")
+        state.add_message(
+            "Hollowmere clings to the lip of the old dungeon stair, half town and half watchtower."
+        )
+        state.add_message(
+            "Steel rings out across the square below - Imperial soldiers are already moving on the town."
+        )
         self.update_fov()
 
     # ------------------------------------------------------------------
@@ -882,8 +1055,12 @@ class _GenerationMixin:
         if not self.can_occupy(px, py):
             player.x, player.y = self._find_entry_tile(px, py)
 
-        state.add_message("Open country stretches in every direction beneath a wide sky.")
-        state.add_message("Walk to the edge of the land to cross into the next stretch of it.")
+        state.add_message(
+            "Open country stretches in every direction beneath a wide sky."
+        )
+        state.add_message(
+            "Walk to the edge of the land to cross into the next stretch of it."
+        )
         self.update_fov()
 
     def _imperial_density(self, zx: int, zy: int) -> float:
@@ -914,20 +1091,31 @@ class _GenerationMixin:
 
         if self._zone_is_road(zx, zy):
             self._draw_road_through_zone(zx, zy)
-            state.add_message("A dirt road cuts through here, worn flat by countless boots.")
+            state.add_message(
+                "A dirt road cuts through here, worn flat by countless boots."
+            )
 
         if imperial_density >= 0.7:
             zone_type = "imperial reach"
-            state.add_message("Banners of the Grand Empire snap overhead - the land itself stands at attention.")
+            state.add_message(
+                "Banners of the Grand Empire snap overhead - the land itself stands at attention."
+            )
         elif imperial_density <= 0.3:
             zone_type = "wilds"
-            state.add_message("No order rules out here. The wind moves through open country untouched by the legions.")
+            state.add_message(
+                "No order rules out here. The wind moves through open country untouched by the legions."
+            )
         else:
             zone_type = "borderlands"
-            state.add_message("The land is a patchwork - wild growth pressing against straight Imperial walls.")
+            state.add_message(
+                "The land is a patchwork - wild growth pressing against straight Imperial walls."
+            )
         for promise in realized_promises:
             flesh = getattr(promise, "flesh", None) or {}
-            state.add_message(flesh.get("arrival_line") or f"The story was true: {promise.subject} is here.")
+            state.add_message(
+                flesh.get("arrival_line")
+                or f"The story was true: {promise.subject} is here."
+            )
         return zone_type
 
     def _scatter_terrain_features(self, zone_rng: random.Random) -> None:
@@ -948,7 +1136,9 @@ class _GenerationMixin:
                     if zone_rng.random() < 0.7 and state.tiles[y][x] == FLOOR:
                         state.tiles[y][x] = kind
 
-    def _place_zone_buildings(self, zone_rng: random.Random, imperial_density: float) -> list[dict[str, Any]]:
+    def _place_zone_buildings(
+        self, zone_rng: random.Random, imperial_density: float
+    ) -> list[dict[str, Any]]:
         """Place a handful of free-standing, non-overlapping buildings within the open ground.
 
         A margin keeps every building clear of the outer ring of tiles so the edges of
@@ -976,7 +1166,19 @@ class _GenerationMixin:
                 continue
             placed.append(room)
             building_index = len(buildings) + 1
-            label_rng = random.Random(stable_seed(state.rng_seed, "zone_building_profile", state.zone_x, state.zone_y, building_index, room.x, room.y, room.w, room.h))
+            label_rng = random.Random(
+                stable_seed(
+                    state.rng_seed,
+                    "zone_building_profile",
+                    state.zone_x,
+                    state.zone_y,
+                    building_index,
+                    room.x,
+                    room.y,
+                    room.w,
+                    room.h,
+                )
+            )
             if imperial:
                 self._build_imperial_structure(room)
                 buildings.append({"room": room, "kind": "imperial"})
@@ -986,12 +1188,22 @@ class _GenerationMixin:
                 buildings.append({"room": room, "kind": "common"})
                 archetype = label_rng.choice(
                     [
-                        a for a in ROOM_ARCHETYPES
-                        if a.id in {"storeroom", "shrine", "scriptorium", "root_choked_room", "laboratory"}
+                        a
+                        for a in ROOM_ARCHETYPES
+                        if a.id
+                        in {
+                            "storeroom",
+                            "shrine",
+                            "scriptorium",
+                            "root_choked_room",
+                            "laboratory",
+                        }
                     ]
                 )
             room_id = f"zone_{state.zone_x}_{state.zone_y}_building_{building_index:02d}_{normalize_id(archetype.room_type)}"
-            self._register_room_profile(self._profile_from_archetype(room, room_id, archetype, label_rng))
+            self._register_room_profile(
+                self._profile_from_archetype(room, room_id, archetype, label_rng)
+            )
         return buildings
 
     def _build_common_structure(self, room: Room, zone_rng: random.Random) -> None:
@@ -1001,11 +1213,17 @@ class _GenerationMixin:
         if side == "north":
             door = (zone_rng.randint(room.x + 1, room.x + room.w - 2), room.y)
         elif side == "south":
-            door = (zone_rng.randint(room.x + 1, room.x + room.w - 2), room.y + room.h - 1)
+            door = (
+                zone_rng.randint(room.x + 1, room.x + room.w - 2),
+                room.y + room.h - 1,
+            )
         elif side == "west":
             door = (room.x, zone_rng.randint(room.y + 1, room.y + room.h - 2))
         else:
-            door = (room.x + room.w - 1, zone_rng.randint(room.y + 1, room.y + room.h - 2))
+            door = (
+                room.x + room.w - 1,
+                zone_rng.randint(room.y + 1, room.y + room.h - 2),
+            )
         self.state.tiles[door[1]][door[0]] = DOOR
 
     def _realize_zone_promises(
@@ -1023,7 +1241,11 @@ class _GenerationMixin:
         by_id = {promise.id: promise for promise in self.state.promises}
         for reservation in reservations:
             promise = by_id.get(reservation.promise_id)
-            if promise is None or promise.status in {"realized", "fulfilled", "redeemed"}:
+            if promise is None or promise.status in {
+                "realized",
+                "fulfilled",
+                "redeemed",
+            }:
                 continue
             site = SITE_BLUEPRINTS.get(reservation.blueprint)
             if site is None:
@@ -1045,8 +1267,22 @@ class _GenerationMixin:
             archetype_id = archetype_by_blueprint.get(site.id, "storeroom")
             archetype = next(a for a in ROOM_ARCHETYPES if a.id == archetype_id)
             room_id = f"zone_{zx}_{zy}_promise_{normalize_id(promise.id)}"
-            label_rng = random.Random(stable_seed(self.state.rng_seed, "promise_room_profile", zx, zy, promise.id, room.x, room.y, room.w, room.h))
-            base_profile = self._profile_from_archetype(room, room_id, archetype, label_rng, promise_hooks=[promise.id])
+            label_rng = random.Random(
+                stable_seed(
+                    self.state.rng_seed,
+                    "promise_room_profile",
+                    zx,
+                    zy,
+                    promise.id,
+                    room.x,
+                    room.y,
+                    room.w,
+                    room.h,
+                )
+            )
+            base_profile = self._profile_from_archetype(
+                room, room_id, archetype, label_rng, promise_hooks=[promise.id]
+            )
             self._register_room_profile(
                 RoomProfile(
                     id=base_profile.id,
@@ -1058,19 +1294,30 @@ class _GenerationMixin:
                     era=base_profile.era,
                     condition=base_profile.condition,
                     topics=base_profile.topics,
-                    tags=sorted({*base_profile.tags, *promise.tags, site.id, "promise_bound"}),
+                    tags=sorted(
+                        {*base_profile.tags, *promise.tags, site.id, "promise_bound"}
+                    ),
                     secret_slots=base_profile.secret_slots,
                     promise_hooks=[promise.id],
                 )
             )
-            buildings.append({"room": room, "kind": "promise", "blueprint": site.id, "promise_id": promise.id})
+            buildings.append(
+                {
+                    "room": room,
+                    "kind": "promise",
+                    "blueprint": site.id,
+                    "promise_id": promise.id,
+                }
+            )
             self._populate_promise_structure(room, site, promise, zone_rng)
             promise.status = "realized"
             promise.realized_in = f"{site.id} at zone ({zx},{zy})"
             self._write_promise_site_canon(room, site, promise, zx, zy)
             realized.append(promise)
         self.state.promise_reservations[(zx, zy)] = [
-            reservation for reservation in reservations if reservation.promise_id not in {promise.id for promise in realized}
+            reservation
+            for reservation in reservations
+            if reservation.promise_id not in {promise.id for promise in realized}
         ]
         if not self.state.promise_reservations[(zx, zy)]:
             self.state.promise_reservations.pop((zx, zy), None)
@@ -1094,7 +1341,9 @@ class _GenerationMixin:
             return room
         return None
 
-    def _build_promise_structure(self, room: Room, site: SiteBlueprint, zone_rng: random.Random) -> None:
+    def _build_promise_structure(
+        self, room: Room, site: SiteBlueprint, zone_rng: random.Random
+    ) -> None:
         if site.structure == "open":
             for y in range(room.y, room.y + room.h):
                 for x in range(room.x, room.x + room.w):
@@ -1128,8 +1377,13 @@ class _GenerationMixin:
         if site.npc_role is not None:
             spot = self._random_unoccupied_open_tile_in_room(room, occupied)
             if spot is not None:
-                keeper_name = flesh.get("keeper_name") or self._promise_keeper_name(promise)
-                backstory = flesh.get("keeper_backstory") or f"Keeps this place and knows the story that brought you here: {promise.text}"
+                keeper_name = flesh.get("keeper_name") or self._promise_keeper_name(
+                    promise
+                )
+                backstory = (
+                    flesh.get("keeper_backstory")
+                    or f"Keeps this place and knows the story that brought you here: {promise.text}"
+                )
                 self.spawn_npc(
                     keeper_name,
                     "k",
@@ -1150,7 +1404,9 @@ class _GenerationMixin:
         for _ in range(site.hostile_count):
             spot = self._random_unoccupied_open_tile_in_room(room, occupied)
             if spot is not None:
-                self._spawn_from_template(zone_rng.choice(list(self.region.enemy_templates)), spot[0], spot[1])
+                self._spawn_from_template(
+                    zone_rng.choice(list(self.region.enemy_templates)), spot[0], spot[1]
+                )
                 occupied.add(spot)
         self._spawn_quest_objective_item(room, promise, occupied)
 
@@ -1165,11 +1421,21 @@ class _GenerationMixin:
         flesh = getattr(promise, "flesh", None) or {}
         profile = self.room_profile_at(*room.center)
         promise_id = normalize_id(str(getattr(promise, "id", "promise")))
-        promise_tags = {normalize_id(str(tag)) for tag in getattr(promise, "tags", []) if str(tag).strip()}
+        promise_tags = {
+            normalize_id(str(tag))
+            for tag in getattr(promise, "tags", [])
+            if str(tag).strip()
+        }
         room_tags = set(profile.tags if profile else [])
         tags = sorted({site.id, "promise_site", *promise_tags, *room_tags})
-        title = flesh.get("site_name") or str(getattr(promise, "subject", "") or site.id).strip()
-        arrival = flesh.get("arrival_line") or f"The story was true: {getattr(promise, 'subject', 'a promised place')} is here."
+        title = (
+            flesh.get("site_name")
+            or str(getattr(promise, "subject", "") or site.id).strip()
+        )
+        arrival = (
+            flesh.get("arrival_line")
+            or f"The story was true: {getattr(promise, 'subject', 'a promised place')} is here."
+        )
         text = f"{arrival} The place answers an earlier claim: {getattr(promise, 'text', '')}".strip()
         seed_packet = {
             "promise_id": getattr(promise, "id", ""),
@@ -1182,7 +1448,11 @@ class _GenerationMixin:
             CanonRecord(
                 id=f"canon_{promise_id}_site",
                 kind="room_flavor",
-                attachment={"kind": "promise", "promise_id": getattr(promise, "id", ""), "room_id": profile.id if profile else None},
+                attachment={
+                    "kind": "promise",
+                    "promise_id": getattr(promise, "id", ""),
+                    "room_id": profile.id if profile else None,
+                },
                 title=title,
                 text=text,
                 summary=arrival,
@@ -1194,14 +1464,26 @@ class _GenerationMixin:
         )
 
         for entity in sorted(self.state.entities.values(), key=lambda item: item.id):
-            if not room.x <= entity.x < room.x + room.w or not room.y <= entity.y < room.y + room.h:
+            if (
+                not room.x <= entity.x < room.x + room.w
+                or not room.y <= entity.y < room.y + room.h
+            ):
                 continue
-            if entity.kind == "prop" and flesh.get("prop_description") and entity.description == flesh.get("prop_description"):
+            if (
+                entity.kind == "prop"
+                and flesh.get("prop_description")
+                and entity.description == flesh.get("prop_description")
+            ):
                 self.add_canon_record(
                     CanonRecord(
                         id=f"canon_{promise_id}_{entity.id}",
                         kind="object_detail",
-                        attachment={"kind": "entity", "entity_id": entity.id, "promise_id": getattr(promise, "id", ""), "room_id": profile.id if profile else None},
+                        attachment={
+                            "kind": "entity",
+                            "entity_id": entity.id,
+                            "promise_id": getattr(promise, "id", ""),
+                            "room_id": profile.id if profile else None,
+                        },
                         title=entity.name,
                         text=entity.description or "",
                         summary=entity.description,
@@ -1222,7 +1504,12 @@ class _GenerationMixin:
                     CanonRecord(
                         id=f"canon_{promise_id}_{entity.id}",
                         kind="npc_appearance",
-                        attachment={"kind": "entity", "entity_id": entity.id, "promise_id": getattr(promise, "id", ""), "room_id": profile.id if profile else None},
+                        attachment={
+                            "kind": "entity",
+                            "entity_id": entity.id,
+                            "promise_id": getattr(promise, "id", ""),
+                            "room_id": profile.id if profile else None,
+                        },
                         title=npc_profile.name,
                         text=" ".join(part for part in text_parts if part).strip(),
                         summary=f"{npc_profile.name}, {npc_profile.role}",
@@ -1250,14 +1537,26 @@ class _GenerationMixin:
         item_key = item_name.lower()
         if item_key in self.state.inventory:
             return
-        if any(entity.kind == "item" and (entity.name.lower() == item_key or entity.item_type == item_key) for entity in self.state.entities.values()):
+        if any(
+            entity.kind == "item"
+            and (entity.name.lower() == item_key or entity.item_type == item_key)
+            for entity in self.state.entities.values()
+        ):
             return
         spot = self._random_unoccupied_open_tile_in_room(room, occupied)
         if spot is None:
             return
         from .npc_quests import QUEST_ITEMS
 
-        spec = QUEST_ITEMS.get(item_key, {"char": "?", "item_type": "quest_item", "material": None, "tags": {"quest_item"}})
+        spec = QUEST_ITEMS.get(
+            item_key,
+            {
+                "char": "?",
+                "item_type": "quest_item",
+                "material": None,
+                "tags": {"quest_item"},
+            },
+        )
         self.spawn_item(
             name=item_name.title(),
             char=str(spec.get("char") or "?"),
@@ -1269,7 +1568,9 @@ class _GenerationMixin:
             tags=set(spec.get("tags") or {"quest_item"}),
         )
         occupied.add(spot)
-        self.state.add_message("A strange feeling washes over you. There is something important nearby...")
+        self.state.add_message(
+            "A strange feeling washes over you. There is something important nearby..."
+        )
 
     def _random_unoccupied_open_tile_in_room(
         self,
@@ -1290,7 +1591,9 @@ class _GenerationMixin:
         if "fire" in promise_tags or "midnight" in promise_tags:
             prop_ids.extend(["votive_candles", "cursed_candle", "iron_brazier"])
         if "empire" in promise_tags or "warrant" in promise_tags:
-            prop_ids.extend(["posted_notice", "requisition_ledger", "regulation_lantern"])
+            prop_ids.extend(
+                ["posted_notice", "requisition_ledger", "regulation_lantern"]
+            )
         deduped: list[str] = []
         for prop_id in prop_ids:
             if prop_id not in deduped:
@@ -1298,7 +1601,11 @@ class _GenerationMixin:
         return deduped
 
     def _promise_keeper_name(self, promise: Any) -> str:
-        subject = normalize_id(getattr(promise, "subject", "keeper")).replace("_", " ").strip()
+        subject = (
+            normalize_id(getattr(promise, "subject", "keeper"))
+            .replace("_", " ")
+            .strip()
+        )
         words = [word.capitalize() for word in subject.split()[:2] if word]
         return "Keeper " + (" ".join(words) if words else "Maren")
 
@@ -1318,12 +1625,24 @@ class _GenerationMixin:
     def _wall_room_perimeter(self, room: Room) -> None:
         for y in range(room.y, room.y + room.h):
             for x in range(room.x, room.x + room.w):
-                on_edge = x in (room.x, room.x + room.w - 1) or y in (room.y, room.y + room.h - 1)
+                on_edge = x in (room.x, room.x + room.w - 1) or y in (
+                    room.y,
+                    room.y + room.h - 1,
+                )
                 self.state.tiles[y][x] = WALL if on_edge else FLOOR
 
-    def _populate_zone(self, zone_rng: random.Random, buildings: list[dict[str, Any]], imperial_density: float) -> None:
+    def _populate_zone(
+        self,
+        zone_rng: random.Random,
+        buildings: list[dict[str, Any]],
+        imperial_density: float,
+    ) -> None:
         state = self.state
-        occupied: set[tuple[int, int]] = {(state.player.x, state.player.y)} if state.player_id in state.entities else set()
+        occupied: set[tuple[int, int]] = (
+            {(state.player.x, state.player.y)}
+            if state.player_id in state.entities
+            else set()
+        )
 
         for building in buildings:
             room: Room = building["room"]
@@ -1332,21 +1651,31 @@ class _GenerationMixin:
                     spot = self._random_open_tile_in_room(room)
                     if spot in occupied:
                         continue
-                    self._spawn_from_template(zone_rng.choice(LEGION_ENEMY_TEMPLATES), spot[0], spot[1])
+                    self._spawn_from_template(
+                        zone_rng.choice(LEGION_ENEMY_TEMPLATES), spot[0], spot[1]
+                    )
                     occupied.add(spot)
             elif building["kind"] == "promise":
                 continue
             elif zone_rng.random() < 0.5:
                 spot = self._random_open_tile_in_room(room)
                 if spot not in occupied:
-                    self._spawn_from_template(zone_rng.choice(list(self.region.enemy_templates)), spot[0], spot[1])
+                    self._spawn_from_template(
+                        zone_rng.choice(list(self.region.enemy_templates)),
+                        spot[0],
+                        spot[1],
+                    )
                     occupied.add(spot)
 
         for _ in range(zone_rng.randint(1, 3)):
             spot = self._random_open_ground_tile(zone_rng, occupied)
             if spot is None:
                 break
-            roster = LEGION_ENEMY_TEMPLATES if zone_rng.random() < imperial_density else list(self.region.enemy_templates)
+            roster = (
+                LEGION_ENEMY_TEMPLATES
+                if zone_rng.random() < imperial_density
+                else list(self.region.enemy_templates)
+            )
             self._spawn_from_template(zone_rng.choice(roster), spot[0], spot[1])
             occupied.add(spot)
 
@@ -1366,15 +1695,27 @@ class _GenerationMixin:
 
     def _spawn_from_template(
         self,
-        template: tuple[str, str, int, int, int, str, set[str], dict[str, int], dict[str, int]],
+        template: tuple[
+            str, str, int, int, int, str, set[str], dict[str, int], dict[str, int]
+        ],
         x: int,
         y: int,
         faction: str = "enemy",
     ) -> Entity:
         name, char, hp, attack, defense, ai, tags, resistances, weaknesses = template
         return self.spawn_actor(
-            name, char, x, y, hp, attack, defense, faction, ai,
-            tags=set(tags), resistances=dict(resistances), weaknesses=dict(weaknesses),
+            name,
+            char,
+            x,
+            y,
+            hp,
+            attack,
+            defense,
+            faction,
+            ai,
+            tags=set(tags),
+            resistances=dict(resistances),
+            weaknesses=dict(weaknesses),
         )
 
     def _random_open_ground_tile(
@@ -1422,7 +1763,13 @@ class _GenerationMixin:
         if self.in_bounds(cx, cy) and state.tiles[cy][cx] != WALL:
             state.tiles[cy][cx] = ROAD
 
-    def _generate_llm_town(self, zx: int, zy: int, spec: Any, generation_context: dict[str, Any] | None = None) -> str:
+    def _generate_llm_town(
+        self,
+        zx: int,
+        zy: int,
+        spec: Any,
+        generation_context: dict[str, Any] | None = None,
+    ) -> str:
         """Generate an open-zone town from an LLM-produced TownSpec."""
         state = self.state
         state.tiles = [[FLOOR for _ in range(state.width)] for _ in range(state.height)]
@@ -1470,8 +1817,22 @@ class _GenerationMixin:
             archetype_id = archetype_by_building.get(btype, "storeroom")
             archetype = next(a for a in ROOM_ARCHETYPES if a.id == archetype_id)
             room_id = f"zone_{zx}_{zy}_town_{len(placed):02d}_{normalize_id(building_spec.name or btype)}"
-            label_rng = random.Random(stable_seed(state.rng_seed, "town_room_profile", zx, zy, room_id, placed_room.x, placed_room.y, placed_room.w, placed_room.h))
-            base_profile = self._profile_from_archetype(placed_room, room_id, archetype, label_rng)
+            label_rng = random.Random(
+                stable_seed(
+                    state.rng_seed,
+                    "town_room_profile",
+                    zx,
+                    zy,
+                    room_id,
+                    placed_room.x,
+                    placed_room.y,
+                    placed_room.w,
+                    placed_room.h,
+                )
+            )
+            base_profile = self._profile_from_archetype(
+                placed_room, room_id, archetype, label_rng
+            )
             self._register_room_profile(
                 RoomProfile(
                     id=base_profile.id,
@@ -1479,7 +1840,8 @@ class _GenerationMixin:
                     y=base_profile.y,
                     w=base_profile.w,
                     h=base_profile.h,
-                    room_type=str(building_spec.name or btype).strip() or archetype.room_type,
+                    room_type=str(building_spec.name or btype).strip()
+                    or archetype.room_type,
                     era=base_profile.era,
                     condition=base_profile.condition,
                     topics=base_profile.topics,
@@ -1492,7 +1854,11 @@ class _GenerationMixin:
                 placed_by_type[btype] = placed_room
 
         # Spawn NPCs.
-        occupied: set[tuple[int, int]] = {(state.player.x, state.player.y)} if state.player_id in state.entities else set()
+        occupied: set[tuple[int, int]] = (
+            {(state.player.x, state.player.y)}
+            if state.player_id in state.entities
+            else set()
+        )
         for npc_spec in spec.npcs:
             btype = (npc_spec.building or "").lower().strip()
             room = placed_by_type.get(btype)
@@ -1511,6 +1877,7 @@ class _GenerationMixin:
             role = npc_spec.role.lower().strip()
             stats = _ROLE_STATS.get(role, _DEFAULT_NPC_STATS)
             from .npc_quests import generate_npc_quest
+
             quest_data = generate_npc_quest(self, zone_rng) or {}
             self.spawn_npc(
                 name=npc_spec.name,
@@ -1538,18 +1905,32 @@ class _GenerationMixin:
         if spec.description:
             state.add_message(spec.description)
         promise_hooks = (generation_context or {}).get("promise_hooks") or []
-        top_hook = promise_hooks[0] if promise_hooks and isinstance(promise_hooks, list) and isinstance(promise_hooks[0], dict) else None
+        top_hook = (
+            promise_hooks[0]
+            if promise_hooks
+            and isinstance(promise_hooks, list)
+            and isinstance(promise_hooks[0], dict)
+            else None
+        )
         hook_id = str(top_hook.get("id")) if top_hook and top_hook.get("id") else ""
         if hook_id:
             for promise in self.state.promises:
-                if promise.id == hook_id and promise.status not in {"realized", "fulfilled", "redeemed"}:
+                if promise.id == hook_id and promise.status not in {
+                    "realized",
+                    "fulfilled",
+                    "redeemed",
+                }:
                     promise.status = "realized"
                     promise.realized_in = f"{spec.town_name} ({zx},{zy})"
-                    state.add_message(f"An old promise finds a place in {spec.town_name}.")
+                    state.add_message(
+                        f"An old promise finds a place in {spec.town_name}."
+                    )
                     break
             reservations = self.state.promise_reservations.get((zx, zy), [])
             self.state.promise_reservations[(zx, zy)] = [
-                reservation for reservation in reservations if reservation.promise_id != hook_id
+                reservation
+                for reservation in reservations
+                if reservation.promise_id != hook_id
             ]
             if not self.state.promise_reservations[(zx, zy)]:
                 self.state.promise_reservations.pop((zx, zy), None)
@@ -1591,9 +1972,13 @@ class _GenerationMixin:
         state.region_id = new_region_id
         self._load_or_generate_zone(new_zx, new_zy, entry_x, entry_y)
         if region_changed:
-            state.add_message(f"You cross into {self.region.name}. The air is different here.")
+            state.add_message(
+                f"You cross into {self.region.name}. The air is different here."
+            )
         else:
-            state.add_message(f"You cross into new territory - the {state.zone_type} of zone ({new_zx}, {new_zy}).")
+            state.add_message(
+                f"You cross into new territory - the {state.zone_type} of zone ({new_zx}, {new_zy})."
+            )
         return True
 
     def _save_current_zone(self) -> None:
@@ -1619,7 +2004,9 @@ class _GenerationMixin:
 
     def _road_anchor(self, cx: int, cy: int) -> tuple[int, int]:
         """Deterministic anchor point for grid cell (cx, cy), cell size = 8 zones."""
-        rng = random.Random((self.state.rng_seed or 0) * 1_000_003 + cx * 100_003 + cy * 9_999_991 + 1)
+        rng = random.Random(
+            (self.state.rng_seed or 0) * 1_000_003 + cx * 100_003 + cy * 9_999_991 + 1
+        )
         return (cx * 8 + rng.randint(2, 5), cy * 8 + rng.randint(2, 5))
 
     def _zone_is_road(self, zx: int, zy: int) -> bool:
@@ -1651,7 +2038,12 @@ class _GenerationMixin:
 
     def _zone_should_be_town(self, zx: int, zy: int) -> bool:
         """Deterministic: ~30% chance on road zones, ~10% elsewhere."""
-        rng = random.Random((self.state.rng_seed or 0) * 1_000_003 + zx * 73_856_093 + zy * 83_492_791 + 2)
+        rng = random.Random(
+            (self.state.rng_seed or 0) * 1_000_003
+            + zx * 73_856_093
+            + zy * 83_492_791
+            + 2
+        )
         threshold = 0.30 if self._zone_is_road(zx, zy) else 0.10
         return rng.random() < threshold
 
@@ -1661,7 +2053,12 @@ class _GenerationMixin:
 
     def _build_town_context(self, zx: int, zy: int) -> dict:
         """Build a procedurally varied context dict for the town LLM prompt."""
-        rng = random.Random((self.state.rng_seed or 0) * 1_000_003 + zx * 19_349_663 + zy * 83_492_791 + 3)
+        rng = random.Random(
+            (self.state.rng_seed or 0) * 1_000_003
+            + zx * 19_349_663
+            + zy * 83_492_791
+            + 3
+        )
         location = rng.choice(_TOWN_LOCATIONS)
         defining_trait = rng.choice(_TOWN_DEFINING_TRAITS)
         current_situation = rng.choice(_TOWN_SITUATIONS)
@@ -1692,7 +2089,9 @@ class _GenerationMixin:
             if not self._zone_should_be_town(nx, ny):
                 continue
             if self._town_executor is None:
-                self._town_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+                self._town_executor = concurrent.futures.ThreadPoolExecutor(
+                    max_workers=1
+                )
             ctx = self._build_town_context(nx, ny)
             self._pending_town_contexts[key] = ctx
             self._pending_town_start_times[key] = time.monotonic()
@@ -1703,6 +2102,7 @@ class _GenerationMixin:
     def _get_town_spec(self, zx: int, zy: int) -> tuple[Any, dict[str, Any]]:
         """Return TownSpec for (zx, zy) — from pending future or generate now. Never blocks >_TOWN_GEN_TIMEOUT."""
         from .wild_magic import MockTownProvider
+
         key = (zx, zy)
         if self._town_executor is None:
             self._town_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
@@ -1722,7 +2122,9 @@ class _GenerationMixin:
         except Exception:
             return MockTownProvider().generate(zx, zy, ctx), ctx
 
-    def _load_or_generate_zone(self, zx: int, zy: int, entry_x: int, entry_y: int) -> None:
+    def _load_or_generate_zone(
+        self, zx: int, zy: int, entry_x: int, entry_y: int
+    ) -> None:
         state = self.state
         player = state.entities[state.player_id]
         key = (zx, zy)
@@ -1730,7 +2132,9 @@ class _GenerationMixin:
         if key in state.zones:
             snapshot = state.zones[key]
             state.tiles = [row[:] for row in snapshot.tiles]
-            state.tile_tags = {key_: list(value) for key_, value in snapshot.tile_tags.items()}
+            state.tile_tags = {
+                key_: list(value) for key_, value in snapshot.tile_tags.items()
+            }
             state.tile_durations = dict(snapshot.tile_durations)
             state.explored = set(snapshot.explored)
             state.entities = dict(snapshot.entities)
@@ -1775,7 +2179,11 @@ class _GenerationMixin:
             if not tags & {"books", "lore", "paper"}:
                 continue
             rng = random.Random(stable_seed(state.rng_seed, "room_books", room_id))
-            count = rng.randint(1, 2) if "books" in tags else (1 if rng.random() < 0.5 else 0)
+            count = (
+                rng.randint(1, 2)
+                if "books" in tags
+                else (1 if rng.random() < 0.5 else 0)
+            )
             if count <= 0:
                 continue
             candidates = [
@@ -1815,7 +2223,9 @@ class _GenerationMixin:
         era = rng.choice(_ROOM_ERAS)
         condition = rng.choice(_ROOM_CONDITIONS)
         topics = rng.sample(list(archetype.topics), k=min(2, len(archetype.topics)))
-        tags = sorted({archetype.id, era, condition, *archetype.tags, *archetype.prop_categories})
+        tags = sorted(
+            {archetype.id, era, condition, *archetype.tags, *archetype.prop_categories}
+        )
         secret_slots: list[dict[str, Any]] = []
         if archetype.secret_kinds and rng.random() < 0.28:
             secret_kind = rng.choice(archetype.secret_kinds)
@@ -1824,7 +2234,9 @@ class _GenerationMixin:
                     "id": f"{room_id}_{secret_kind}",
                     "kind": secret_kind,
                     "reveal_difficulty": rng.choice(["plain", "careful", "demanding"]),
-                    "clue_style": rng.choice(["scratches", "draft", "mismatched dust", "odd repetition"]),
+                    "clue_style": rng.choice(
+                        ["scratches", "draft", "mismatched dust", "odd repetition"]
+                    ),
                     "possible_reward_tags": sorted({"lore", *archetype.tags[:2]}),
                 }
             )
@@ -1847,10 +2259,23 @@ class _GenerationMixin:
         self.state.room_profiles.clear()
         self.state.tile_rooms.clear()
         for index, room in enumerate(rooms, 1):
-            label_rng = random.Random(stable_seed(self.state.rng_seed, "dungeon_room_profile", self.state.depth, index, room.x, room.y, room.w, room.h))
+            label_rng = random.Random(
+                stable_seed(
+                    self.state.rng_seed,
+                    "dungeon_room_profile",
+                    self.state.depth,
+                    index,
+                    room.x,
+                    room.y,
+                    room.w,
+                    room.h,
+                )
+            )
             archetype = label_rng.choice(ROOM_ARCHETYPES)
             room_id = f"depth_{self.state.depth}_room_{index:02d}_{normalize_id(archetype.room_type)}"
-            self._register_room_profile(self._profile_from_archetype(room, room_id, archetype, label_rng))
+            self._register_room_profile(
+                self._profile_from_archetype(room, room_id, archetype, label_rng)
+            )
 
     def _room_prop_categories(self, room: Room) -> list[str]:
         profile = self.room_profile_at(*room.center)
@@ -1892,7 +2317,10 @@ class _GenerationMixin:
         return mirrored
 
     def _carve_corridor_straight(
-        self, start: tuple[int, int], end: tuple[int, int], horizontal_first: bool = True
+        self,
+        start: tuple[int, int],
+        end: tuple[int, int],
+        horizontal_first: bool = True,
     ) -> None:
         """Right-angle corridor with a fixed bend order (deterministic, so mirrors match exactly)."""
         x1, y1 = start
@@ -1905,7 +2333,11 @@ class _GenerationMixin:
             self._carve_h_tunnel(x1, x2, y2)
 
     def _carve_corridor_mirrored(
-        self, start: tuple[int, int], end: tuple[int, int], axis_x: int, horizontal_first: bool = True
+        self,
+        start: tuple[int, int],
+        end: tuple[int, int],
+        axis_x: int,
+        horizontal_first: bool = True,
     ) -> None:
         self._carve_corridor_straight(start, end, horizontal_first)
         mirrored_start = (2 * axis_x - start[0], start[1])
@@ -1919,11 +2351,25 @@ class _GenerationMixin:
             for x in range(axis_x + 1, self.state.width - 1):
                 if self.state.tiles[y][x] != FLOOR:
                     continue
-                horizontal_floor = self.state.tiles[y][x - 1] != WALL and self.state.tiles[y][x + 1] != WALL
-                vertical_walls = self.state.tiles[y - 1][x] == WALL and self.state.tiles[y + 1][x] == WALL
-                vertical_floor = self.state.tiles[y - 1][x] != WALL and self.state.tiles[y + 1][x] != WALL
-                horizontal_walls = self.state.tiles[y][x - 1] == WALL and self.state.tiles[y][x + 1] == WALL
-                if (horizontal_floor and vertical_walls) or (vertical_floor and horizontal_walls):
+                horizontal_floor = (
+                    self.state.tiles[y][x - 1] != WALL
+                    and self.state.tiles[y][x + 1] != WALL
+                )
+                vertical_walls = (
+                    self.state.tiles[y - 1][x] == WALL
+                    and self.state.tiles[y + 1][x] == WALL
+                )
+                vertical_floor = (
+                    self.state.tiles[y - 1][x] != WALL
+                    and self.state.tiles[y + 1][x] != WALL
+                )
+                horizontal_walls = (
+                    self.state.tiles[y][x - 1] == WALL
+                    and self.state.tiles[y][x + 1] == WALL
+                )
+                if (horizontal_floor and vertical_walls) or (
+                    vertical_floor and horizontal_walls
+                ):
                     candidates.append((x, y))
         self.rng.shuffle(candidates)
         for x, y in candidates[:count]:
@@ -1938,19 +2384,41 @@ class _GenerationMixin:
             for x in range(1, self.state.width - 1):
                 if self.state.tiles[y][x] != FLOOR:
                     continue
-                if any(entity.x == x and entity.y == y for entity in self.state.entities.values()):
+                if any(
+                    entity.x == x and entity.y == y
+                    for entity in self.state.entities.values()
+                ):
                     continue
-                horizontal_floor = self.state.tiles[y][x - 1] != WALL and self.state.tiles[y][x + 1] != WALL
-                vertical_walls = self.state.tiles[y - 1][x] == WALL and self.state.tiles[y + 1][x] == WALL
-                vertical_floor = self.state.tiles[y - 1][x] != WALL and self.state.tiles[y + 1][x] != WALL
-                horizontal_walls = self.state.tiles[y][x - 1] == WALL and self.state.tiles[y][x + 1] == WALL
-                if (horizontal_floor and vertical_walls) or (vertical_floor and horizontal_walls):
+                horizontal_floor = (
+                    self.state.tiles[y][x - 1] != WALL
+                    and self.state.tiles[y][x + 1] != WALL
+                )
+                vertical_walls = (
+                    self.state.tiles[y - 1][x] == WALL
+                    and self.state.tiles[y + 1][x] == WALL
+                )
+                vertical_floor = (
+                    self.state.tiles[y - 1][x] != WALL
+                    and self.state.tiles[y + 1][x] != WALL
+                )
+                horizontal_walls = (
+                    self.state.tiles[y][x - 1] == WALL
+                    and self.state.tiles[y][x + 1] == WALL
+                )
+                if (horizontal_floor and vertical_walls) or (
+                    vertical_floor and horizontal_walls
+                ):
                     candidates.append((x, y))
         self.rng.shuffle(candidates)
         for x, y in candidates[: max(2, min(8, len(candidates) // 5))]:
             self.state.tiles[y][x] = DOOR
 
-    def _floor_reachable(self, start: tuple[int, int], goal: tuple[int, int], blocked: set[tuple[int, int]]) -> bool:
+    def _floor_reachable(
+        self,
+        start: tuple[int, int],
+        goal: tuple[int, int],
+        blocked: set[tuple[int, int]],
+    ) -> bool:
         queue: deque[tuple[int, int]] = deque([start])
         seen = {start}
         while queue:
@@ -1958,7 +2426,11 @@ class _GenerationMixin:
             if (x, y) == goal:
                 return True
             for nx, ny in ((x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)):
-                if (nx, ny) in seen or (nx, ny) in blocked or not self.in_bounds(nx, ny):
+                if (
+                    (nx, ny) in seen
+                    or (nx, ny) in blocked
+                    or not self.in_bounds(nx, ny)
+                ):
                     continue
                 tile = self.state.tiles[ny][nx]
                 # Doors are always freely passable here -- the `blocked` set is how callers
@@ -1989,7 +2461,8 @@ class _GenerationMixin:
             key_id = f"key_{normalize_id(key_name)}"
             self.set_tile(door_xy[0], door_xy[1], DOOR, tags={"locked", key_id})
             reachable_rooms = [
-                room for room in rooms[:-1]
+                room
+                for room in rooms[:-1]
                 if self._floor_reachable(start, room.center, blocked={door_xy})
             ]
             key_room = self.rng.choice(reachable_rooms) if reachable_rooms else rooms[0]
@@ -2012,7 +2485,9 @@ class _GenerationMixin:
                 return weights
         return themes[-1][1]
 
-    def _pick_themed_prop_id(self, depth: int, preferred_categories: list[str] | None = None) -> str:
+    def _pick_themed_prop_id(
+        self, depth: int, preferred_categories: list[str] | None = None
+    ) -> str:
         preferred_ids = [
             pid
             for category in (preferred_categories or [])
@@ -2033,7 +2508,9 @@ class _GenerationMixin:
         ids = PROP_CATEGORIES.get(chosen_cat, [])
         return self.rng.choice(ids) if ids else self.rng.choice(get_all_prop_ids())
 
-    def _spawn_props_in_room(self, room: Room, depth: int, allow_scene: bool = True) -> None:
+    def _spawn_props_in_room(
+        self, room: Room, depth: int, allow_scene: bool = True
+    ) -> None:
         preferred_categories = self._room_prop_categories(room)
         if allow_scene and self.rng.random() < 0.20:
             # Scenes follow the region's theme gradient too: imperial pairings
@@ -2041,8 +2518,12 @@ class _GenerationMixin:
             # back to any scene if the current themes have no complete pairing.
             weights = self._floor_theme_weights(depth)
             categories = preferred_categories or list(weights)
-            themed_ids = {pid for cat in categories for pid in PROP_CATEGORIES.get(cat, [])}
-            themed_scenes = [s for s in _PROP_SCENES if all(pid in themed_ids for pid in s)]
+            themed_ids = {
+                pid for cat in categories for pid in PROP_CATEGORIES.get(cat, [])
+            }
+            themed_scenes = [
+                s for s in _PROP_SCENES if all(pid in themed_ids for pid in s)
+            ]
             scene = self.rng.choice(themed_scenes or _PROP_SCENES)
             for pid in scene:
                 template = get_prop_template(pid)
@@ -2050,7 +2531,11 @@ class _GenerationMixin:
                     x, y = self._random_open_tile_in_room(room)
                     self.spawn_prop(pid, x, y)
         else:
-            count = 1 + (1 if self.rng.random() < 0.40 else 0) + (1 if self.rng.random() < 0.15 else 0)
+            count = (
+                1
+                + (1 if self.rng.random() < 0.40 else 0)
+                + (1 if self.rng.random() < 0.15 else 0)
+            )
             for _ in range(count):
                 prop_id = self._pick_themed_prop_id(depth, preferred_categories)
                 x, y = self._random_open_tile_in_room(room)
@@ -2078,14 +2563,16 @@ class _GenerationMixin:
         player = state.entities[state.player_id]
         snapshot = state.dungeon_floors[depth]
         state.tiles = [row[:] for row in snapshot.tiles]
-        state.tile_tags = {key: list(value) for key, value in snapshot.tile_tags.items()}
+        state.tile_tags = {
+            key: list(value) for key, value in snapshot.tile_tags.items()
+        }
         state.tile_durations = dict(snapshot.tile_durations)
         state.explored = set(snapshot.explored)
         state.entities = dict(snapshot.entities)
         state.zone_type = snapshot.zone_type
         state.room_profiles = dict(snapshot.room_profiles)
         state.tile_rooms = dict(snapshot.tile_rooms)
-        
+
         entry_x, entry_y = player.x, player.y
         found = False
         for y, row in enumerate(state.tiles):
@@ -2096,6 +2583,6 @@ class _GenerationMixin:
                     break
             if found:
                 break
-        
+
         state.entities[player.id] = player
         player.x, player.y = entry_x, entry_y

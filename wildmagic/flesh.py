@@ -6,6 +6,7 @@ it cannot create, move, or unbind a promise, and realization stands complete wit
 Flesh rides the same background channel as lore extraction (purpose "lore" config), so
 no extra environment setup is needed.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -15,7 +16,12 @@ import re
 import urllib.error
 from typing import Any, Protocol
 
-from .config import audit_dir, get_lore_model, get_lore_provider, ollama_lore_num_predict
+from .config import (
+    audit_dir,
+    get_lore_model,
+    get_lore_provider,
+    ollama_lore_num_predict,
+)
 from .fallbacks import fallbacks_enabled
 from .llm_client import (
     _post_ollama_chat,
@@ -48,8 +54,7 @@ class FleshResolution:
 class FleshProvider(Protocol):
     name: str
 
-    def draft(self, context: dict[str, Any]) -> str:
-        ...
+    def draft(self, context: dict[str, Any]) -> str: ...
 
 
 class OllamaFleshProvider:
@@ -64,8 +69,14 @@ class OllamaFleshProvider:
     ) -> None:
         self._model_override = model
         self.model = model or get_lore_model()
-        self.base_url = normalize_ollama_url(base_url) if base_url else ollama_host(self.purpose)
-        self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds(self.purpose)
+        self.base_url = (
+            normalize_ollama_url(base_url) if base_url else ollama_host(self.purpose)
+        )
+        self.timeout_seconds = (
+            timeout_seconds
+            if timeout_seconds is not None
+            else ollama_timeout_seconds(self.purpose)
+        )
 
     def draft(self, context: dict[str, Any]) -> str:
         payload = {
@@ -90,7 +101,10 @@ class OllamaFleshProvider:
         try:
             data = _post_ollama_chat(self.base_url, payload, self.timeout_seconds)
         except ValueError as exc:
-            if "Unexpected empty grammar stack" not in str(exc) or "format" not in payload:
+            if (
+                "Unexpected empty grammar stack" not in str(exc)
+                or "format" not in payload
+            ):
                 raise
             retry_payload = dict(payload)
             retry_payload.pop("format", None)
@@ -105,7 +119,10 @@ class MockFleshProvider:
     name = "mock"
 
     def draft(self, context: dict[str, Any]) -> str:
-        subject = " ".join(str(context.get("subject") or "promised place").split()).strip() or "promised place"
+        subject = (
+            " ".join(str(context.get("subject") or "promised place").split()).strip()
+            or "promised place"
+        )
         first_word = subject.split()[0].capitalize()
         return json.dumps(
             {
@@ -152,13 +169,28 @@ def resolve_flesh(provider: FleshProvider, context: dict[str, Any]) -> FleshReso
     try:
         raw = provider.draft(context)
         flesh = normalize_flesh(parse_flesh_json(raw))
-        audit_path = _write_flesh_audit(provider, context, raw, flesh, False, None, resolved_provider_name)
-        return FleshResolution(flesh, False, None, resolved_provider_name, raw, audit_path)
-    except (OSError, TimeoutError, urllib.error.URLError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        audit_path = _write_flesh_audit(
+            provider, context, raw, flesh, False, None, resolved_provider_name
+        )
+        return FleshResolution(
+            flesh, False, None, resolved_provider_name, raw, audit_path
+        )
+    except (
+        OSError,
+        TimeoutError,
+        urllib.error.URLError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as exc:
         resolved_provider_name = _flesh_provider_name(provider)
         error = str(exc)
-        audit_path = _write_flesh_audit(provider, context, raw, None, True, error, resolved_provider_name)
-        return FleshResolution(None, True, error, resolved_provider_name, raw, audit_path)
+        audit_path = _write_flesh_audit(
+            provider, context, raw, None, True, error, resolved_provider_name
+        )
+        return FleshResolution(
+            None, True, error, resolved_provider_name, raw, audit_path
+        )
 
 
 def parse_flesh_json(raw: str) -> dict[str, Any]:

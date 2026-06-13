@@ -29,14 +29,33 @@ class CreatureTemplate:
 
 
 ITEM_TEMPLATES = {
-    "generic_object": ItemTemplate("generic_object", "?", "object", "unknown", {"conjured"}),
-    "body_part": ItemTemplate("body_part", ",", "body part", "flesh", {"organic", "ritual", "conjured"}, 8),
-    "glass_shard": ItemTemplate("glass_shard", "*", "shard", "glass", {"sharp", "fragile", "conjured"}, 10),
-    "ritual_component": ItemTemplate("ritual_component", "?", "ritual component", "unknown", {"ritual", "conjured"}, 8),
-    "weapon_like": ItemTemplate("weapon_like", "/", "improvised weapon", "iron", {"weapon", "conjured"}, 1),
+    "generic_object": ItemTemplate(
+        "generic_object", "?", "object", "unknown", {"conjured"}
+    ),
+    "body_part": ItemTemplate(
+        "body_part", ",", "body part", "flesh", {"organic", "ritual", "conjured"}, 8
+    ),
+    "glass_shard": ItemTemplate(
+        "glass_shard", "*", "shard", "glass", {"sharp", "fragile", "conjured"}, 10
+    ),
+    "ritual_component": ItemTemplate(
+        "ritual_component",
+        "?",
+        "ritual component",
+        "unknown",
+        {"ritual", "conjured"},
+        8,
+    ),
+    "weapon_like": ItemTemplate(
+        "weapon_like", "/", "improvised weapon", "iron", {"weapon", "conjured"}, 1
+    ),
     "food": ItemTemplate("food", "%", "food", "organic", {"edible", "conjured"}, 6),
-    "key_like": ItemTemplate("key_like", ";", "key-like object", "brass", {"key", "conjured"}, 3),
-    "treasure": ItemTemplate("treasure", "$", "treasure", "gold", {"valuable", "conjured"}, 5),
+    "key_like": ItemTemplate(
+        "key_like", ";", "key-like object", "brass", {"key", "conjured"}, 3
+    ),
+    "treasure": ItemTemplate(
+        "treasure", "$", "treasure", "gold", {"valuable", "conjured"}, 5
+    ),
 }
 
 
@@ -52,8 +71,28 @@ CREATURE_TEMPLATES = {
         {"tiny", "swarm", "beast", "conjured"},
         max_count=8,
     ),
-    "small_beast": CreatureTemplate("small_beast", "r", 5, 2, 0, "simple", "enemy", {"beast", "conjured"}, max_count=4),
-    "humanoid": CreatureTemplate("humanoid", "h", 8, 3, 1, "simple", "enemy", {"humanoid", "conjured"}, max_count=3),
+    "small_beast": CreatureTemplate(
+        "small_beast",
+        "r",
+        5,
+        2,
+        0,
+        "simple",
+        "enemy",
+        {"beast", "conjured"},
+        max_count=4,
+    ),
+    "humanoid": CreatureTemplate(
+        "humanoid",
+        "h",
+        8,
+        3,
+        1,
+        "simple",
+        "enemy",
+        {"humanoid", "conjured"},
+        max_count=3,
+    ),
     "construct": CreatureTemplate(
         "construct",
         "c",
@@ -119,11 +158,15 @@ CREATURE_TEMPLATES = {
 
 
 def item_template(template_id: str | None) -> ItemTemplate:
-    return ITEM_TEMPLATES.get(normalize_template_id(template_id), ITEM_TEMPLATES["generic_object"])
+    return ITEM_TEMPLATES.get(
+        normalize_template_id(template_id), ITEM_TEMPLATES["generic_object"]
+    )
 
 
 def creature_template(template_id: str | None) -> CreatureTemplate:
-    return CREATURE_TEMPLATES.get(normalize_template_id(template_id), CREATURE_TEMPLATES["small_beast"])
+    return CREATURE_TEMPLATES.get(
+        normalize_template_id(template_id), CREATURE_TEMPLATES["small_beast"]
+    )
 
 
 def normalize_template_id(template_id: str | None) -> str:

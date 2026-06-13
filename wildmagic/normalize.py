@@ -40,7 +40,9 @@ def normalize_id(value: str) -> str:
     return value.lower().strip().replace(" ", "_").replace("-", "_")
 
 
-def normalize_faction(value: Any, default: str = "ally", neutral_is_ally: bool = False) -> str:
+def normalize_faction(
+    value: Any, default: str = "ally", neutral_is_ally: bool = False
+) -> str:
     normalized = normalize_id(str(value or default))
     aliases = {
         "player": "ally",
@@ -116,27 +118,84 @@ def infer_behavior_tags(name: str, tags: set[str]) -> set[str]:
     def missing(prefix: str) -> bool:
         return not any(tag.startswith(prefix) for tag in tag_set)
 
-    if has_name_word("archer", "ranger", "shooter", "bowman", "sniper", "gunner", "crossbow") or has_tag("archer", "shooter", "bowman"):
+    if has_name_word(
+        "archer", "ranger", "shooter", "bowman", "sniper", "gunner", "crossbow"
+    ) or has_tag("archer", "shooter", "bowman"):
         tag_set.add("ranged")
-    if has_name_word("ward", "totem", "beacon", "font", "pillar", "obelisk", "turret", "emanation", "radiator", "anchor") or has_tag("immobile", "passive", "ward", "totem"):
+    if has_name_word(
+        "ward",
+        "totem",
+        "beacon",
+        "font",
+        "pillar",
+        "obelisk",
+        "turret",
+        "emanation",
+        "radiator",
+        "anchor",
+    ) or has_tag("immobile", "passive", "ward", "totem"):
         tag_set.add("stationary")
-    if has_name_word("guardian", "sentinel", "warden", "protector") and "stationary" not in tag_set:
+    if (
+        has_name_word("guardian", "sentinel", "warden", "protector")
+        and "stationary" not in tag_set
+    ):
         tag_set.add("guardian")
     if has_name_word(
-        "legion", "legionary", "centurion", "marshal", "exemplar", "spearman",
-        "sergeant", "chaplain", "drill", "imperial", "praetorian",
+        "legion",
+        "legionary",
+        "centurion",
+        "marshal",
+        "exemplar",
+        "spearman",
+        "sergeant",
+        "chaplain",
+        "drill",
+        "imperial",
+        "praetorian",
     ) or has_tag("empire", "legion", "disciplined", "imperial"):
         tag_set.add("disciplined")
-    if has_name_word("bomb", "explosive", "volatile", "detonator") or has_tag("bomb", "explosive", "volatile"):
+    if has_name_word("bomb", "explosive", "volatile", "detonator") or has_tag(
+        "bomb", "explosive", "volatile"
+    ):
         tag_set.add("explode_on_death")
 
     aura_rules = [
-        ("aura_burn_2", "aura_burn", ("fire", "burning", "flaming", "flame", "hot", "infernal", "scorching"), ("burn", "fire", "flame", "scorch", "ember", "inferno", "blaze")),
-        ("aura_heal_2", "aura_heal", ("heal", "healing", "restorative", "regenerative", "life", "mending"), ("heal", "healing", "medic", "cleric", "life", "restore", "mend")),
-        ("aura_poison_2", "aura_poison", ("poison", "toxic", "plague", "venomous", "venom", "miasma"), ("poison", "toxic", "plague", "miasma", "venom", "pestilence")),
-        ("aura_fear_2", "aura_fear", ("fear", "terror", "dread", "horror", "frightening", "terrifying"), ("fear", "dread", "terror", "horror", "despair")),
-        ("aura_slow_2", "aura_slow", ("slow", "sluggish", "leaden", "weight", "heavy", "torpor"), ("slow", "sluggish", "leaden", "weight", "torpor")),
-        ("aura_bleed_2", "aura_bleed", ("bleed", "bleeding", "hemorrhage", "thorn", "barbed"), ("bleed", "thorn", "shard", "barb", "needle")),
+        (
+            "aura_burn_2",
+            "aura_burn",
+            ("fire", "burning", "flaming", "flame", "hot", "infernal", "scorching"),
+            ("burn", "fire", "flame", "scorch", "ember", "inferno", "blaze"),
+        ),
+        (
+            "aura_heal_2",
+            "aura_heal",
+            ("heal", "healing", "restorative", "regenerative", "life", "mending"),
+            ("heal", "healing", "medic", "cleric", "life", "restore", "mend"),
+        ),
+        (
+            "aura_poison_2",
+            "aura_poison",
+            ("poison", "toxic", "plague", "venomous", "venom", "miasma"),
+            ("poison", "toxic", "plague", "miasma", "venom", "pestilence"),
+        ),
+        (
+            "aura_fear_2",
+            "aura_fear",
+            ("fear", "terror", "dread", "horror", "frightening", "terrifying"),
+            ("fear", "dread", "terror", "horror", "despair"),
+        ),
+        (
+            "aura_slow_2",
+            "aura_slow",
+            ("slow", "sluggish", "leaden", "weight", "heavy", "torpor"),
+            ("slow", "sluggish", "leaden", "weight", "torpor"),
+        ),
+        (
+            "aura_bleed_2",
+            "aura_bleed",
+            ("bleed", "bleeding", "hemorrhage", "thorn", "barbed"),
+            ("bleed", "thorn", "shard", "barb", "needle"),
+        ),
     ]
     for aura_tag, prefix, tag_words, name_words in aura_rules:
         if missing(prefix) and (has_tag(*tag_words) or has_name_word(*name_words)):
@@ -164,7 +223,10 @@ def singular_target_tag(value: str) -> str:
 def normalize_numeric_map(value: Any, minimum: int, maximum: int) -> dict[str, int]:
     if not isinstance(value, dict):
         return {}
-    return {normalize_id(str(key)): clamp_int(raw, minimum, maximum) for key, raw in value.items()}
+    return {
+        normalize_id(str(key)): clamp_int(raw, minimum, maximum)
+        for key, raw in value.items()
+    }
 
 
 def sanitize_name(value: str, fallback: str, max_length: int = 40) -> str:

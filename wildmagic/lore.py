@@ -34,8 +34,26 @@ from .prompts import LORE_EXTRACTION_SYSTEM_PROMPT
 from .promises import WorldPromise, parse_spatial_hint, promise_context_for_prompt
 
 
-VALID_STATUSES = {"unverified", "rumored", "verified", "contested", "false", "corroborated", "redeemed"}
-VALID_KINDS = {"rumor", "background", "place", "person", "threat", "quest", "prophecy", "rendezvous", "custom"}
+VALID_STATUSES = {
+    "unverified",
+    "rumored",
+    "verified",
+    "contested",
+    "false",
+    "corroborated",
+    "redeemed",
+}
+VALID_KINDS = {
+    "rumor",
+    "background",
+    "place",
+    "person",
+    "threat",
+    "quest",
+    "prophecy",
+    "rendezvous",
+    "custom",
+}
 
 
 @dataclass
@@ -51,8 +69,7 @@ class LoreExtractionResolution:
 class LoreExtractionProvider(Protocol):
     name: str
 
-    def extract(self, context: dict[str, Any]) -> str:
-        ...
+    def extract(self, context: dict[str, Any]) -> str: ...
 
 
 class OllamaLoreProvider:
@@ -67,8 +84,14 @@ class OllamaLoreProvider:
     ) -> None:
         self._model_override = model
         self.model = model or get_lore_model()
-        self.base_url = normalize_ollama_url(base_url) if base_url else ollama_host(self.purpose)
-        self.timeout_seconds = timeout_seconds if timeout_seconds is not None else ollama_timeout_seconds(self.purpose)
+        self.base_url = (
+            normalize_ollama_url(base_url) if base_url else ollama_host(self.purpose)
+        )
+        self.timeout_seconds = (
+            timeout_seconds
+            if timeout_seconds is not None
+            else ollama_timeout_seconds(self.purpose)
+        )
 
     def extract(self, context: dict[str, Any]) -> str:
         payload = {
@@ -93,7 +116,10 @@ class OllamaLoreProvider:
         try:
             data = _post_ollama_chat(self.base_url, payload, self.timeout_seconds)
         except ValueError as exc:
-            if "Unexpected empty grammar stack" not in str(exc) or "format" not in payload:
+            if (
+                "Unexpected empty grammar stack" not in str(exc)
+                or "format" not in payload
+            ):
                 raise
             retry_payload = dict(payload)
             retry_payload.pop("format", None)
@@ -114,7 +140,10 @@ class MockLoreProvider:
         if not reply.strip() or len(reply.split()) < 8:
             return json.dumps({"claims": []})
 
-        if any(word in lowered for word in ("rumor", "heard", "seen", "midnight", "witch", "oak")):
+        if any(
+            word in lowered
+            for word in ("rumor", "heard", "seen", "midnight", "witch", "oak")
+        ):
             subject = _subject_from_text(reply) or "local rumor"
             return json.dumps(
                 {
@@ -132,7 +161,9 @@ class MockLoreProvider:
                     ]
                 }
             )
-        if any(word in lowered for word in ("used to", "once", "before", "old", "ancient")):
+        if any(
+            word in lowered for word in ("used to", "once", "before", "old", "ancient")
+        ):
             subject = _subject_from_text(reply) or npc
             return json.dumps(
                 {
@@ -180,20 +211,43 @@ def make_lore_provider(provider_name: str | None = None) -> LoreExtractionProvid
     return AutoLoreProvider()
 
 
-def resolve_lore_extraction(provider: LoreExtractionProvider, context: dict[str, Any]) -> LoreExtractionResolution:
+def resolve_lore_extraction(
+    provider: LoreExtractionProvider, context: dict[str, Any]
+) -> LoreExtractionResolution:
     resolved_provider_name = _lore_provider_name(provider)
     raw: str | None = None
     try:
         raw = provider.extract(context)
         parsed = parse_lore_json(raw)
         promises = normalize_lore_promises(parsed, context)
-        audit_path = write_lore_audit_log(provider, context, raw, [promise.to_dict() for promise in promises], False, None, resolved_provider_name)
-        return LoreExtractionResolution(promises, False, None, resolved_provider_name, raw, audit_path)
-    except (OSError, TimeoutError, urllib.error.URLError, TypeError, ValueError, json.JSONDecodeError) as exc:
+        audit_path = write_lore_audit_log(
+            provider,
+            context,
+            raw,
+            [promise.to_dict() for promise in promises],
+            False,
+            None,
+            resolved_provider_name,
+        )
+        return LoreExtractionResolution(
+            promises, False, None, resolved_provider_name, raw, audit_path
+        )
+    except (
+        OSError,
+        TimeoutError,
+        urllib.error.URLError,
+        TypeError,
+        ValueError,
+        json.JSONDecodeError,
+    ) as exc:
         resolved_provider_name = _lore_provider_name(provider)
         error = str(exc)
-        audit_path = write_lore_audit_log(provider, context, raw, None, True, error, resolved_provider_name)
-        return LoreExtractionResolution([], True, error, resolved_provider_name, raw, audit_path)
+        audit_path = write_lore_audit_log(
+            provider, context, raw, None, True, error, resolved_provider_name
+        )
+        return LoreExtractionResolution(
+            [], True, error, resolved_provider_name, raw, audit_path
+        )
 
 
 def parse_lore_json(raw: str) -> dict[str, Any]:
@@ -210,7 +264,9 @@ def parse_lore_json(raw: str) -> dict[str, Any]:
     return parsed
 
 
-def normalize_lore_promises(data: dict[str, Any], context: dict[str, Any]) -> list[WorldPromise]:
+def normalize_lore_promises(
+    data: dict[str, Any], context: dict[str, Any]
+) -> list[WorldPromise]:
     raw_claims = data.get("claims") or []
     if isinstance(raw_claims, dict):
         raw_claims = [raw_claims]
@@ -247,21 +303,32 @@ def normalize_lore_promises(data: dict[str, Any], context: dict[str, Any]) -> li
         if not tags:
             tags = _tags_from_text(f"{subject} {text}")[:6]
         origin_zone = None
-        if isinstance(context.get("zone"), dict) and context["zone"].get("x") is not None and context["zone"].get("y") is not None:
+        if (
+            isinstance(context.get("zone"), dict)
+            and context["zone"].get("x") is not None
+            and context["zone"].get("y") is not None
+        ):
             origin_zone = (int(context["zone"]["x"]), int(context["zone"]["y"]))
         where = _clean_text(raw.get("where"), 120)
-        claimed_space = parse_spatial_hint(
-            where,
-            fallback_text=f"{subject} {text} {' '.join(tags)}",
-            anchor_zone=origin_zone or (0, 0),
-        ) if where else None
+        claimed_space = (
+            parse_spatial_hint(
+                where,
+                fallback_text=f"{subject} {text} {' '.join(tags)}",
+                anchor_zone=origin_zone or (0, 0),
+            )
+            if where
+            else None
+        )
         promises.append(
             WorldPromise(
                 id=_promise_id(context, index, subject, text),
                 kind=kind,
                 subject=subject,
                 text=text,
-                source=str(context.get("source") or f"dialogue:{context.get('npc') or 'unknown'}"),
+                source=str(
+                    context.get("source")
+                    or f"dialogue:{context.get('npc') or 'unknown'}"
+                ),
                 source_turn=int(context.get("turn") or 0),
                 origin_zone=origin_zone,
                 location=str(context.get("location") or "unknown"),
@@ -278,7 +345,9 @@ def normalize_lore_promises(data: dict[str, Any], context: dict[str, Any]) -> li
     return promises
 
 
-def lore_context_for_prompt(promises: list[WorldPromise], limit: int = 8, text_limit: int = 240) -> list[dict[str, Any]]:
+def lore_context_for_prompt(
+    promises: list[WorldPromise], limit: int = 8, text_limit: int = 240
+) -> list[dict[str, Any]]:
     return promise_context_for_prompt(promises, limit=limit, text_limit=text_limit)
 
 
@@ -381,7 +450,19 @@ def _tags_from_text(text: str) -> list[str]:
     tags: list[str] = []
     for word in re.findall(r"[A-Za-z][A-Za-z'-]{2,}", text.lower()):
         tag = normalize_id(word)
-        if tag in {"the", "and", "that", "this", "with", "from", "says", "said", "you", "your", "there"}:
+        if tag in {
+            "the",
+            "and",
+            "that",
+            "this",
+            "with",
+            "from",
+            "says",
+            "said",
+            "you",
+            "your",
+            "there",
+        }:
             continue
         if tag not in tags:
             tags.append(tag)
@@ -392,7 +473,19 @@ def _tags_from_text(text: str) -> list[str]:
 
 def _what_from_text(text: str) -> str | None:
     lowered = text.lower()
-    for keyword in ("chapel", "shrine", "temple", "witch", "hermit", "camp", "cache", "tomb", "barrow", "lair", "checkpoint"):
+    for keyword in (
+        "chapel",
+        "shrine",
+        "temple",
+        "witch",
+        "hermit",
+        "camp",
+        "cache",
+        "tomb",
+        "barrow",
+        "lair",
+        "checkpoint",
+    ):
         if keyword in lowered:
             return keyword
     return None
@@ -402,7 +495,16 @@ def _subject_from_text(text: str) -> str | None:
     match = re.search(r"\b([A-Z][A-Za-z'-]+(?:\s+[A-Z][A-Za-z'-]+){0,2})\b", text)
     if match:
         return match.group(1)
-    for keyword in ("witch", "oak", "tree", "spellbook", "saint", "empire", "road", "ruin"):
+    for keyword in (
+        "witch",
+        "oak",
+        "tree",
+        "spellbook",
+        "saint",
+        "empire",
+        "road",
+        "ruin",
+    ):
         if keyword in text.lower():
             return keyword
     return None
