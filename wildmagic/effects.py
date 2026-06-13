@@ -51,7 +51,9 @@ def _positive_cost_amount(value: Any, maximum: int, default: int = 1) -> int:
 class _EffectsMixin:
     """Effect/cost application and placement helpers extracted from GameEngine."""
 
-    def apply_wild_magic_resolution(self, resolution: dict[str, Any]) -> WildMagicOutcome:
+    def apply_wild_magic_resolution(
+        self, resolution: dict[str, Any]
+    ) -> WildMagicOutcome:
         messages: list[str] = []
         if self.state.game_over:
             return WildMagicOutcome(False, False, ["The dead do not cast."])
@@ -63,9 +65,17 @@ class _EffectsMixin:
             return WildMagicOutcome(False, True, [message])
 
         accepted = bool(resolution.get("accepted", True))
-        outcome_text = str(resolution.get("outcome_text") or resolution.get("outcome") or resolution.get("message") or "").strip()
+        outcome_text = str(
+            resolution.get("outcome_text")
+            or resolution.get("outcome")
+            or resolution.get("message")
+            or ""
+        ).strip()
         if not accepted:
-            reason = str(resolution.get("rejected_reason") or "The spell is too vast to fit through you.")
+            reason = str(
+                resolution.get("rejected_reason")
+                or "The spell is too vast to fit through you."
+            )
             self.state.add_message(reason)
             self.state.stats.spells_failed += 1
             self.finish_player_turn()
@@ -77,7 +87,10 @@ class _EffectsMixin:
                 self.state.add_message(outcome_text)
                 messages.append(outcome_text)
 
-            for message in self._fire_triggers("on_next_spell", {"target": self.state.player, "source": self.state.player}):
+            for message in self._fire_triggers(
+                "on_next_spell",
+                {"target": self.state.player, "source": self.state.player},
+            ):
                 messages.append(message)
 
             for effect in coerce_list(resolution.get("effects")):
@@ -110,6 +123,7 @@ class _EffectsMixin:
             message = f"Wild magic failed during application: {exc}"
             self.state.add_message(message)
             return WildMagicOutcome(False, True, [message])
+
     def _apply_cost(self, cost: dict[str, Any]) -> str | None:
         if not isinstance(cost, dict):
             return None
@@ -153,7 +167,9 @@ class _EffectsMixin:
             player.mana = min(player.mana, player.max_mana)
             return f"Cost: {amount} maximum mana."
         if cost_type == "item":
-            item = str(cost.get("item") or cost.get("item_name") or cost.get("id") or "").strip()
+            item = str(
+                cost.get("item") or cost.get("item_name") or cost.get("id") or ""
+            ).strip()
             amount = clamp_int(cost.get("amount"), 1, 99)
             if not item:
                 return None
@@ -167,9 +183,15 @@ class _EffectsMixin:
                     self.state.inventory.pop(item, None)
             return f"Cost: {spent} {item}." if spent else f"Cost unpaid: no {item}."
         if cost_type == "curse":
-            curse_id = str(cost.get("id") or cost.get("name") or "nameless_curse").lower().replace(" ", "_")
+            curse_id = (
+                str(cost.get("id") or cost.get("name") or "nameless_curse")
+                .lower()
+                .replace(" ", "_")
+            )
             name = str(cost.get("name") or curse_id.replace("_", " ").title())
-            description = str(cost.get("description") or "Reality now remembers you incorrectly.")
+            description = str(
+                cost.get("description") or "Reality now remembers you incorrectly."
+            )
             if curse_id in self.state.curses:
                 self.state.curses[curse_id].stacks += 1
             else:
@@ -200,7 +222,9 @@ class _EffectsMixin:
                         f"Wild magic leaves you with an uncanny condition: {name}.",
                     )
                 return f"Cost became a curse: {name}."
-            dur_val3: int | str = "permanent" if duration == "permanent" else clamp_int(duration, 1, 999)
+            dur_val3: int | str = (
+                "permanent" if duration == "permanent" else clamp_int(duration, 1, 999)
+            )
             player.statuses[status] = dur_val3
             shown = display_name or status.replace("_", " ")
             if display_name:
@@ -209,6 +233,7 @@ class _EffectsMixin:
                 player.status_expiry_text[status] = expiry_text
             return f"Cost: you are {shown}."
         return None
+
     def _apply_effect(self, effect: dict[str, Any]) -> list[str]:
         if not isinstance(effect, dict):
             return []
@@ -218,17 +243,32 @@ class _EffectsMixin:
             target = self.resolve_target(str(effect.get("target") or "nearest_enemy"))
             if not target:
                 return ["The spell claws at empty air."]
-            amount = clamp_int(effect.get("amount"), 1, 999) if effect.get("amount") is not None else 5
+            amount = (
+                clamp_int(effect.get("amount"), 1, 999)
+                if effect.get("amount") is not None
+                else 5
+            )
             damage_type = str(effect.get("damage_type") or "arcane")
             actual = self.calculate_actual_damage(target, amount, damage_type)
-            is_player_dmg = (target.id == self.state.player_id and actual > 0)
-            self.state.add_message(f"{target.name} {self._verb(target, 'take', 'takes')} {actual} {damage_type} damage.", is_danger=is_player_dmg)
+            is_player_dmg = target.id == self.state.player_id and actual > 0
+            self.state.add_message(
+                f"{target.name} {self._verb(target, 'take', 'takes')} {actual} {damage_type} damage.",
+                is_danger=is_player_dmg,
+            )
             self.damage_entity(target, amount, damage_type, source=self.state.player)
             return []
         if effect_type == "area_damage":
             x, y = self.effect_position(effect)
-            radius = clamp_int(effect.get("radius"), 0, 99) if effect.get("radius") is not None else 3
-            amount = clamp_int(effect.get("amount"), 1, 999) if effect.get("amount") is not None else 5
+            radius = (
+                clamp_int(effect.get("radius"), 0, 99)
+                if effect.get("radius") is not None
+                else 3
+            )
+            amount = (
+                clamp_int(effect.get("amount"), 1, 999)
+                if effect.get("amount") is not None
+                else 5
+            )
             damage_type = str(effect.get("damage_type") or "arcane")
             include_player = bool(effect.get("include_player", False))
             affects = normalize_id(str(effect.get("affects") or "non_player"))
@@ -243,22 +283,37 @@ class _EffectsMixin:
                 if not area_damage_affects(entity, affects, self.state.player_id):
                     continue
                 actual = self.calculate_actual_damage(entity, amount, damage_type)
-                hit.append(f"{entity.name} {self._verb(entity, 'take', 'takes')} {actual} {damage_type}")
+                hit.append(
+                    f"{entity.name} {self._verb(entity, 'take', 'takes')} {actual} {damage_type}"
+                )
                 actuals.append(entity)
                 if entity.id == self.state.player_id and actual > 0:
                     is_player_dmg = True
             if not hit:
                 return ["The blast spends itself on empty stone."]
-            self.state.add_message(f"Area spell hits {len(hit)} target(s): {', '.join(hit)}.", is_danger=is_player_dmg)
+            self.state.add_message(
+                f"Area spell hits {len(hit)} target(s): {', '.join(hit)}.",
+                is_danger=is_player_dmg,
+            )
             for entity in actuals:
-                self.damage_entity(entity, amount, damage_type, source=self.state.player)
+                self.damage_entity(
+                    entity, amount, damage_type, source=self.state.player
+                )
             return []
         if effect_type == "area_status":
             x, y = self.effect_position(effect)
-            radius = clamp_int(effect.get("radius"), 0, 99) if effect.get("radius") is not None else 15
+            radius = (
+                clamp_int(effect.get("radius"), 0, 99)
+                if effect.get("radius") is not None
+                else 15
+            )
             status = normalize_id(str(effect.get("status") or "strange"))
-            display_name = str(effect.get("display_name") or effect.get("name") or "").strip() or status.replace("_", " ")
-            expiry_text = str(effect.get("expiry_text") or effect.get("wears_off") or "").strip()
+            display_name = str(
+                effect.get("display_name") or effect.get("name") or ""
+            ).strip() or status.replace("_", " ")
+            expiry_text = str(
+                effect.get("expiry_text") or effect.get("wears_off") or ""
+            ).strip()
             duration = effect.get("duration", 3)
             affects = normalize_id(str(effect.get("affects") or "enemies"))
             include_player = bool(effect.get("include_player", False))
@@ -268,7 +323,9 @@ class _EffectsMixin:
                     return []
                 status = canonical
             affected: list[str] = []
-            dur_val2: int | str = "permanent" if duration == "permanent" else clamp_int(duration, 1, 99)
+            dur_val2: int | str = (
+                "permanent" if duration == "permanent" else clamp_int(duration, 1, 99)
+            )
             for entity in self.entities_in_radius(x, y, radius):
                 if entity.kind == "item" or entity.hp <= 0:
                     continue
@@ -289,22 +346,34 @@ class _EffectsMixin:
             target = self.resolve_target(str(effect.get("target") or "player"))
             if not target:
                 return []
-            amount = clamp_int(effect.get("amount"), 1, 999) if effect.get("amount") is not None else 5
+            amount = (
+                clamp_int(effect.get("amount"), 1, 999)
+                if effect.get("amount") is not None
+                else 5
+            )
             actual = self.heal_entity(target, amount)
             if actual == 0:
                 if target.id == self.state.player_id:
                     return ["Your wounds are already mended."]
-                return [f"{target.name} {self._verb(target, 'are', 'is')} already whole."]
+                return [
+                    f"{target.name} {self._verb(target, 'are', 'is')} already whole."
+                ]
             return [f"{target.name} {self._verb(target, 'heal', 'heals')} {actual} HP."]
         if effect_type == "restore_mana":
             target = self.resolve_target(str(effect.get("target") or "player"))
             if not target:
                 return []
-            amount = clamp_int(effect.get("amount"), 1, 999) if effect.get("amount") is not None else 5
+            amount = (
+                clamp_int(effect.get("amount"), 1, 999)
+                if effect.get("amount") is not None
+                else 5
+            )
             before = target.mana
             target.mana = min(target.max_mana, target.mana + amount)
             gained = target.mana - before
-            return [f"{target.name} {self._verb(target, 'recover', 'recovers')} {gained} mana."]
+            return [
+                f"{target.name} {self._verb(target, 'recover', 'recovers')} {gained} mana."
+            ]
         if effect_type == "teleport":
             target = self.resolve_target(str(effect.get("target") or "player"))
             if not target:
@@ -312,7 +381,9 @@ class _EffectsMixin:
             x = clamp_int(effect.get("x"), 0, self.state.width - 1)
             y = clamp_int(effect.get("y"), 0, self.state.height - 1)
             if self.teleport_entity(target, x, y):
-                return [f"{target.name} {self._verb(target, 'snap', 'snaps')} to another tile."]
+                return [
+                    f"{target.name} {self._verb(target, 'snap', 'snaps')} to another tile."
+                ]
             return ["The teleport folds into a wall and fails."]
         if effect_type in {"push", "pull"}:
             target_str = str(effect.get("target") or "nearest_enemy")
@@ -323,7 +394,10 @@ class _EffectsMixin:
                 targets = [target] if target else []
             if not targets:
                 return []
-            origin = self.resolve_target(str(effect.get("origin") or "player")) or self.state.player
+            origin = (
+                self.resolve_target(str(effect.get("origin") or "player"))
+                or self.state.player
+            )
             moved_total = 0
             moved_names: list[str] = []
             for target in targets[:12]:
@@ -343,14 +417,20 @@ class _EffectsMixin:
             if len(targets) == 1:
                 return [f"{targets[0].name} is moved {moved_total} tile(s)."]
             if moved_names:
-                return [f"{len(moved_names)} target(s) are moved {moved_total} tile(s) total."]
+                return [
+                    f"{len(moved_names)} target(s) are moved {moved_total} tile(s) total."
+                ]
             return ["The force finds no room to move anyone."]
         if effect_type in {"create_tile", "set_tile", "create_tiles"}:
             x, y = self.effect_position(effect)
             tile_name = str(effect.get("tile") or FLOOR).lower()
             tile = tile_from_name(tile_name)
             duration = optional_duration(effect.get("duration"))
-            tags = set(normalize_id(str(tag)) for tag in coerce_list(effect.get("tags")) if str(tag).strip())
+            tags = set(
+                normalize_id(str(tag))
+                for tag in coerce_list(effect.get("tags"))
+                if str(tag).strip()
+            )
             changed = 0
             tile_specs = effect.get("tiles")
             if isinstance(tile_specs, list):
@@ -364,17 +444,40 @@ class _EffectsMixin:
                     if first_spec_tile is None:
                         first_spec_tile = spec_tile
                     spec_duration = optional_duration(spec.get("duration", duration))
-                    spec_tags = set(normalize_id(str(tag)) for tag in coerce_list(spec.get("tags", list(tags))) if str(tag).strip())
+                    spec_tags = set(
+                        normalize_id(str(tag))
+                        for tag in coerce_list(spec.get("tags", list(tags)))
+                        if str(tag).strip()
+                    )
                     if self.set_tile(tx, ty, spec_tile, spec_duration, spec_tags):
                         changed += 1
                 if first_spec_tile is not None:
                     tile = first_spec_tile
             else:
                 radius = clamp_int(effect.get("radius"), 0, 99)
-                hollow = bool(effect.get("hollow") or effect.get("ring") or effect.get("perimeter"))
+                hollow = bool(
+                    effect.get("hollow")
+                    or effect.get("ring")
+                    or effect.get("perimeter")
+                )
                 inner_radius = max(0, radius - 1) if hollow else -1
-                shape = normalize_id(str(effect.get("shape") or effect.get("pattern") or ""))
-                if shape in {"line", "beam", "path", "corridor", "ray", "bridge", "wall", "barrier", "cone", "fan", "scatter", "spray"}:
+                shape = normalize_id(
+                    str(effect.get("shape") or effect.get("pattern") or "")
+                )
+                if shape in {
+                    "line",
+                    "beam",
+                    "path",
+                    "corridor",
+                    "ray",
+                    "bridge",
+                    "wall",
+                    "barrier",
+                    "cone",
+                    "fan",
+                    "scatter",
+                    "spray",
+                }:
                     for tx, ty in self.shape_points(effect, x, y)[:200]:
                         if self.set_tile(tx, ty, tile, duration, tags):
                             changed += 1
@@ -384,14 +487,22 @@ class _EffectsMixin:
                             continue
                         if self.set_tile(tx, ty, tile, duration, tags):
                             changed += 1
-            return [f"Terrain changes to {TILE_NAMES.get(tile, 'strange')} on {changed} tile(s)."]
+            return [
+                f"Terrain changes to {TILE_NAMES.get(tile, 'strange')} on {changed} tile(s)."
+            ]
         if effect_type == "add_status":
             target_str = normalize_id(str(effect.get("target") or "nearest_enemy"))
             status = normalize_id(str(effect.get("status") or "strange"))
-            display_name = str(effect.get("display_name") or effect.get("name") or "").strip() or status.replace("_", " ")
-            expiry_text = str(effect.get("expiry_text") or effect.get("wears_off") or "").strip()
+            display_name = str(
+                effect.get("display_name") or effect.get("name") or ""
+            ).strip() or status.replace("_", " ")
+            expiry_text = str(
+                effect.get("expiry_text") or effect.get("wears_off") or ""
+            ).strip()
             duration = effect.get("duration", 3)
-            dur_val: int | str = "permanent" if duration == "permanent" else clamp_int(duration, 1, 99)
+            dur_val: int | str = (
+                "permanent" if duration == "permanent" else clamp_int(duration, 1, 99)
+            )
             if status not in MECHANICAL_STATUSES:
                 canonical = STATUS_FLAVOR_ALIASES.get(status)
                 if not canonical:
@@ -405,7 +516,9 @@ class _EffectsMixin:
                         ent.status_display[status] = display_name
                     if expiry_text:
                         ent.status_expiry_text[status] = expiry_text
-                return [f"{display_name.title()} spreads to {len(group_targets)} target(s)."]
+                return [
+                    f"{display_name.title()} spreads to {len(group_targets)} target(s)."
+                ]
             target = self.resolve_target(target_str)
             if not target or target.kind == "item":
                 return []
@@ -414,7 +527,9 @@ class _EffectsMixin:
                 target.status_display[status] = display_name
             if expiry_text:
                 target.status_expiry_text[status] = expiry_text
-            return [f"{target.name} {self._verb(target, 'are', 'is')} now {display_name}."]
+            return [
+                f"{target.name} {self._verb(target, 'are', 'is')} now {display_name}."
+            ]
         if effect_type == "remove_status":
             target = self.resolve_target(str(effect.get("target") or "player"))
             if not target:
@@ -422,29 +537,55 @@ class _EffectsMixin:
             status = normalize_id(str(effect.get("status") or ""))
             if status:
                 target.statuses.pop(status, None)
-                return [f"{target.name} {self._verb(target, 'are', 'is')} no longer {status.replace('_', ' ')}."]
+                return [
+                    f"{target.name} {self._verb(target, 'are', 'is')} no longer {status.replace('_', ' ')}."
+                ]
             target.statuses.clear()
             if target.id == self.state.player_id:
                 return ["All statuses leave you."]
             return [f"All statuses leave {target.name}."]
         if effect_type == "summon":
-            name = str(effect.get("name") or effect.get("creature") or effect.get("creature_type") or "borrowed thing")
-            faction = normalize_faction(effect.get("faction"), default="ally", neutral_is_ally=True)
+            name = str(
+                effect.get("name")
+                or effect.get("creature")
+                or effect.get("creature_type")
+                or "borrowed thing"
+            )
+            faction = normalize_faction(
+                effect.get("faction"), default="ally", neutral_is_ally=True
+            )
             count = clamp_int(effect.get("count") or effect.get("quantity") or 1, 1, 6)
             char = str(effect.get("char") or ("a" if faction == "ally" else "e"))[:1]
             hp = clamp_int(effect.get("hp") or 5, 1, 20)
             attack = clamp_int(effect.get("attack") or 2, 0, 8)
             defense = clamp_int(effect.get("defense") or 0, 0, 8)
-            tags = set(normalize_id(str(tag)) for tag in coerce_list(effect.get("tags")) if str(tag).strip())
+            tags = set(
+                normalize_id(str(tag))
+                for tag in coerce_list(effect.get("tags"))
+                if str(tag).strip()
+            )
             spawned = 0
             for attempt in range(count):
-                x, y = self.effect_position(effect) if attempt == 0 else (self.state.player.x, self.state.player.y)
+                x, y = (
+                    self.effect_position(effect)
+                    if attempt == 0
+                    else (self.state.player.x, self.state.player.y)
+                )
                 if not self.can_occupy(x, y):
-                    x, y = self.find_open_tile_near(self.state.player.x, self.state.player.y)
+                    x, y = self.find_open_tile_near(
+                        self.state.player.x, self.state.player.y
+                    )
                 if not self.can_occupy(x, y):
                     continue
                 self.spawn_actor(
-                    name, char, x, y, hp, attack, defense, faction,
+                    name,
+                    char,
+                    x,
+                    y,
+                    hp,
+                    attack,
+                    defense,
+                    faction,
                     "simple" if faction == "enemy" else None,
                     tags=tags,
                     resistances=normalize_numeric_map(effect.get("resistances"), 0, 95),
@@ -453,7 +594,9 @@ class _EffectsMixin:
                 spawned += 1
             if spawned == 0:
                 return [f"{name} tries to arrive, but finds no room."]
-            return [f"{spawned} {name}{'' if spawned == 1 else 's'} {'arrives' if spawned == 1 else 'arrive'}."]
+            return [
+                f"{spawned} {name}{'' if spawned == 1 else 's'} {'arrives' if spawned == 1 else 'arrive'}."
+            ]
         if effect_type == "spawn_item":
             name = str(effect.get("name") or effect.get("item") or "oddment")
             item_type = str(effect.get("item_type") or effect.get("item") or name)
@@ -469,7 +612,11 @@ class _EffectsMixin:
                 item_type,
                 clamp_int(effect.get("quantity"), 1, 99),
                 material=str(effect.get("material") or "") or None,
-                tags=set(normalize_id(str(tag)) for tag in coerce_list(effect.get("tags")) if str(tag).strip()),
+                tags=set(
+                    normalize_id(str(tag))
+                    for tag in coerce_list(effect.get("tags"))
+                    if str(tag).strip()
+                ),
             )
             return [f"{name} appears."]
         if effect_type == "conjure_item":
@@ -479,9 +626,15 @@ class _EffectsMixin:
         if effect_type == "transform_item":
             target_type = normalize_id(str(effect.get("target") or "nearest_item"))
             item = str(effect.get("item") or effect.get("item_type") or "").strip()
-            new_name = str(effect.get("new_name") or effect.get("new_item_type") or "oddment").strip()
+            new_name = str(
+                effect.get("new_name") or effect.get("new_item_type") or "oddment"
+            ).strip()
             new_material = str(effect.get("material") or "").strip() or None
-            new_tags = [normalize_id(str(tag)) for tag in coerce_list(effect.get("tags")) if str(tag).strip()]
+            new_tags = [
+                normalize_id(str(tag))
+                for tag in coerce_list(effect.get("tags"))
+                if str(tag).strip()
+            ]
 
             if not item:
                 return []
@@ -492,20 +645,28 @@ class _EffectsMixin:
                     self.state.inventory[item] = current - 1
                     if self.state.inventory[item] <= 0:
                         del self.state.inventory[item]
-                    self.state.inventory[new_name] = self.state.inventory.get(new_name, 0) + 1
+                    self.state.inventory[new_name] = (
+                        self.state.inventory.get(new_name, 0) + 1
+                    )
                     return [f"The {item} in your inventory becomes {new_name}."]
                 return [f"You have no {item} to transform."]
 
             # Find nearest item entity matching the name
             player = self.state.player
             candidates = [
-                e for e in self.state.entities.values()
-                if e.kind == "item" and e.alive and (item.lower() in e.name.lower() or item.lower() in (e.item_type or "").lower())
+                e
+                for e in self.state.entities.values()
+                if e.kind == "item"
+                and e.alive
+                and (
+                    item.lower() in e.name.lower()
+                    or item.lower() in (e.item_type or "").lower()
+                )
             ]
             if not candidates:
                 return [f"No {item} found to transform."]
             target = min(candidates, key=lambda e: self.distance(player, e))
-            
+
             target.name = new_name
             target.item_type = new_name
             if new_material:
@@ -541,14 +702,20 @@ class _EffectsMixin:
             if "char" in effect:
                 target.char = str(effect["char"])[:1] or target.char
             if "faction" in effect:
-                target.faction = normalize_faction(effect["faction"], default=target.faction)
+                target.faction = normalize_faction(
+                    effect["faction"], default=target.faction
+                )
             if "material" in effect:
                 target.material = str(effect["material"])[:32]
             target.max_hp = clamp_int(effect.get("max_hp", target.max_hp), 1, 99)
             target.hp = clamp_int(effect.get("hp", target.hp), 0, target.max_hp)
             target.attack = clamp_int(effect.get("attack", target.attack), 0, 20)
             target.defense = clamp_int(effect.get("defense", target.defense), 0, 20)
-            target.tags.update(normalize_id(str(tag)) for tag in coerce_list(effect.get("tags")) if str(tag).strip())
+            target.tags.update(
+                normalize_id(str(tag))
+                for tag in coerce_list(effect.get("tags"))
+                if str(tag).strip()
+            )
             if target.id == self.state.player_id:
                 return ["You are transformed."]
             return [f"{target.name} {self._verb(target, 'are', 'is')} transformed."]
@@ -567,39 +734,78 @@ class _EffectsMixin:
                 return []
             if effect_type == "add_tag":
                 target.tags.add(tag)
-                return [f"{target.name} {self._verb(target, 'gain', 'gains')} the {tag} tag."]
+                return [
+                    f"{target.name} {self._verb(target, 'gain', 'gains')} the {tag} tag."
+                ]
             target.tags.discard(tag)
-            return [f"{target.name} {self._verb(target, 'lose', 'loses')} the {tag} tag."]
+            return [
+                f"{target.name} {self._verb(target, 'lose', 'loses')} the {tag} tag."
+            ]
         if effect_type in {"add_resistance", "add_weakness"}:
             target = self.resolve_target(str(effect.get("target") or "player"))
             if not target:
                 return []
-            damage_type = normalize_id(str(effect.get("damage_type") or effect.get("resistance") or "arcane"))
-            amount = clamp_int(effect.get("amount"), 1, 95 if effect_type == "add_resistance" else 200)
-            table = target.resistances if effect_type == "add_resistance" else target.weaknesses
-            table[damage_type] = clamp_int(table.get(damage_type, 0) + amount, 0, 95 if effect_type == "add_resistance" else 200)
+            damage_type = normalize_id(
+                str(effect.get("damage_type") or effect.get("resistance") or "arcane")
+            )
+            amount = clamp_int(
+                effect.get("amount"), 1, 95 if effect_type == "add_resistance" else 200
+            )
+            table = (
+                target.resistances
+                if effect_type == "add_resistance"
+                else target.weaknesses
+            )
+            table[damage_type] = clamp_int(
+                table.get(damage_type, 0) + amount,
+                0,
+                95 if effect_type == "add_resistance" else 200,
+            )
             if effect_type == "add_resistance":
-                return [f"{target.name} {self._verb(target, 'resist', 'resists')} {damage_type}."]
-            return [f"{target.name} {self._verb(target, 'are', 'is')} vulnerable to {damage_type}."]
+                return [
+                    f"{target.name} {self._verb(target, 'resist', 'resists')} {damage_type}."
+                ]
+            return [
+                f"{target.name} {self._verb(target, 'are', 'is')} vulnerable to {damage_type}."
+            ]
         if effect_type == "set_flag":
-            flag = normalize_id(str(effect.get("flag") or effect.get("id") or "unnamed_flag"))
+            flag = normalize_id(
+                str(effect.get("flag") or effect.get("id") or "unnamed_flag")
+            )
             self.state.flags[flag] = effect.get("value", True)
             # The model reaches for debt-flavored flags constantly (audit mining
             # 2026-06: 148 of 152 set_flag uses were "future_debt") — a flag is
             # mechanically inert, so make the debt real: a visible stacking
             # curse now, and a collector already on its way.
-            if any(word in flag for word in ("debt", "owed", "owe", "price", "payment", "reckoning", "collector")):
+            if any(
+                word in flag
+                for word in (
+                    "debt",
+                    "owed",
+                    "owe",
+                    "price",
+                    "payment",
+                    "reckoning",
+                    "collector",
+                )
+            ):
                 return self._incur_wild_debt()
             return [f"World flag set: {flag}."]
         if effect_type == "schedule_event":
-            event = dict(effect.get("event") if isinstance(effect.get("event"), dict) else effect)
+            event = dict(
+                effect.get("event") if isinstance(effect.get("event"), dict) else effect
+            )
             event.pop("type", None)
             event["turns"] = clamp_int(effect.get("turns", event.get("turns")), 1, 999)
-            event["event_type"] = str(effect.get("event_type") or event.get("event_type") or "message")
+            event["event_type"] = str(
+                effect.get("event_type") or event.get("event_type") or "message"
+            )
             self.state.event_timers.append(event)
             return [f"Something has been scheduled in {event['turns']} turn(s)."]
         if effect_type in {"create_trigger", "trigger", "ward"}:
-            trigger_name = normalize_trigger_name(str(effect.get("trigger") or effect.get("on") or "on_next_spell"))
+            trigger_name = normalize_trigger_name(
+                str(effect.get("trigger") or effect.get("on") or "on_next_spell")
+            )
             effects = coerce_list(effect.get("effects") or effect.get("effect"))
             if not effects:
                 return ["The trigger has nothing to do and collapses."]
@@ -625,7 +831,9 @@ class _EffectsMixin:
                 "effects": [dict(raw) for raw in effects[:8] if isinstance(raw, dict)],
             }
             if trigger["duration"] != "permanent":
-                trigger["expires_turn"] = self.state.turn + clamp_int(trigger["duration"], 1, 999)
+                trigger["expires_turn"] = self.state.turn + clamp_int(
+                    trigger["duration"], 1, 999
+                )
             self.state.triggers.append(trigger)
             return [f"{trigger['name']} waits for {trigger_name.replace('_', ' ')}."]
         if effect_type == "create_promise":
@@ -656,14 +864,26 @@ class _EffectsMixin:
         item_name = " ".join(str(effect.get("item") or "").split())[:60]
         if item_name and not what:
             what = "cache"  # prophesied things wait somewhere holdable
-        subject = " ".join(str(effect.get("subject") or what or "a spoken prophecy").split())[:80]
-        text = " ".join(str(effect.get("text") or effect.get("claim") or "").split())[:360]
+        subject = " ".join(
+            str(effect.get("subject") or what or "a spoken prophecy").split()
+        )[:80]
+        text = " ".join(str(effect.get("text") or effect.get("claim") or "").split())[
+            :360
+        ]
         if not text:
             text = f"You spoke it into the world: {subject}."
         salience = clamp_int(effect.get("salience") or 3, 1, 5)
         zone = (self.state.zone_x, self.state.zone_y)
-        claimed = parse_spatial_hint(where, fallback_text=f"{subject} {text}", anchor_zone=zone) if where else None
-        digest = hashlib.sha1(f"{self.state.turn}|{subject}|{text}|{item_name}".encode("utf-8")).hexdigest()[:12]
+        claimed = (
+            parse_spatial_hint(
+                where, fallback_text=f"{subject} {text}", anchor_zone=zone
+            )
+            if where
+            else None
+        )
+        digest = hashlib.sha1(
+            f"{self.state.turn}|{subject}|{text}|{item_name}".encode("utf-8")
+        ).hexdigest()[:12]
         promise = WorldPromise(
             id=f"promise_prophecy_{digest}",
             kind=kind,
@@ -678,72 +898,112 @@ class _EffectsMixin:
             confidence=0.9,  # the wild heard you say it
             what=what,
             claimed_space=claimed,
-            objective=Objective("fetch", {"item": item_name, "quantity": clamp_int(effect.get("quantity") or 1, 1, 5)}) if item_name else None,
+            objective=Objective(
+                "fetch",
+                {
+                    "item": item_name,
+                    "quantity": clamp_int(effect.get("quantity") or 1, 1, 5),
+                },
+            )
+            if item_name
+            else None,
         )
         added = self.add_promises([promise])
         spoken = added[0] if added else promise
         # Engine-authoritative cost floor on top of whatever the resolution charged.
         floor = 3 + salience + (5 if item_name else 0)
-        messages = [message for message in [self._apply_cost({"type": "mana", "amount": floor})] if message]
+        messages = [
+            message
+            for message in [self._apply_cost({"type": "mana", "amount": floor})]
+            if message
+        ]
         if item_name:
             messages.extend(self._incur_wild_debt())
         if spoken.binding is not None:
             messages.append("The world makes room for your words.")
         else:
-            messages.append("Your words drift into the world, too loose yet to bind it.")
+            messages.append(
+                "Your words drift into the world, too loose yet to bind it."
+            )
         return messages
 
     def _incur_wild_debt(self) -> list[str]:
         """One rolling Wild Debt: a stacking curse, a collector already on its way, and
         a threat-promise in the ledger so the journal knows something is coming. The
         timer is the temporal executor — it settles the promise when it fires."""
-        curse_message = self._apply_cost({
-            "type": "curse",
-            "id": "wild_debt",
-            "name": "Wild Debt",
-            "description": "The wild expects repayment. Something is already on its way.",
-        })
-        stacks = self.state.curses["wild_debt"].stacks if "wild_debt" in self.state.curses else 1
-        debt_promise = next((promise for promise in self.state.promises if promise.id == "promise_wild_debt"), None)
+        curse_message = self._apply_cost(
+            {
+                "type": "curse",
+                "id": "wild_debt",
+                "name": "Wild Debt",
+                "description": "The wild expects repayment. Something is already on its way.",
+            }
+        )
+        stacks = (
+            self.state.curses["wild_debt"].stacks
+            if "wild_debt" in self.state.curses
+            else 1
+        )
+        debt_promise = next(
+            (
+                promise
+                for promise in self.state.promises
+                if promise.id == "promise_wild_debt"
+            ),
+            None,
+        )
         if debt_promise is None:
-            self.add_promises([
-                WorldPromise(
-                    id="promise_wild_debt",
-                    kind="threat",
-                    subject="wild debt",
-                    text="The wild expects repayment. Something is already on its way.",
-                    tags=["debt", "collector"],
-                    source="spell:wild_debt",
-                    source_turn=self.state.turn,
-                    origin_zone=(self.state.zone_x, self.state.zone_y),
-                    location=self.state.location_label(),
-                    salience=3,
-                    confidence=0.9,
-                )
-            ])
+            self.add_promises(
+                [
+                    WorldPromise(
+                        id="promise_wild_debt",
+                        kind="threat",
+                        subject="wild debt",
+                        text="The wild expects repayment. Something is already on its way.",
+                        tags=["debt", "collector"],
+                        source="spell:wild_debt",
+                        source_turn=self.state.turn,
+                        origin_zone=(self.state.zone_x, self.state.zone_y),
+                        location=self.state.location_label(),
+                        salience=3,
+                        confidence=0.9,
+                    )
+                ]
+            )
         else:
             # The ledger reopens: a settled debt un-settles when you borrow again.
             debt_promise.status = "unverified"
             debt_promise.source_turn = self.state.turn
-        self.state.event_timers.append({
-            "turns": self.rng.randint(8, 15),
-            "event_type": "summon",
-            "name": "debt collector",
-            "char": "D",
-            "hp": 8 + 2 * stacks,
-            "attack": 3 + stacks,
-            "faction": "enemy",
-            "promise_id": "promise_wild_debt",
-        })
+        self.state.event_timers.append(
+            {
+                "turns": self.rng.randint(8, 15),
+                "event_type": "summon",
+                "name": "debt collector",
+                "char": "D",
+                "hp": 8 + 2 * stacks,
+                "attack": 3 + stacks,
+                "faction": "enemy",
+                "promise_id": "promise_wild_debt",
+            }
+        )
         messages = ["The debt is real. Somewhere, something turns toward you."]
         if curse_message:
             messages.insert(0, curse_message)
         return messages
 
-    def shape_points(self, effect: dict[str, Any], fallback_x: int, fallback_y: int) -> list[tuple[int, int]]:
+    def shape_points(
+        self, effect: dict[str, Any], fallback_x: int, fallback_y: int
+    ) -> list[tuple[int, int]]:
         shape = normalize_id(str(effect.get("shape") or effect.get("pattern") or ""))
-        origin = self.resolve_target(str(effect.get("origin") or effect.get("from") or "player")) or self.state.player
-        target = self.resolve_target(str(effect.get("target") or effect.get("to") or "nearest_enemy"))
+        origin = (
+            self.resolve_target(
+                str(effect.get("origin") or effect.get("from") or "player")
+            )
+            or self.state.player
+        )
+        target = self.resolve_target(
+            str(effect.get("target") or effect.get("to") or "nearest_enemy")
+        )
         end_x, end_y = (target.x, target.y) if target else (fallback_x, fallback_y)
         width = clamp_int(effect.get("width"), 0, 3)
         radius = clamp_int(effect.get("radius"), 1, 12)
@@ -760,12 +1020,16 @@ class _EffectsMixin:
             if dx == 0 and dy == 0:
                 dx = 1
             px, py = -dy, dx
-            half = clamp_int(effect.get("length"), 1, 12) if "length" in effect else radius
+            half = (
+                clamp_int(effect.get("length"), 1, 12) if "length" in effect else radius
+            )
             for step in range(-half, half + 1):
                 wx = end_x + px * step
                 wy = end_y + py * step
                 points.extend(self.points_in_radius(wx, wy, width))
-            return unique_points([(px, py) for px, py in points if self.in_bounds(px, py)])
+            return unique_points(
+                [(px, py) for px, py in points if self.in_bounds(px, py)]
+            )
 
         if shape in {"cone", "fan"}:
             vx = end_x - origin.x
@@ -799,7 +1063,9 @@ class _EffectsMixin:
                 clamp_int(effect.get("x"), 0, self.state.width - 1),
                 clamp_int(effect.get("y"), 0, self.state.height - 1),
             )
-        target = self.resolve_target(str(effect.get("target") or effect.get("center") or ""))
+        target = self.resolve_target(
+            str(effect.get("target") or effect.get("center") or "")
+        )
         if target:
             return target.x, target.y
         player = self.state.player
@@ -839,11 +1105,21 @@ class _EffectsMixin:
 
     def _conjure_item(self, effect: dict[str, Any]) -> list[str]:
         template = item_template(str(effect.get("template") or "generic_object"))
-        count = clamp_int(effect.get("count", effect.get("quantity", 1)), 1, template.max_quantity)
-        name = sanitize_name(str(effect.get("name") or template.item_type), template.item_type)
-        material = sanitize_name(str(effect.get("material") or template.material), template.material, 24)
+        count = clamp_int(
+            effect.get("count", effect.get("quantity", 1)), 1, template.max_quantity
+        )
+        name = sanitize_name(
+            str(effect.get("name") or template.item_type), template.item_type
+        )
+        material = sanitize_name(
+            str(effect.get("material") or template.material), template.material, 24
+        )
         tags = set(template.tags)
-        tags.update(normalize_id(str(tag)) for tag in coerce_list(effect.get("tags")) if str(tag).strip())
+        tags.update(
+            normalize_id(str(tag))
+            for tag in coerce_list(effect.get("tags"))
+            if str(tag).strip()
+        )
         x, y = self.resolve_placement(effect, prefer_unblocked=False)
         self.spawn_item(
             name,
@@ -858,13 +1134,26 @@ class _EffectsMixin:
         return [f"{name} appears."]
 
     def _conjure_creature(self, effect: dict[str, Any]) -> list[str]:
-        template = creature_template(str(effect.get("template") or effect.get("creature_type") or "small_beast"))
-        count = clamp_int(effect.get("count") or effect.get("quantity") or 1, 1, template.max_count)
-        name = sanitize_name(str(effect.get("name") or template.id.replace("_", " ")), template.id.replace("_", " "))
-        faction = normalize_faction(effect.get("faction"), default="ally", neutral_is_ally=True)
+        template = creature_template(
+            str(effect.get("template") or effect.get("creature_type") or "small_beast")
+        )
+        count = clamp_int(
+            effect.get("count") or effect.get("quantity") or 1, 1, template.max_count
+        )
+        name = sanitize_name(
+            str(effect.get("name") or template.id.replace("_", " ")),
+            template.id.replace("_", " "),
+        )
+        faction = normalize_faction(
+            effect.get("faction"), default="ally", neutral_is_ally=True
+        )
         char = sanitize_char(str(effect.get("char") or template.char), template.char)
         tags = set(template.tags)
-        tags.update(normalize_id(str(tag)) for tag in coerce_list(effect.get("tags")) if str(tag).strip())
+        tags.update(
+            normalize_id(str(tag))
+            for tag in coerce_list(effect.get("tags"))
+            if str(tag).strip()
+        )
         resistances = dict(template.resistances)
         resistances.update(normalize_numeric_map(effect.get("resistances"), 0, 95))
         weaknesses = dict(template.weaknesses)
@@ -891,9 +1180,13 @@ class _EffectsMixin:
             spawned += 1
         if spawned == 0:
             return [f"{name} tries to arrive, but finds no room."]
-        return [f"{spawned} {name}{'' if spawned == 1 else 's'} {'arrives' if spawned == 1 else 'arrive'}."]
+        return [
+            f"{spawned} {name}{'' if spawned == 1 else 's'} {'arrives' if spawned == 1 else 'arrive'}."
+        ]
 
-    def resolve_placement(self, effect: dict[str, Any], prefer_unblocked: bool, attempt: int = 0) -> tuple[int, int]:
+    def resolve_placement(
+        self, effect: dict[str, Any], prefer_unblocked: bool, attempt: int = 0
+    ) -> tuple[int, int]:
         placement = normalize_id(str(effect.get("placement") or "near_target"))
         if "x" in effect and "y" in effect:
             x = clamp_int(effect.get("x"), 0, self.state.width - 1)
@@ -906,14 +1199,22 @@ class _EffectsMixin:
         player = self.state.player
         anchor = target if target is not None else player
         if placement == "target_tile":
-            return (anchor.x, anchor.y) if not prefer_unblocked else self.find_open_tile_near(anchor.x, anchor.y)
+            return (
+                (anchor.x, anchor.y)
+                if not prefer_unblocked
+                else self.find_open_tile_near(anchor.x, anchor.y)
+            )
         if placement == "near_player":
             return self.find_open_tile_near(player.x, player.y)
         if placement == "visible_floor":
             return self.random_visible_floor()
         if placement == "near_walls":
             near_wall = self.find_open_tile_near_wall(anchor.x, anchor.y, attempt)
-            return near_wall if near_wall is not None else self.find_open_tile_near(anchor.x, anchor.y)
+            return (
+                near_wall
+                if near_wall is not None
+                else self.find_open_tile_near(anchor.x, anchor.y)
+            )
         return self.find_open_tile_near(anchor.x, anchor.y)
 
     def random_visible_floor(self) -> tuple[int, int]:
@@ -927,14 +1228,19 @@ class _EffectsMixin:
         player = self.state.player
         return self.find_open_tile_near(player.x, player.y)
 
-    def find_open_tile_near_wall(self, x: int, y: int, attempt: int = 0) -> tuple[int, int] | None:
+    def find_open_tile_near_wall(
+        self, x: int, y: int, attempt: int = 0
+    ) -> tuple[int, int] | None:
         candidates: list[tuple[int, int]] = []
         for radius in range(1, 10):
             for ty in range(y - radius, y + radius + 1):
                 for tx in range(x - radius, x + radius + 1):
                     if not self.can_occupy(tx, ty):
                         continue
-                    if any(self.tile_at(tx + dx, ty + dy) == WALL for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]):
+                    if any(
+                        self.tile_at(tx + dx, ty + dy) == WALL
+                        for dx, dy in [(0, -1), (0, 1), (-1, 0), (1, 0)]
+                    ):
                         candidates.append((tx, ty))
             if candidates:
                 self.rng.shuffle(candidates)
@@ -952,4 +1258,3 @@ class _EffectsMixin:
                 if self.can_occupy(tx, ty):
                     return tx, ty
         return self.state.player.x, self.state.player.y
-

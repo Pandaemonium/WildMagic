@@ -11,15 +11,32 @@ from .replay import save_replay
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Play Wild Magic from the terminal.")
     parser.add_argument("--seed", type=int, default=None)
-    parser.add_argument("--scenario", default="dungeon", choices=["dungeon", "test_chamber", "empire_compound", "frontier", "town"])
+    parser.add_argument(
+        "--scenario",
+        default="dungeon",
+        choices=["dungeon", "test_chamber", "empire_compound", "frontier", "town"],
+    )
     parser.add_argument("--provider", default=None, choices=["auto", "mock", "ollama"])
-    parser.add_argument("--record", type=Path, default=None, help="Write a replay JSON file at exit.")
-    parser.add_argument("--script", type=Path, default=None, help="Read commands from a text file.")
-    parser.add_argument("--command", action="append", default=[], help="Run one command. Can be passed more than once.")
-    parser.add_argument("--no-render", action="store_true", help="Only print command results.")
+    parser.add_argument(
+        "--record", type=Path, default=None, help="Write a replay JSON file at exit."
+    )
+    parser.add_argument(
+        "--script", type=Path, default=None, help="Read commands from a text file."
+    )
+    parser.add_argument(
+        "--command",
+        action="append",
+        default=[],
+        help="Run one command. Can be passed more than once.",
+    )
+    parser.add_argument(
+        "--no-render", action="store_true", help="Only print command results."
+    )
     args = parser.parse_args(argv)
 
-    session = GameSession(seed=args.seed, scenario=args.scenario, provider_name=args.provider)
+    session = GameSession(
+        seed=args.seed, scenario=args.scenario, provider_name=args.provider
+    )
     try:
         commands = load_commands(args)
         interactive = not commands and sys.stdin.isatty()
@@ -84,7 +101,12 @@ def render_screen(session: GameSession) -> str:
     lines = render_map(session)
     state = session.engine.state
     player = state.player
-    inventory = ", ".join(f"{name} x{amount}" for name, amount in sorted(state.inventory.items())) or "empty"
+    inventory = (
+        ", ".join(
+            f"{name} x{amount}" for name, amount in sorted(state.inventory.items())
+        )
+        or "empty"
+    )
     curses = ", ".join(curse.name for curse in state.curses.values()) or "none"
     if state.scenario == "frontier":
         location = f"Zone ({state.zone_x},{state.zone_y}) [{state.zone_type}]"
@@ -120,10 +142,14 @@ def render_map(session: GameSession) -> list[str]:
         for entity in state.entities.values()
         if entity.kind != "item" or entity.alive
     ]
-    for entity in sorted(drawable_entities, key=lambda item: (item.kind == "player", item.kind != "item")):
+    for entity in sorted(
+        drawable_entities, key=lambda item: (item.kind == "player", item.kind != "item")
+    ):
         revealed = "revealed" in entity.statuses
         if engine.in_bounds(entity.x, entity.y) and (
-            entity.id == state.player_id or engine.is_visible(entity.x, entity.y) or revealed
+            entity.id == state.player_id
+            or engine.is_visible(entity.x, entity.y)
+            or revealed
         ):
             rows[entity.y][entity.x] = entity.char
     return ["".join(row) for row in rows]

@@ -26,7 +26,10 @@ def _delayed_arrival_fallback_from_spell(spell: str) -> dict[str, Any] | None:
         "severity": "moderate",
         "outcome_text": f"The spell takes a simpler shape: {name} is due soon.",
         "effects": [effect],
-        "costs": [{"type": "mana", "amount": 3}, {"type": "status", "status": "marked", "duration": 4}],
+        "costs": [
+            {"type": "mana", "amount": 3},
+            {"type": "status", "status": "marked", "duration": 4},
+        ],
         "rejected_reason": None,
         "fallback": "local_delayed_arrival",
     }
@@ -52,9 +55,14 @@ def _delayed_arrival_effect_from_text(text: str) -> dict[str, Any] | None:
             "nine": 9,
             "ten": 10,
         }
-        word_turns = re.search(r"\b(?:in|after)\s+(one|two|three|four|five|six|seven|eight|nine|ten)\s+turn", normalized)
+        word_turns = re.search(
+            r"\b(?:in|after)\s+(one|two|three|four|five|six|seven|eight|nine|ten)\s+turn",
+            normalized,
+        )
         turns = word_numbers.get(word_turns.group(1), 3) if word_turns else 3
-    if not any(word in normalized for word in ["arrive", "appears", "appear", "summon"]):
+    if not any(
+        word in normalized for word in ["arrive", "appears", "appear", "summon"]
+    ):
         return None
 
     name = "debt collector"
@@ -69,7 +77,11 @@ def _delayed_arrival_effect_from_text(text: str) -> dict[str, Any] | None:
             if candidate:
                 name = candidate[:40]
                 break
-    faction = "ally" if any(word in normalized for word in ["friendly", "ally", "helpful"]) else "enemy"
+    faction = (
+        "ally"
+        if any(word in normalized for word in ["friendly", "ally", "helpful"])
+        else "enemy"
+    )
     return {
         "type": "schedule_event",
         "turns": turns,
@@ -103,12 +115,25 @@ def _force_wave_fallback_from_spell(spell: str) -> dict[str, Any] | None:
     )
     has_target = any(
         word in normalized
-        for word in ["enemy", "enemies", "foe", "foes", "target", "monster", "creature", "goblin", "slime"]
+        for word in [
+            "enemy",
+            "enemies",
+            "foe",
+            "foes",
+            "target",
+            "monster",
+            "creature",
+            "goblin",
+            "slime",
+        ]
     )
     if not (has_impulse and has_target):
         return None
 
-    area = any(word in normalized for word in ["across", "rolling", "all", "room", "floor", "wave"])
+    area = any(
+        word in normalized
+        for word in ["across", "rolling", "all", "room", "floor", "wave"]
+    )
     if area:
         effects = [
             {
@@ -120,13 +145,31 @@ def _force_wave_fallback_from_spell(spell: str) -> dict[str, Any] | None:
                 "include_player": False,
                 "affects": "enemies",
             },
-            {"type": "push", "target": "all_enemies", "origin": "player", "distance": 2},
+            {
+                "type": "push",
+                "target": "all_enemies",
+                "origin": "player",
+                "distance": 2,
+            },
         ]
-        costs = [{"type": "mana", "amount": 5}, {"type": "status", "status": "slowed", "duration": 1}]
+        costs = [
+            {"type": "mana", "amount": 5},
+            {"type": "status", "status": "slowed", "duration": 1},
+        ]
     else:
         effects = [
-            {"type": "damage", "target": "nearest_enemy", "amount": 4, "damage_type": "force"},
-            {"type": "push", "target": "nearest_enemy", "origin": "player", "distance": 3},
+            {
+                "type": "damage",
+                "target": "nearest_enemy",
+                "amount": 4,
+                "damage_type": "force",
+            },
+            {
+                "type": "push",
+                "target": "nearest_enemy",
+                "origin": "player",
+                "distance": 3,
+            },
         ]
         costs = [{"type": "mana", "amount": 4}]
     return {

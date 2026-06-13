@@ -147,7 +147,10 @@ def region_prompt_block(region_style: dict | None) -> str:
     instructions, at modest token cost)."""
     if not region_style:
         return ""
-    lines = ["", f"Region: the player is in {region_style.get('name', 'unknown country')}."]
+    lines = [
+        "",
+        f"Region: the player is in {region_style.get('name', 'unknown country')}.",
+    ]
     voice = (region_style.get("voice") or "").strip()
     if voice:
         lines.append(f"Region voice for outcome_text: {voice}")

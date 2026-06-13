@@ -13,26 +13,180 @@ NPC_PERCEPTION_RADIUS = 6
 
 
 # (name, char, hp, attack, defense, ai, tags, resistances, weaknesses)
-WILD_ENEMY_TEMPLATES: list[tuple[str, str, int, int, int, str, set[str], dict[str, int], dict[str, int]]] = [
-    ("goblin cutpurse", "g", 8, 3, 0, "goblin", {"goblin", "humanoid", "flesh"}, {}, {}),
-    ("glass bat", "b", 5, 2, 0, "bat", {"beast", "glass"}, {"poison": 25}, {"force": 25}),
-    ("ash slime", "s", 10, 2, 1, "slime", {"slime", "ash"}, {"fire": 35, "poison": 50}, {"frost": 25}),
-    ("bone skeleton", "k", 7, 3, 1, "simple", {"undead", "bone"}, {"poison": 100, "frost": 50}, {"force": 50, "radiant": 50}),
+WILD_ENEMY_TEMPLATES: list[
+    tuple[str, str, int, int, int, str, set[str], dict[str, int], dict[str, int]]
+] = [
+    (
+        "goblin cutpurse",
+        "g",
+        8,
+        3,
+        0,
+        "goblin",
+        {"goblin", "humanoid", "flesh"},
+        {},
+        {},
+    ),
+    (
+        "glass bat",
+        "b",
+        5,
+        2,
+        0,
+        "bat",
+        {"beast", "glass"},
+        {"poison": 25},
+        {"force": 25},
+    ),
+    (
+        "ash slime",
+        "s",
+        10,
+        2,
+        1,
+        "slime",
+        {"slime", "ash"},
+        {"fire": 35, "poison": 50},
+        {"frost": 25},
+    ),
+    (
+        "bone skeleton",
+        "k",
+        7,
+        3,
+        1,
+        "simple",
+        {"undead", "bone"},
+        {"poison": 100, "frost": 50},
+        {"force": 50, "radiant": 50},
+    ),
     ("cave spider", "x", 6, 2, 0, "simple", {"beast", "spider"}, {}, {"fire": 25}),
-    ("shadow wraith", "W", 4, 4, 0, "simple", {"undead", "shadow"}, {"physical": 25, "poison": 100}, {"radiant": 75, "fire": 25}),
-    ("fungal crawler", "c", 9, 2, 0, "simple", {"beast", "fungus"}, {"acid": 50}, {"fire": 50}),
-    ("fen archer", "a", 6, 3, 0, "goblin", {"goblin", "humanoid", "flesh", "ranged"}, {}, {"fire": 25}),
-    ("husk sentinel", "n", 14, 3, 3, "simple", {"construct", "stone", "stationary"}, {"physical": 25, "poison": 100}, {"force": 50}),
-    ("carrion rat", "r", 4, 2, 0, "simple", {"beast", "vermin", "scavenger"}, {"poison": 50}, {}),
-    ("bog hexweaver", "v", 7, 2, 0, "goblin", {"goblin", "humanoid", "caster", "summoner"}, {}, {"physical": 10}),
+    (
+        "shadow wraith",
+        "W",
+        4,
+        4,
+        0,
+        "simple",
+        {"undead", "shadow"},
+        {"physical": 25, "poison": 100},
+        {"radiant": 75, "fire": 25},
+    ),
+    (
+        "fungal crawler",
+        "c",
+        9,
+        2,
+        0,
+        "simple",
+        {"beast", "fungus"},
+        {"acid": 50},
+        {"fire": 50},
+    ),
+    (
+        "fen archer",
+        "a",
+        6,
+        3,
+        0,
+        "goblin",
+        {"goblin", "humanoid", "flesh", "ranged"},
+        {},
+        {"fire": 25},
+    ),
+    (
+        "husk sentinel",
+        "n",
+        14,
+        3,
+        3,
+        "simple",
+        {"construct", "stone", "stationary"},
+        {"physical": 25, "poison": 100},
+        {"force": 50},
+    ),
+    (
+        "carrion rat",
+        "r",
+        4,
+        2,
+        0,
+        "simple",
+        {"beast", "vermin", "scavenger"},
+        {"poison": 50},
+        {},
+    ),
+    (
+        "bog hexweaver",
+        "v",
+        7,
+        2,
+        0,
+        "goblin",
+        {"goblin", "humanoid", "caster", "summoner"},
+        {},
+        {"physical": 10},
+    ),
 ]
 
-LEGION_ENEMY_TEMPLATES: list[tuple[str, str, int, int, int, str, set[str], dict[str, int], dict[str, int]]] = [
-    ("drill initiate", "i", 6, 2, 0, "legion", {"empire", "human", "soldier", "disciplined"}, {}, {"force": 25}),
-    ("legion spearman", "l", 9, 3, 1, "legion", {"empire", "human", "soldier", "disciplined"}, {"physical": 15}, {}),
-    ("wall sergeant", "m", 10, 3, 2, "legion", {"empire", "human", "soldier", "officer", "disciplined"}, {"physical": 15}, {}),
-    ("iron chaplain", "h", 7, 2, 1, "legion", {"empire", "human", "priest", "disciplined"}, {"radiant": 25}, {"poison": 25}),
-    ("exemplar of the line", "e", 12, 4, 2, "legion", {"empire", "human", "soldier", "elite", "disciplined"}, {"physical": 25}, {}),
+LEGION_ENEMY_TEMPLATES: list[
+    tuple[str, str, int, int, int, str, set[str], dict[str, int], dict[str, int]]
+] = [
+    (
+        "drill initiate",
+        "i",
+        6,
+        2,
+        0,
+        "legion",
+        {"empire", "human", "soldier", "disciplined"},
+        {},
+        {"force": 25},
+    ),
+    (
+        "legion spearman",
+        "l",
+        9,
+        3,
+        1,
+        "legion",
+        {"empire", "human", "soldier", "disciplined"},
+        {"physical": 15},
+        {},
+    ),
+    (
+        "wall sergeant",
+        "m",
+        10,
+        3,
+        2,
+        "legion",
+        {"empire", "human", "soldier", "officer", "disciplined"},
+        {"physical": 15},
+        {},
+    ),
+    (
+        "iron chaplain",
+        "h",
+        7,
+        2,
+        1,
+        "legion",
+        {"empire", "human", "priest", "disciplined"},
+        {"radiant": 25},
+        {"poison": 25},
+    ),
+    (
+        "exemplar of the line",
+        "e",
+        12,
+        4,
+        2,
+        "legion",
+        {"empire", "human", "soldier", "elite", "disciplined"},
+        {"physical": 25},
+        {},
+    ),
 ]
 
 # Tag-pairs whose bearers are mutually hostile, on top of the baseline
@@ -105,24 +259,54 @@ ITEM_USE_SPECS: dict[str, dict[str, Any]] = {
         "message": "You drag the {item} across your palm. Your strikes feel sharper.",
     },
     "bone_shard": {
-        "effects": [{"kind": "damage_nearest", "range": 12, "amount": 4, "damage_type": "physical", "required": True}],
+        "effects": [
+            {
+                "kind": "damage_nearest",
+                "range": 12,
+                "amount": 4,
+                "damage_type": "physical",
+                "required": True,
+            }
+        ],
         "message": "You hurl the {item}. {target} takes {amount} damage.",
         "failure": "No enemy is close enough to throw at.",
     },
     "viscous_residue": {
-        "effects": [{"kind": "status_nearest", "range": 8, "status": "poisoned", "duration": 4, "required": True}],
+        "effects": [
+            {
+                "kind": "status_nearest",
+                "range": 8,
+                "status": "poisoned",
+                "duration": 4,
+                "required": True,
+            }
+        ],
         "message": "You fling the {item}. {target} is poisoned.",
         "failure": "No enemy to throw this at.",
     },
     "metal_scrap": {
-        "effects": [{"kind": "damage_nearest", "range": 6, "amount_min": 3, "amount_max": 6, "damage_type": "physical", "required": True}],
+        "effects": [
+            {
+                "kind": "damage_nearest",
+                "range": 6,
+                "amount_min": 3,
+                "amount_max": 6,
+                "damage_type": "physical",
+                "required": True,
+            }
+        ],
         "message": "You bash with the {item}. {target} takes {amount} damage.",
         "failure": "No enemy nearby.",
     },
     "arcane_residue": {
         "effects": [
             {"kind": "restore_mana", "amount": 3},
-            {"kind": "damage_nearest", "range": 8, "amount": 3, "damage_type": "arcane"},
+            {
+                "kind": "damage_nearest",
+                "range": 8,
+                "amount": 3,
+                "damage_type": "arcane",
+            },
         ],
         "message": "The {item} sparks. You gain {mana} mana. {target_clause}",
     },
@@ -146,22 +330,34 @@ ITEM_USE_SPECS: dict[str, dict[str, Any]] = {
 
 TRAP_SPECS: dict[str, dict[str, Any]] = {
     "trap_spike": {
-        "damage": 4, "damage_type": "physical", "status": "bleeding", "duration": 3,
+        "damage": 4,
+        "damage_type": "physical",
+        "status": "bleeding",
+        "duration": 3,
         "message": "Hidden spikes punch up through the floor!",
         "message_other": "Hidden spikes punch up under {name}!",
     },
     "trap_gas": {
-        "damage": 2, "damage_type": "poison", "status": "poisoned", "duration": 4,
+        "damage": 2,
+        "damage_type": "poison",
+        "status": "poisoned",
+        "duration": 4,
         "message": "A hidden vent hisses open, choking you in foul gas!",
         "message_other": "A hidden vent chokes {name} in foul gas!",
     },
     "trap_flame": {
-        "damage": 3, "damage_type": "fire", "status": "burning", "duration": 3,
+        "damage": 3,
+        "damage_type": "fire",
+        "status": "burning",
+        "duration": 3,
         "message": "A hidden nozzle roars, washing you in flame!",
         "message_other": "A hidden nozzle washes {name} in flame!",
     },
     "trap_frost": {
-        "damage": 2, "damage_type": "frost", "status": "slowed", "duration": 3,
+        "damage": 2,
+        "damage_type": "frost",
+        "status": "slowed",
+        "duration": 3,
         "message": "A hidden rune flares, and killing frost bites into you!",
         "message_other": "A hidden rune bites {name} with killing frost!",
     },
@@ -206,21 +402,50 @@ DEFAULT_ITEM_USE_SPEC: dict[str, Any] = {
 }
 
 
-TRADE_KEYWORDS = frozenset({
-    "trade", "trades", "traded", "trading",
-    "sell", "sells", "sold", "selling",
-    "buy", "buys", "bought", "buying",
-    "barter", "bartering",
-    "deal", "deals",
-    "offer", "offers", "offered", "offering",
-    "exchange", "exchanges", "exchanging",
-    "swap", "swaps", "swapping",
-    "purchase", "purchases", "purchasing",
-    "haggle", "haggling",
-    "wares", "goods", "merchandise",
-    "gold", "coin", "coins",
-    "price", "prices", "priced",
-})
+TRADE_KEYWORDS = frozenset(
+    {
+        "trade",
+        "trades",
+        "traded",
+        "trading",
+        "sell",
+        "sells",
+        "sold",
+        "selling",
+        "buy",
+        "buys",
+        "bought",
+        "buying",
+        "barter",
+        "bartering",
+        "deal",
+        "deals",
+        "offer",
+        "offers",
+        "offered",
+        "offering",
+        "exchange",
+        "exchanges",
+        "exchanging",
+        "swap",
+        "swaps",
+        "swapping",
+        "purchase",
+        "purchases",
+        "purchasing",
+        "haggle",
+        "haggling",
+        "wares",
+        "goods",
+        "merchandise",
+        "gold",
+        "coin",
+        "coins",
+        "price",
+        "prices",
+        "priced",
+    }
+)
 
 
 def scan_for_trade_intent(message: str, reply: str) -> bool:
@@ -327,7 +552,9 @@ _TOWN_SITUATIONS: list[str] = [
     "Someone new arrived claiming to own something here, and the paperwork looks real",
 ]
 
-_TOWN_GEN_TIMEOUT = 90  # seconds to wait for background LLM town generation before falling back to mock
+_TOWN_GEN_TIMEOUT = (
+    90  # seconds to wait for background LLM town generation before falling back to mock
+)
 
 _TOWN_SETTLEMENT_TYPES: list[tuple[str, int, int]] = [
     ("hamlet", 2, 3),

@@ -34,8 +34,18 @@ from .config import get_config_value  # noqa: E402
 from .speleval_corpus import CORPUS  # noqa: E402
 
 SYMBOLIC_TARGETS = {
-    "player", "self", "caster", "nearest_enemy", "all_enemies", "enemies",
-    "all", "non_player", "allies", "any", "trigger_target", "trigger_source",
+    "player",
+    "self",
+    "caster",
+    "nearest_enemy",
+    "all_enemies",
+    "enemies",
+    "all",
+    "non_player",
+    "allies",
+    "any",
+    "trigger_target",
+    "trigger_source",
 }
 
 
@@ -52,7 +62,9 @@ def _valid_target_names(context: dict[str, Any] | None) -> set[str]:
     return valid
 
 
-def _hallucinated_targets(data: dict[str, Any] | None, context: dict[str, Any] | None) -> list[str]:
+def _hallucinated_targets(
+    data: dict[str, Any] | None, context: dict[str, Any] | None
+) -> list[str]:
     if not data:
         return []
     valid = _valid_target_names(context)
@@ -93,7 +105,9 @@ def _exploit_leaks(spell: str, data: dict[str, Any] | None) -> list[str]:
     return leaks
 
 
-def run_live(provider_name: str, kinds: set[str], limit: int | None, seed: int) -> dict[str, Any]:
+def run_live(
+    provider_name: str, kinds: set[str], limit: int | None, seed: int
+) -> dict[str, Any]:
     from .actions import GameSession
 
     entries = [e for e in CORPUS if e[1] in kinds]
@@ -102,7 +116,9 @@ def run_live(provider_name: str, kinds: set[str], limit: int | None, seed: int) 
 
     rows: list[dict[str, Any]] = []
     for index, (spell, kind, intent) in enumerate(entries, 1):
-        session = GameSession(seed=seed, scenario="test_chamber", provider_name=provider_name)
+        session = GameSession(
+            seed=seed, scenario="test_chamber", provider_name=provider_name
+        )
         started = time.perf_counter()
         result = session.cast_wild(spell, record=False)
         latency = time.perf_counter() - started
@@ -113,25 +129,38 @@ def run_live(provider_name: str, kinds: set[str], limit: int | None, seed: int) 
         accepted = bool(data) and data.get("accepted") is not False and not technical
         rejected = bool(data) and data.get("accepted") is False
         halluc = _hallucinated_targets(data, result.llm_context) if accepted else []
-        leaks = _exploit_leaks(spell, data) if kind == "exploit" and not technical else []
+        leaks = (
+            _exploit_leaks(spell, data) if kind == "exploit" and not technical else []
+        )
 
-        rows.append({
-            "spell": spell,
-            "kind": kind,
-            "intent": intent,
-            "technical_failure": technical,
-            "accepted": accepted,
-            "rejected": rejected,
-            "error": record.get("error"),
-            "effect_types": [str(e.get("type")) for e in (data.get("effects") or []) if isinstance(e, dict)] if data else [],
-            "n_costs": len(data.get("costs") or []) if data else 0,
-            "hallucinated_targets": halluc,
-            "exploit_leaks": leaks,
-            "latency_s": round(latency, 3),
-        })
+        rows.append(
+            {
+                "spell": spell,
+                "kind": kind,
+                "intent": intent,
+                "technical_failure": technical,
+                "accepted": accepted,
+                "rejected": rejected,
+                "error": record.get("error"),
+                "effect_types": [
+                    str(e.get("type"))
+                    for e in (data.get("effects") or [])
+                    if isinstance(e, dict)
+                ]
+                if data
+                else [],
+                "n_costs": len(data.get("costs") or []) if data else 0,
+                "hallucinated_targets": halluc,
+                "exploit_leaks": leaks,
+                "latency_s": round(latency, 3),
+            }
+        )
         status = "TECH " if technical else ("rej  " if rejected else "ok   ")
         flags = (" HALLUC" if halluc else "") + (" LEAK" if leaks else "")
-        print(f"[{index:3d}/{len(entries)}] {status}{latency:6.2f}s  {kind:8s} {intent:11s} {spell[:58]!r}{flags}", flush=True)
+        print(
+            f"[{index:3d}/{len(entries)}] {status}{latency:6.2f}s  {kind:8s} {intent:11s} {spell[:58]!r}{flags}",
+            flush=True,
+        )
 
     return {"mode": "live", "provider": provider_name, "rows": rows}
 
@@ -155,7 +184,9 @@ def summarize_live(report: dict[str, Any]) -> None:
 
     print()
     print(f"SPELL EVAL REPORT  provider={report['provider']}  n={n}")
-    print(f"  resolved {pct(accepted)}   rejected {pct(rejected)}   technical {pct(technical)}   hallucinated-target rows {halluc}")
+    print(
+        f"  resolved {pct(accepted)}   rejected {pct(rejected)}   technical {pct(technical)}   hallucinated-target rows {halluc}"
+    )
     print(f"  latency mean {sum(latencies) / n:.2f}s   p90 {p90:.2f}s")
 
     by_group: dict[str, Counter] = defaultdict(Counter)
@@ -174,7 +205,10 @@ def summarize_live(report: dict[str, Any]) -> None:
 
     effect_types = Counter(t for r in rows for t in r["effect_types"])
     print()
-    print("  top effect types:", ", ".join(f"{t} x{c}" for t, c in effect_types.most_common(10)))
+    print(
+        "  top effect types:",
+        ", ".join(f"{t} x{c}" for t, c in effect_types.most_common(10)),
+    )
 
     exploit_rows = [r for r in rows if r["kind"] == "exploit"]
     if exploit_rows:
@@ -231,7 +265,9 @@ def run_audit_replay(path: str) -> dict[str, Any]:
 
     print(f"AUDIT REPLAY  {path}")
     print(f"  records with raw response: {total} (skipped {no_raw} without one)")
-    print(f"  parse+validate OK under current code: {now_ok} ({100.0 * now_ok / max(total, 1):.1f}%)")
+    print(
+        f"  parse+validate OK under current code: {now_ok} ({100.0 * now_ok / max(total, 1):.1f}%)"
+    )
     print(f"  improvements (failed then, passes now): {improvements}")
     print(f"  REGRESSIONS (passed then, fails now): {len(regressions)}")
     for spell, error in regressions[:15]:
@@ -240,20 +276,41 @@ def run_audit_replay(path: str) -> dict[str, Any]:
         print("  current failure reasons:")
         for reason, count in validation_errors.most_common(8):
             print(f"    {count:4d}  {reason}")
-    return {"mode": "audit", "total": total, "now_ok": now_ok,
-            "improvements": improvements, "regressions": len(regressions)}
+    return {
+        "mode": "audit",
+        "total": total,
+        "now_ok": now_ok,
+        "improvements": improvements,
+        "regressions": len(regressions),
+    }
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--provider", default=get_config_value("WILDMAGIC_PROVIDER", "mock"))
-    parser.add_argument("--kinds", default="common,creative,exploit",
-                        help="comma-separated subset of: common,creative,exploit")
+    parser = argparse.ArgumentParser(
+        description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
+    parser.add_argument(
+        "--provider", default=get_config_value("WILDMAGIC_PROVIDER", "mock")
+    )
+    parser.add_argument(
+        "--kinds",
+        default="common,creative,exploit",
+        help="comma-separated subset of: common,creative,exploit",
+    )
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--seed", type=int, default=123)
-    parser.add_argument("--json", dest="json_path", default=None, help="also write the full report as JSON")
-    parser.add_argument("--from-audit", dest="audit_path", default=None,
-                        help="offline mode: re-validate recorded raw responses from this JSONL file")
+    parser.add_argument(
+        "--json",
+        dest="json_path",
+        default=None,
+        help="also write the full report as JSON",
+    )
+    parser.add_argument(
+        "--from-audit",
+        dest="audit_path",
+        default=None,
+        help="offline mode: re-validate recorded raw responses from this JSONL file",
+    )
     args = parser.parse_args(argv)
 
     if args.audit_path:

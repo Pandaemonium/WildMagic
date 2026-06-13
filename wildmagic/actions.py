@@ -13,7 +13,12 @@ from .canon import (
     make_canon_provider,
     resolve_canon,
 )
-from .config import canon_prewarm_enabled, canon_prewarm_limit, flesh_enabled, lore_enabled
+from .config import (
+    canon_prewarm_enabled,
+    canon_prewarm_limit,
+    flesh_enabled,
+    lore_enabled,
+)
 from .determinism import stable_seed
 from .engine import GameEngine
 from .flesh import (
@@ -165,33 +170,68 @@ class GameSession:
         )
         self.provider = provider or make_provider(provider_name)
         self.provider_label = getattr(self.provider, "name", "unknown")
-        self.dialogue_provider = dialogue_provider or make_dialogue_provider(dialogue_provider_name)
-        self.dialogue_provider_label = getattr(self.dialogue_provider, "name", "unknown")
+        self.dialogue_provider = dialogue_provider or make_dialogue_provider(
+            dialogue_provider_name
+        )
+        self.dialogue_provider_label = getattr(
+            self.dialogue_provider, "name", "unknown"
+        )
         self.trade_provider = trade_provider or make_trade_provider(trade_provider_name)
         self.trade_provider_label = getattr(self.trade_provider, "name", "unknown")
         resolved_lore_provider_name = lore_provider_name
-        if resolved_lore_provider_name is None and provider_name in {"mock", "ollama", "auto"}:
+        if resolved_lore_provider_name is None and provider_name in {
+            "mock",
+            "ollama",
+            "auto",
+        }:
             resolved_lore_provider_name = provider_name
-        self.lore_provider = lore_provider or make_lore_provider(resolved_lore_provider_name)
+        self.lore_provider = lore_provider or make_lore_provider(
+            resolved_lore_provider_name
+        )
         self.lore_provider_label = getattr(self.lore_provider, "name", "unknown")
         resolved_flesh_provider_name = flesh_provider_name
-        if resolved_flesh_provider_name is None and provider_name in {"mock", "ollama", "auto"}:
+        if resolved_flesh_provider_name is None and provider_name in {
+            "mock",
+            "ollama",
+            "auto",
+        }:
             resolved_flesh_provider_name = provider_name
-        self.flesh_provider = flesh_provider or make_flesh_provider(resolved_flesh_provider_name)
+        self.flesh_provider = flesh_provider or make_flesh_provider(
+            resolved_flesh_provider_name
+        )
         self.flesh_provider_label = getattr(self.flesh_provider, "name", "unknown")
         resolved_canon_provider_name = canon_provider_name
-        if resolved_canon_provider_name is None and provider_name in {"mock", "ollama", "auto"}:
+        if resolved_canon_provider_name is None and provider_name in {
+            "mock",
+            "ollama",
+            "auto",
+        }:
             resolved_canon_provider_name = provider_name
-        self.canon_provider = canon_provider or make_canon_provider(resolved_canon_provider_name)
+        self.canon_provider = canon_provider or make_canon_provider(
+            resolved_canon_provider_name
+        )
         self.canon_provider_label = getattr(self.canon_provider, "name", "unknown")
-        self.background_canon_provider = canon_provider or make_background_canon_provider(resolved_canon_provider_name)
+        self.background_canon_provider = (
+            canon_provider
+            or make_background_canon_provider(resolved_canon_provider_name)
+        )
         # In replay mode, promises and flesh come from the recorded apply points;
         # background producers must stay silent.
         self.replay_mode = replay_mode
         self._lore_executor: concurrent.futures.ThreadPoolExecutor | None = None
-        self._pending_lore: list[tuple[concurrent.futures.Future[LoreExtractionResolution], dict[str, Any], int | None]] = []
-        self._pending_flesh: list[tuple[concurrent.futures.Future[FleshResolution], str]] = []
-        self._pending_canon: list[tuple[concurrent.futures.Future[CanonResolution], CanonSaturationJob]] = []
+        self._pending_lore: list[
+            tuple[
+                concurrent.futures.Future[LoreExtractionResolution],
+                dict[str, Any],
+                int | None,
+            ]
+        ] = []
+        self._pending_flesh: list[
+            tuple[concurrent.futures.Future[FleshResolution], str]
+        ] = []
+        self._pending_canon: list[
+            tuple[concurrent.futures.Future[CanonResolution], CanonSaturationJob]
+        ] = []
         self._queued_flesh_ids: set[str] = set()
         self._queued_canon_ids: set[str] = set()
         # Promise dicts applied to the engine since the last recorded action, snapshotted
@@ -265,30 +305,48 @@ class GameSession:
                 explicit_messages = describe_journal(self.engine)
             elif verb in {"examine", "study", "observe"}:
                 action = "examine"
-                success, technical_failure, canon_record, explicit_messages = self._examine_current_room(
-                    replay_canon,
+                success, technical_failure, canon_record, explicit_messages = (
+                    self._examine_current_room(
+                        replay_canon,
+                    )
                 )
             elif verb in {"read", "peruse"}:
                 action = "read"
-                success, technical_failure, canon_record, explicit_messages = self._read_book(
-                    command_argument(original_command, tokens),
-                    replay_canon,
+                success, technical_failure, canon_record, explicit_messages = (
+                    self._read_book(
+                        command_argument(original_command, tokens),
+                        replay_canon,
+                    )
                 )
             elif verb in {"investigate", "search"}:
                 action = "investigate"
-                success, technical_failure, canon_record, explicit_messages = self._investigate(
-                    command_argument(original_command, tokens),
-                    replay_canon,
+                success, technical_failure, canon_record, explicit_messages = (
+                    self._investigate(
+                        command_argument(original_command, tokens),
+                        replay_canon,
+                    )
                 )
-            elif verb in {"wares", "browse", "shop"} and self.engine.state.pending_trade is None:
+            elif (
+                verb in {"wares", "browse", "shop"}
+                and self.engine.state.pending_trade is None
+            ):
                 action = "wares"
                 success = True
                 explicit_messages = self._browse_wares()
-            elif self.engine.state.pending_trade is not None and verb in {"accept", "yes", "y"}:
+            elif self.engine.state.pending_trade is not None and verb in {
+                "accept",
+                "yes",
+                "y",
+            }:
                 action = "trade_accept"
                 success = True
                 self.engine.resolve_pending_trade(True)
-            elif self.engine.state.pending_trade is not None and verb in {"reject", "decline", "no", "n"}:
+            elif self.engine.state.pending_trade is not None and verb in {
+                "reject",
+                "decline",
+                "no",
+                "n",
+            }:
                 action = "trade_reject"
                 success = True
                 self.engine.resolve_pending_trade(False)
@@ -315,13 +373,17 @@ class GameSession:
                 if method_name:
                     success = getattr(self.engine, method_name)()
                 else:
-                    explicit_messages = [f"Unknown standard spell: {spell_name or '(missing)'}"]
+                    explicit_messages = [
+                        f"Unknown standard spell: {spell_name or '(missing)'}"
+                    ]
             elif verb in {"move", "go"}:
                 action = "move"
                 direction = tokens[1].lower() if len(tokens) > 1 else ""
                 success = self._move(direction)
                 if direction not in DIRECTIONS:
-                    explicit_messages = [f"Unknown direction: {direction or '(missing)'}"]
+                    explicit_messages = [
+                        f"Unknown direction: {direction or '(missing)'}"
+                    ]
             elif verb in DIRECTIONS:
                 action = "move"
                 success = self._move(verb)
@@ -357,7 +419,9 @@ class GameSession:
             elif verb in {"possess", "swap", "inhabit"}:
                 action = "possess"
                 before_id = self.engine.state.player_id
-                target = self._find_swap_target(command_argument(original_command, tokens))
+                target = self._find_swap_target(
+                    command_argument(original_command, tokens)
+                )
                 if target is None:
                     explicit_messages = ["No body within reach to inhabit."]
                 else:
@@ -369,18 +433,26 @@ class GameSession:
                 action = "cast"
                 spell = command_argument(original_command, tokens)
                 if "silenced" in self.engine.state.player.statuses:
-                    explicit_messages = ["You are silenced - the spell is swallowed before it can speak."]
+                    explicit_messages = [
+                        "You are silenced - the spell is swallowed before it can speak."
+                    ]
                 else:
-                    success, technical_failure, wild_magic_record, llm_context = self._cast_wild(spell, replay_wild_magic)
+                    success, technical_failure, wild_magic_record, llm_context = (
+                        self._cast_wild(spell, replay_wild_magic)
+                    )
             elif verb in {"talk", "speak", "say"}:
                 action = "talk"
                 message = command_argument(original_command, tokens)
                 if "silenced" in self.engine.state.player.statuses:
                     explicit_messages = ["You are silenced - no words come out."]
                 elif not message:
-                    explicit_messages = ["Say what? Specify what you want to say, e.g. 'talk hello there'."]
+                    explicit_messages = [
+                        "Say what? Specify what you want to say, e.g. 'talk hello there'."
+                    ]
                 else:
-                    success, technical_failure, dialogue_record = self._talk(message, replay_dialogue)
+                    success, technical_failure, dialogue_record = self._talk(
+                        message, replay_dialogue
+                    )
             elif verb == "quest":
                 action = "quest"
                 subverb = tokens[1].lower() if len(tokens) > 1 else ""
@@ -394,11 +466,17 @@ class GameSession:
                         explicit_messages.append("Quest Log:")
                         for idx, q in enumerate(quests, 1):
                             status_label = "[x]" if q.status == "completed" else "[ ]"
-                            explicit_messages.append(f"  {idx}. {status_label} {q.name} - {q.description} (Contact: {q.contact}, Location: {q.location})")
+                            explicit_messages.append(
+                                f"  {idx}. {status_label} {q.name} - {q.description} (Contact: {q.contact}, Location: {q.location})"
+                            )
                 elif subverb == "add":
                     name = tokens[2] if len(tokens) > 2 else "Unknown Quest"
                     desc = tokens[3] if len(tokens) > 3 else ""
-                    contact = tokens[4] if len(tokens) > 4 else (self.engine.state.last_talked_npc_name or "None")
+                    contact = (
+                        tokens[4]
+                        if len(tokens) > 4
+                        else (self.engine.state.last_talked_npc_name or "None")
+                    )
                     if len(tokens) > 5:
                         loc = tokens[5]
                     else:
@@ -423,25 +501,35 @@ class GameSession:
                         idx = int(tokens[2]) - 1
                         completed = self.engine.complete_quest_by_index(idx)
                         if completed is not None:
-                            self.engine.state.add_message(f"Quest marked completed: {completed.name}")
+                            self.engine.state.add_message(
+                                f"Quest marked completed: {completed.name}"
+                            )
                             success = True
                         else:
                             explicit_messages = ["Invalid quest index."]
                     except (ValueError, IndexError):
-                        explicit_messages = ["Quest complete command requires a numeric index, e.g. 'quest complete 1'."]
+                        explicit_messages = [
+                            "Quest complete command requires a numeric index, e.g. 'quest complete 1'."
+                        ]
                 elif subverb == "remove":
                     try:
                         idx = int(tokens[2]) - 1
                         removed = self.engine.remove_quest_by_index(idx)
                         if removed is not None:
-                            self.engine.state.add_message(f"Quest removed: {removed.name}")
+                            self.engine.state.add_message(
+                                f"Quest removed: {removed.name}"
+                            )
                             success = True
                         else:
                             explicit_messages = ["Invalid quest index."]
                     except (ValueError, IndexError):
-                        explicit_messages = ["Quest remove command requires a numeric index, e.g. 'quest remove 1'."]
+                        explicit_messages = [
+                            "Quest remove command requires a numeric index, e.g. 'quest remove 1'."
+                        ]
                 else:
-                    explicit_messages = ["Unknown quest subcommand. Use 'quest list', 'quest add', 'quest complete <index>', or 'quest remove <index>'."]
+                    explicit_messages = [
+                        "Unknown quest subcommand. Use 'quest list', 'quest add', 'quest complete <index>', or 'quest remove <index>'."
+                    ]
             else:
                 explicit_messages = [f"Unknown command: {verb}"]
 
@@ -451,7 +539,11 @@ class GameSession:
             messages = explicit_messages
         else:
             new_message_count = self.engine.state.message_count - message_count_before
-            messages = self.engine.state.messages[-new_message_count:] if new_message_count > 0 else []
+            messages = (
+                self.engine.state.messages[-new_message_count:]
+                if new_message_count > 0
+                else []
+            )
         result = ActionResult(
             command=original_command,
             action=action,
@@ -476,7 +568,11 @@ class GameSession:
             self.apply_recorded_promises(replay_promises.get("after"))
         if replay_flesh is not None:
             self.apply_recorded_flesh(replay_flesh.get("after"))
-        if replay_canon is not None and action not in {"read", "examine", "investigate"}:
+        if replay_canon is not None and action not in {
+            "read",
+            "examine",
+            "investigate",
+        }:
             self.apply_recorded_canon(replay_canon.get("after"))
         if record:
             action_record = result.to_record()
@@ -484,7 +580,10 @@ class GameSession:
             flesh_after = self._pop_applied_flesh()
             canon_after = self._pop_applied_canon()
             if promises_before or promises_after:
-                action_record["promises"] = {"before": promises_before, "after": promises_after}
+                action_record["promises"] = {
+                    "before": promises_before,
+                    "after": promises_after,
+                }
             if flesh_before or flesh_after:
                 action_record["flesh"] = {"before": flesh_before, "after": flesh_after}
             if canon_before or canon_after:
@@ -504,7 +603,9 @@ class GameSession:
         candidates = [
             entity
             for entity in state.entities.values()
-            if entity.kind in {"actor", "npc"} and entity.alive and entity.id != state.player_id
+            if entity.kind in {"actor", "npc"}
+            and entity.alive
+            and entity.id != state.player_id
         ]
         wanted = name.strip().lower()
         if wanted:
@@ -537,7 +638,9 @@ class GameSession:
         self,
         replay_canon: dict[str, Any] | None = None,
     ) -> tuple[bool, bool, dict[str, Any] | None, list[str]]:
-        room = self.engine.room_profile_at(self.engine.state.player.x, self.engine.state.player.y)
+        room = self.engine.room_profile_at(
+            self.engine.state.player.x, self.engine.state.player.y
+        )
         if room is None:
             return False, False, None, ["There is no coherent place here to examine."]
         record_id = f"canon_room_{normalize_id(room.id)}"
@@ -548,16 +651,24 @@ class GameSession:
             existing = self.engine.state.canon_records.get(record_id)
             replayed_materialization = existing is not None
             replayed_failure = replay_canon.get("materialization")
-            if existing is None and isinstance(replayed_failure, dict) and replayed_failure.get("technical_failure"):
+            if (
+                existing is None
+                and isinstance(replayed_failure, dict)
+                and replayed_failure.get("technical_failure")
+            ):
                 return (
                     False,
                     True,
                     replayed_failure,
-                    [f"The place resists description. ({replayed_failure.get('error')})"],
+                    [
+                        f"The place resists description. ({replayed_failure.get('error')})"
+                    ],
                 )
         if existing is not None:
             if replayed_materialization:
-                self.engine.state.add_message(f"You take time to study {room.room_type}.")
+                self.engine.state.add_message(
+                    f"You take time to study {room.room_type}."
+                )
                 self.engine.finish_player_turn()
                 return (
                     True,
@@ -565,7 +676,12 @@ class GameSession:
                     {"record": existing.to_dict(), "replayed": True},
                     self._present_canon(existing),
                 )
-            return True, False, {"record": existing.to_dict(), "reused": True}, self._present_canon(existing)
+            return (
+                True,
+                False,
+                {"record": existing.to_dict(), "reused": True},
+                self._present_canon(existing),
+            )
 
         context = self._canon_context_for_room(room, record_id)
         resolution = resolve_canon(self.canon_provider, context)
@@ -580,7 +696,12 @@ class GameSession:
             "audit_path": resolution.audit_path,
         }
         if resolution.technical_failure or resolution.record is None:
-            return False, True, canon_record, [f"The place resists description. ({resolution.error})"]
+            return (
+                False,
+                True,
+                canon_record,
+                [f"The place resists description. ({resolution.error})"],
+            )
         applied = self.engine.add_canon_record(resolution.record)
         self._canon_apply_buffer.append(applied.to_dict())
         self.engine.state.add_message(f"You take time to study {room.room_type}.")
@@ -597,10 +718,11 @@ class GameSession:
                 "tags": sorted(entity.tags),
             }
             for entity in state.entities.values()
-            if entity.kind == "prop"
-            and room.contains(entity.x, entity.y)
+            if entity.kind == "prop" and room.contains(entity.x, entity.y)
         ][:6]
-        threads = self.engine.nearby_canon_records(tags=[*room.tags, *room.topics], limit=4)
+        threads = self.engine.nearby_canon_records(
+            tags=[*room.tags, *room.topics], limit=4
+        )
         active_promises = [
             promise.to_dict()
             for promise in state.promises
@@ -634,10 +756,32 @@ class GameSession:
             "contract": {
                 "allowed_outputs": ["title", "summary", "text", "tags", "llm_choices"],
                 "claim_quota": 0,
-                "forbidden": ["treasure", "exits", "enemies", "allies", "quests", "stats", "map changes"],
+                "forbidden": [
+                    "treasure",
+                    "exits",
+                    "enemies",
+                    "allies",
+                    "quests",
+                    "stats",
+                    "map changes",
+                ],
             },
             "base_tags": base_tags,
-            "allowed_tags": sorted({*base_tags, "empire", "magic", "ritual", "lore", "holy", "death", "water", "plant", "book", "books"}),
+            "allowed_tags": sorted(
+                {
+                    *base_tags,
+                    "empire",
+                    "magic",
+                    "ritual",
+                    "lore",
+                    "holy",
+                    "death",
+                    "water",
+                    "plant",
+                    "book",
+                    "books",
+                }
+            ),
             "engine_choices": {
                 "mechanical_effect": "none",
                 "turn_cost": 1,
@@ -673,7 +817,12 @@ class GameSession:
         book = self._find_readable_book(target)
         if book is None:
             if target:
-                return False, False, None, [f"There is no book called '{target}' within reach."]
+                return (
+                    False,
+                    False,
+                    None,
+                    [f"There is no book called '{target}' within reach."],
+                )
             return False, False, None, ["There is no book within reach to read."]
         record_id = f"canon_book_{normalize_id(book.id)}"
         existing = self.engine.state.canon_records.get(record_id)
@@ -683,17 +832,25 @@ class GameSession:
             existing = self.engine.state.canon_records.get(record_id)
             replayed_materialization = existing is not None
             replayed_failure = replay_canon.get("materialization")
-            if existing is None and isinstance(replayed_failure, dict) and replayed_failure.get("technical_failure"):
+            if (
+                existing is None
+                and isinstance(replayed_failure, dict)
+                and replayed_failure.get("technical_failure")
+            ):
                 return (
                     False,
                     True,
                     replayed_failure,
-                    [f"The ink swims and refuses to settle. ({replayed_failure.get('error')})"],
+                    [
+                        f"The ink swims and refuses to settle. ({replayed_failure.get('error')})"
+                    ],
                 )
         if existing is not None:
             if replayed_materialization:
                 self._apply_book_canon(book, existing)
-                self.engine.state.add_message(f"You read {existing.title or book.name}.")
+                self.engine.state.add_message(
+                    f"You read {existing.title or book.name}."
+                )
                 self.engine.finish_player_turn()
                 return (
                     True,
@@ -701,7 +858,12 @@ class GameSession:
                     {"record": existing.to_dict(), "replayed": True},
                     self._present_canon(existing),
                 )
-            return True, False, {"record": existing.to_dict(), "reused": True}, self._present_canon(existing)
+            return (
+                True,
+                False,
+                {"record": existing.to_dict(), "reused": True},
+                self._present_canon(existing),
+            )
 
         context = self._canon_context_for_book(book, record_id)
         resolution = resolve_canon(self.canon_provider, context)
@@ -716,7 +878,12 @@ class GameSession:
             "audit_path": resolution.audit_path,
         }
         if resolution.technical_failure or resolution.record is None:
-            return False, True, canon_record, [f"The ink swims and refuses to settle. ({resolution.error})"]
+            return (
+                False,
+                True,
+                canon_record,
+                [f"The ink swims and refuses to settle. ({resolution.error})"],
+            )
         applied = self.engine.add_canon_record(resolution.record)
         self._canon_apply_buffer.append(applied.to_dict())
         self._apply_book_canon(book, applied)
@@ -738,7 +905,11 @@ class GameSession:
             book.name = record.title
         if record.summary:
             book.description = record.summary
-        author = record.llm_choices.get("author") if isinstance(record.llm_choices, dict) else None
+        author = (
+            record.llm_choices.get("author")
+            if isinstance(record.llm_choices, dict)
+            else None
+        )
         if author and record.summary and author not in record.summary:
             book.description = f"{record.summary} (by {author})"
 
@@ -760,7 +931,16 @@ class GameSession:
         seed_tags = {
             normalize_id(str(value))
             for key, value in book_seed.items()
-            if key in {"topic", "secondary_topic", "genre", "discipline", "author_role", "institution", "taboo_level"}
+            if key
+            in {
+                "topic",
+                "secondary_topic",
+                "genre",
+                "discipline",
+                "author_role",
+                "institution",
+                "taboo_level",
+            }
         }
         thread_tags = sorted({*book.tags, *room_tags, *room_topics, *seed_tags})
         threads = self.engine.nearby_canon_records(tags=thread_tags, limit=4)
@@ -818,29 +998,66 @@ class GameSession:
                         "title_shape",
                         "taboo_level",
                     ],
-                    "avoid_defaulting_to": ["ink", "maps", "cartography", "book damage"],
+                    "avoid_defaulting_to": [
+                        "ink",
+                        "maps",
+                        "cartography",
+                        "book damage",
+                    ],
                 },
-                "forbidden": ["treasure locations", "guaranteed allies", "map exits", "named player rewards", "stats", "spell effects"],
+                "forbidden": [
+                    "treasure locations",
+                    "guaranteed allies",
+                    "map exits",
+                    "named player rewards",
+                    "stats",
+                    "spell effects",
+                ],
             },
             "base_tags": base_tags,
-            "allowed_tags": sorted({*base_tags, *thread_tags, "empire", "magic", "ritual", "lore", "holy", "death", "water", "plant"}),
+            "allowed_tags": sorted(
+                {
+                    *base_tags,
+                    *thread_tags,
+                    "empire",
+                    "magic",
+                    "ritual",
+                    "lore",
+                    "holy",
+                    "death",
+                    "water",
+                    "plant",
+                }
+            ),
             "engine_choices": {
                 "mechanical_effect": "none",
                 "turn_cost": 1,
             },
         }
 
-    def _canon_context_for_book_preview(self, book: Any, record_id: str) -> dict[str, Any]:
+    def _canon_context_for_book_preview(
+        self, book: Any, record_id: str
+    ) -> dict[str, Any]:
         context = self._canon_context_for_book(book, record_id)
         context["kind"] = "book_preview"
         context["source"] = "background"
         context["base_tags"] = sorted({*context.get("base_tags", []), "book_preview"})
-        context["allowed_tags"] = sorted({*context.get("allowed_tags", []), "book_preview"})
+        context["allowed_tags"] = sorted(
+            {*context.get("allowed_tags", []), "book_preview"}
+        )
         context["contract"] = {
             "allowed_outputs": ["title", "summary", "text", "tags", "llm_choices"],
             "claim_quota": 0,
             "book_guidance": context.get("contract", {}).get("book_guidance", {}),
-            "forbidden": ["pages", "treasure locations", "guaranteed allies", "map exits", "named player rewards", "stats", "spell effects"],
+            "forbidden": [
+                "pages",
+                "treasure locations",
+                "guaranteed allies",
+                "map exits",
+                "named player rewards",
+                "stats",
+                "spell effects",
+            ],
         }
         return context
 
@@ -848,7 +1065,11 @@ class GameSession:
         """Book pages run through the same lore extraction as dialogue; the
         passage stands in for the NPC reply and the source records the book."""
         state = self.engine.state
-        author = record.llm_choices.get("author") if isinstance(record.llm_choices, dict) else None
+        author = (
+            record.llm_choices.get("author")
+            if isinstance(record.llm_choices, dict)
+            else None
+        )
         title = record.title or book.name
         return {
             "npc": str(author or title),
@@ -858,7 +1079,9 @@ class GameSession:
             "zone": {"x": state.zone_x, "y": state.zone_y, "type": state.zone_type},
             "message": "(the player reads a book)",
             "reply": record.text,
-            "existing_lore": self.engine.promises_for_context(subject=title, tags=book.tags, limit=5, text_limit=160),
+            "existing_lore": self.engine.promises_for_context(
+                subject=title, tags=book.tags, limit=5, text_limit=160
+            ),
         }
 
     def _investigate(
@@ -870,9 +1093,16 @@ class GameSession:
         exists (RoomProfile secret slots placed at generation), what anchors
         it, and what the reward is; the LLM only words the clue. Stages:
         sweep finds the clue, investigating the clued anchor opens it."""
-        room = self.engine.room_profile_at(self.engine.state.player.x, self.engine.state.player.y)
+        room = self.engine.room_profile_at(
+            self.engine.state.player.x, self.engine.state.player.y
+        )
         if room is None:
-            return False, False, None, ["There is no coherent place here to investigate."]
+            return (
+                False,
+                False,
+                None,
+                ["There is no coherent place here to investigate."],
+            )
         slot = next((s for s in room.secret_slots if s.get("status") != "opened"), None)
         if target:
             return self._investigate_focused(room, slot, target, replay_canon)
@@ -900,7 +1130,12 @@ class GameSession:
             return self._open_secret(room, slot)
         entity = self._find_investigation_target(target)
         if entity is None:
-            return False, False, None, [f"You see no '{target.strip()}' here to investigate."]
+            return (
+                False,
+                False,
+                None,
+                [f"You see no '{target.strip()}' here to investigate."],
+            )
         return self._investigate_entity(room, slot, entity, replay_canon)
 
     def _open_secret(
@@ -927,13 +1162,21 @@ class GameSession:
             CanonRecord(
                 id=f"canon_secret_open_{normalize_id(str(slot.get('id')))}",
                 kind="investigation",
-                attachment={"kind": "room", "room_id": room.id, "secret_id": slot.get("id")},
+                attachment={
+                    "kind": "room",
+                    "room_id": room.id,
+                    "secret_id": slot.get("id"),
+                },
                 text=text,
                 summary=f"Found {qty_text} in {secret_kind_label(slot)}.",
                 tags=sorted({"investigation", "secret", *list(room.tags)[:3]}),
                 source="engine",
                 seed_packet={"secret_id": slot.get("id"), "room_id": room.id},
-                engine_choices={"secret_id": slot.get("id"), "reward": reward, "anchor": slot.get("anchor")},
+                engine_choices={
+                    "secret_id": slot.get("id"),
+                    "reward": reward,
+                    "anchor": slot.get("anchor"),
+                },
                 turn_created=engine.state.turn,
             )
         )
@@ -952,7 +1195,12 @@ class GameSession:
             return None
         candidates = []
         for entity in engine.state.entities.values():
-            if entity.id == engine.state.player_id or entity.kind not in {"prop", "item", "npc", "actor"}:
+            if entity.id == engine.state.player_id or entity.kind not in {
+                "prop",
+                "item",
+                "npc",
+                "actor",
+            }:
                 continue
             if entity.kind == "actor" and not entity.alive:
                 continue
@@ -983,7 +1231,9 @@ class GameSession:
         player = state.player
         distance = max(abs(entity.x - player.x), abs(entity.y - player.y))
         adjacent = distance <= 1
-        band = "adjacent" if adjacent else ("near" if distance <= 4 else "across the room")
+        band = (
+            "adjacent" if adjacent else ("near" if distance <= 4 else "across the room")
+        )
         close_id = f"canon_detail_{normalize_id(entity.id)}_close"
         far_id = f"canon_detail_{normalize_id(entity.id)}_far"
         record_id = close_id if adjacent else far_id
@@ -993,7 +1243,12 @@ class GameSession:
         if best is None and not adjacent:
             best = state.canon_records.get(far_id)
         if best is not None:
-            return True, False, {"record": best.to_dict(), "reused": True}, self._present_canon(best)
+            return (
+                True,
+                False,
+                {"record": best.to_dict(), "reused": True},
+                self._present_canon(best),
+            )
 
         # Adjacent study of the prop anchoring a hidden secret surfaces the clue.
         secret_here = (
@@ -1003,14 +1258,19 @@ class GameSession:
             and entity.kind == "prop"
         )
         if secret_here:
-            rng = random.Random(stable_seed(state.rng_seed, "secret_choices", str(slot.get("id"))))
+            rng = random.Random(
+                stable_seed(state.rng_seed, "secret_choices", str(slot.get("id")))
+            )
             props = [
-                e for e in state.entities.values()
+                e
+                for e in state.entities.values()
                 if e.kind == "prop" and room is not None and room.contains(e.x, e.y)
             ]
             slot.setdefault("anchor", choose_anchor(slot, props, rng))
             slot.setdefault("reward", choose_reward(slot, rng))
-            secret_here = normalize_id(str(slot.get("anchor"))) == normalize_id(entity.name)
+            secret_here = normalize_id(str(slot.get("anchor"))) == normalize_id(
+                entity.name
+            )
 
         existing = state.canon_records.get(record_id)
         replayed = False
@@ -1019,8 +1279,17 @@ class GameSession:
             existing = state.canon_records.get(record_id)
             replayed = existing is not None
             failure = replay_canon.get("materialization")
-            if existing is None and isinstance(failure, dict) and failure.get("technical_failure"):
-                return False, True, failure, [f"You can make nothing more of it. ({failure.get('error')})"]
+            if (
+                existing is None
+                and isinstance(failure, dict)
+                and failure.get("technical_failure")
+            ):
+                return (
+                    False,
+                    True,
+                    failure,
+                    [f"You can make nothing more of it. ({failure.get('error')})"],
+                )
         if existing is not None:
             if secret_here:
                 slot["status"] = "clued"
@@ -1028,10 +1297,22 @@ class GameSession:
             if replayed:
                 state.add_message(f"You study {entity.name}.")
                 engine.finish_player_turn()
-                return True, False, {"record": existing.to_dict(), "replayed": True}, self._present_canon(existing)
-            return True, False, {"record": existing.to_dict(), "reused": True}, self._present_canon(existing)
+                return (
+                    True,
+                    False,
+                    {"record": existing.to_dict(), "replayed": True},
+                    self._present_canon(existing),
+                )
+            return (
+                True,
+                False,
+                {"record": existing.to_dict(), "reused": True},
+                self._present_canon(existing),
+            )
 
-        context = self._canon_context_for_entity(room, slot if secret_here else None, entity, band, record_id)
+        context = self._canon_context_for_entity(
+            room, slot if secret_here else None, entity, band, record_id
+        )
         resolution = resolve_canon(self.canon_provider, context)
         self.canon_provider_label = resolution.provider_name
         canon_record = {
@@ -1044,7 +1325,12 @@ class GameSession:
             "audit_path": resolution.audit_path,
         }
         if resolution.technical_failure or resolution.record is None:
-            return False, True, canon_record, [f"You can make nothing more of it. ({resolution.error})"]
+            return (
+                False,
+                True,
+                canon_record,
+                [f"You can make nothing more of it. ({resolution.error})"],
+            )
         applied = engine.add_canon_record(resolution.record)
         self._canon_apply_buffer.append(applied.to_dict())
         if secret_here:
@@ -1072,7 +1358,11 @@ class GameSession:
     ) -> dict[str, Any]:
         engine = self.engine
         state = engine.state
-        kind = {"prop": "object_detail", "item": "object_detail", "npc": "npc_detail"}.get(entity.kind, "creature_detail")
+        kind = {
+            "prop": "object_detail",
+            "item": "object_detail",
+            "npc": "npc_detail",
+        }.get(entity.kind, "creature_detail")
         subject: dict[str, Any] = {
             "name": entity.name,
             "entity_kind": entity.kind,
@@ -1082,7 +1372,11 @@ class GameSession:
             "distance_band": band,
             "attachment": {"kind": "entity", "entity_id": entity.id},
         }
-        engine_choices: dict[str, Any] = {"mechanical_effect": "none", "turn_cost": 1, "distance_band": band}
+        engine_choices: dict[str, Any] = {
+            "mechanical_effect": "none",
+            "turn_cost": 1,
+            "distance_band": band,
+        }
         claim_quota = 0
         if entity.kind == "npc":
             profile = state.npc_profiles.get(entity.id)
@@ -1095,7 +1389,9 @@ class GameSession:
                 }
             claim_quota = 1
         elif entity.kind == "actor":
-            rng = random.Random(stable_seed(state.rng_seed, "weakness_hint", entity.id, record_id))
+            rng = random.Random(
+                stable_seed(state.rng_seed, "weakness_hint", entity.id, record_id)
+            )
             engine_choices["weakness_hint"] = choose_weakness_hint(entity, rng)
             subject["creature"] = {
                 "faction": entity.faction,
@@ -1149,7 +1445,9 @@ class GameSession:
                 ],
             },
             "base_tags": base_tags,
-            "allowed_tags": sorted({*base_tags, *[normalize_id(t) for t in thread_tags if t], "secret"}),
+            "allowed_tags": sorted(
+                {*base_tags, *[normalize_id(t) for t in thread_tags if t], "secret"}
+            ),
             "engine_choices": engine_choices,
         }
 
@@ -1163,7 +1461,9 @@ class GameSession:
             "zone": {"x": state.zone_x, "y": state.zone_y, "type": state.zone_type},
             "message": "(the player studies them closely)",
             "reply": record.text,
-            "existing_lore": self.engine.promises_for_context(subject=entity.name, tags=entity.tags, limit=5, text_limit=160),
+            "existing_lore": self.engine.promises_for_context(
+                subject=entity.name, tags=entity.tags, limit=5, text_limit=160
+            ),
         }
 
     def _investigate_sweep(
@@ -1177,7 +1477,12 @@ class GameSession:
         if slot is not None and slot.get("status") == "clued":
             clue = state.canon_records.get(str(slot.get("clue_record") or ""))
             if clue is not None:
-                return True, False, {"record": clue.to_dict(), "reused": True}, self._present_canon(clue)
+                return (
+                    True,
+                    False,
+                    {"record": clue.to_dict(), "reused": True},
+                    self._present_canon(clue),
+                )
         if slot is not None and not slot.get("status"):
             return self._investigate_clue_stage(room, slot, replay_canon)
         return self._investigate_plain_stage(room, replay_canon)
@@ -1193,8 +1498,14 @@ class GameSession:
         record_id = f"canon_secret_clue_{normalize_id(str(slot.get('id')))}"
         # Engine choices are fixed before any prompt is built, deterministically
         # from the run seed and slot id — replay-safe and provider-independent.
-        rng = random.Random(stable_seed(state.rng_seed, "secret_choices", str(slot.get("id"))))
-        props = [e for e in state.entities.values() if e.kind == "prop" and room.contains(e.x, e.y)]
+        rng = random.Random(
+            stable_seed(state.rng_seed, "secret_choices", str(slot.get("id")))
+        )
+        props = [
+            e
+            for e in state.entities.values()
+            if e.kind == "prop" and room.contains(e.x, e.y)
+        ]
         slot.setdefault("anchor", choose_anchor(slot, props, rng))
         slot.setdefault("reward", choose_reward(slot, rng))
 
@@ -1205,15 +1516,34 @@ class GameSession:
             existing = state.canon_records.get(record_id)
             replayed = existing is not None
             failure = replay_canon.get("materialization")
-            if existing is None and isinstance(failure, dict) and failure.get("technical_failure"):
-                return False, True, failure, [f"Nothing here holds your attention. ({failure.get('error')})"]
+            if (
+                existing is None
+                and isinstance(failure, dict)
+                and failure.get("technical_failure")
+            ):
+                return (
+                    False,
+                    True,
+                    failure,
+                    [f"Nothing here holds your attention. ({failure.get('error')})"],
+                )
         if existing is not None:
             slot["status"] = "clued"
             slot["clue_record"] = record_id
             if replayed:
                 self._consume_investigation_turns(room, slot)
-                return True, False, {"record": existing.to_dict(), "replayed": True}, self._present_canon(existing)
-            return True, False, {"record": existing.to_dict(), "reused": True}, self._present_canon(existing)
+                return (
+                    True,
+                    False,
+                    {"record": existing.to_dict(), "replayed": True},
+                    self._present_canon(existing),
+                )
+            return (
+                True,
+                False,
+                {"record": existing.to_dict(), "reused": True},
+                self._present_canon(existing),
+            )
 
         context = self._canon_context_for_investigation(room, slot, record_id)
         resolution = resolve_canon(self.canon_provider, context)
@@ -1228,7 +1558,12 @@ class GameSession:
             "audit_path": resolution.audit_path,
         }
         if resolution.technical_failure or resolution.record is None:
-            return False, True, canon_record, [f"Nothing here holds your attention. ({resolution.error})"]
+            return (
+                False,
+                True,
+                canon_record,
+                [f"Nothing here holds your attention. ({resolution.error})"],
+            )
         applied = engine.add_canon_record(resolution.record)
         self._canon_apply_buffer.append(applied.to_dict())
         slot["status"] = "clued"
@@ -1254,15 +1589,36 @@ class GameSession:
             existing = state.canon_records.get(record_id)
             replayed = existing is not None
             failure = replay_canon.get("materialization")
-            if existing is None and isinstance(failure, dict) and failure.get("technical_failure"):
-                return False, True, failure, [f"Nothing here holds your attention. ({failure.get('error')})"]
+            if (
+                existing is None
+                and isinstance(failure, dict)
+                and failure.get("technical_failure")
+            ):
+                return (
+                    False,
+                    True,
+                    failure,
+                    [f"Nothing here holds your attention. ({failure.get('error')})"],
+                )
         if existing is not None:
             if replayed:
-                state.add_message(f"You search the {room.room_type} from corner to corner.")
+                state.add_message(
+                    f"You search the {room.room_type} from corner to corner."
+                )
                 self._spawn_sweep_decoration(existing)
                 engine.finish_player_turn()
-                return True, False, {"record": existing.to_dict(), "replayed": True}, self._present_canon(existing)
-            return True, False, {"record": existing.to_dict(), "reused": True}, self._present_canon(existing)
+                return (
+                    True,
+                    False,
+                    {"record": existing.to_dict(), "replayed": True},
+                    self._present_canon(existing),
+                )
+            return (
+                True,
+                False,
+                {"record": existing.to_dict(), "reused": True},
+                self._present_canon(existing),
+            )
 
         context = self._canon_context_for_investigation(room, None, record_id)
         resolution = resolve_canon(self.canon_provider, context)
@@ -1277,7 +1633,12 @@ class GameSession:
             "audit_path": resolution.audit_path,
         }
         if resolution.technical_failure or resolution.record is None:
-            return False, True, canon_record, [f"Nothing here holds your attention. ({resolution.error})"]
+            return (
+                False,
+                True,
+                canon_record,
+                [f"Nothing here holds your attention. ({resolution.error})"],
+            )
         applied = engine.add_canon_record(resolution.record)
         self._canon_apply_buffer.append(applied.to_dict())
         state.add_message(f"You search the {room.room_type} from corner to corner.")
@@ -1301,7 +1662,9 @@ class GameSession:
         """Surface the LLM's chosen decoration on the map — engine-validated
         against the menu it offered, idempotent across reuse and replay."""
         choices = record.llm_choices if isinstance(record.llm_choices, dict) else {}
-        engine_choices = record.engine_choices if isinstance(record.engine_choices, dict) else {}
+        engine_choices = (
+            record.engine_choices if isinstance(record.engine_choices, dict) else {}
+        )
         template = normalize_id(str(choices.get("decoration_template") or ""))
         allowed = {
             normalize_id(str(option.get("template") or ""))
@@ -1309,7 +1672,12 @@ class GameSession:
             if isinstance(option, dict)
         }
         spot = engine_choices.get("decoration_spot")
-        if not template or template not in allowed or not isinstance(spot, list) or len(spot) != 2:
+        if (
+            not template
+            or template not in allowed
+            or not isinstance(spot, list)
+            or len(spot) != 2
+        ):
             return
         flag_key = f"decoration_{record.id}"
         if self.engine.state.flags.get(flag_key):
@@ -1344,9 +1712,12 @@ class GameSession:
         context = self._canon_context_for_room(room, record_id)
         context["kind"] = "investigation"
         context["base_tags"] = sorted(
-            {tag for tag in context["base_tags"] if tag != "room_flavor"} | {"investigation"}
+            {tag for tag in context["base_tags"] if tag != "room_flavor"}
+            | {"investigation"}
         )
-        context["allowed_tags"] = sorted({*context["allowed_tags"], "investigation", "secret"})
+        context["allowed_tags"] = sorted(
+            {*context["allowed_tags"], "investigation", "secret"}
+        )
         if slot is None:
             context["engine_choices"] = {
                 "secret_present": False,
@@ -1356,7 +1727,9 @@ class GameSession:
             # A secretless sweep may still develop the room: the engine offers a
             # menu of fitting non-blocking props and a validated tile; the LLM
             # may surface ONE of them as something the search turns up.
-            deco_rng = random.Random(stable_seed(self.engine.state.rng_seed, "sweep_decoration", room.id))
+            deco_rng = random.Random(
+                stable_seed(self.engine.state.rng_seed, "sweep_decoration", room.id)
+            )
             options = decoration_menu(list(room.tags), deco_rng)
             spot = self._decoration_spot(room, deco_rng)
             if options and spot is not None:
@@ -1406,13 +1779,18 @@ class GameSession:
     ) -> tuple[bool, bool, dict[str, Any], dict[str, Any] | None]:
         spell = spell.strip()
         if not spell:
-            return False, False, {
-                "spell": "",
-                "provider": self.provider_label,
-                "technical_failure": False,
-                "error": "missing spell text",
-                "data": None,
-            }, None
+            return (
+                False,
+                False,
+                {
+                    "spell": "",
+                    "provider": self.provider_label,
+                    "technical_failure": False,
+                    "error": "missing spell text",
+                    "data": None,
+                },
+                None,
+            )
 
         context: dict[str, Any] | None = None
         if replay_wild_magic is not None:
@@ -1441,16 +1819,25 @@ class GameSession:
             "audit_path": resolution.audit_path,
         }
         if resolution.technical_failure or resolution.data is None:
-            self.engine.state.add_message(f"Wild magic misfired technically: {resolution.error}")
+            self.engine.state.add_message(
+                f"Wild magic misfired technically: {resolution.error}"
+            )
             return False, True, wild_magic_record, context
 
         outcome = self.engine.apply_wild_magic_resolution(resolution.data)
         if outcome.technical_failure:
             wild_magic_record["technical_failure"] = True
             wild_magic_record["error"] = "; ".join(outcome.messages)
-        return outcome.consumed_turn, outcome.technical_failure, wild_magic_record, context
+        return (
+            outcome.consumed_turn,
+            outcome.technical_failure,
+            wild_magic_record,
+            context,
+        )
 
-    def _talk(self, message: str, replay_dialogue: dict[str, Any] | None = None) -> tuple[bool, bool, dict[str, Any] | None]:
+    def _talk(
+        self, message: str, replay_dialogue: dict[str, Any] | None = None
+    ) -> tuple[bool, bool, dict[str, Any] | None]:
         message = message.strip()
         npc = self.engine.find_talk_target()
         if npc is None:
@@ -1469,7 +1856,9 @@ class GameSession:
             dialogue_record = dict(replay_dialogue)
         else:
             context = self.engine.dialogue_context_for_llm(npc, message)
-            resolution = resolve_dialogue(self.dialogue_provider, npc.name, message, context)
+            resolution = resolve_dialogue(
+                self.dialogue_provider, npc.name, message, context
+            )
             self.dialogue_provider_label = resolution.provider_name
             dialogue_record = {
                 "npc": npc.name,
@@ -1482,7 +1871,9 @@ class GameSession:
                 "audit_path": resolution.audit_path,
             }
         if resolution.technical_failure or resolution.reply is None:
-            self.engine.state.add_message(f"{npc.name} doesn't seem to hear you. ({resolution.error})")
+            self.engine.state.add_message(
+                f"{npc.name} doesn't seem to hear you. ({resolution.error})"
+            )
             return False, True, dialogue_record
 
         reply = resolution.reply
@@ -1493,7 +1884,9 @@ class GameSession:
                 trade_data = trade.get("data")
         elif self.engine.should_consider_trade(npc, message, reply):
             trade_context = self.engine.trade_context_for_llm(npc, message, reply)
-            trade_resolution = resolve_trade_proposal(self.trade_provider, npc.name, trade_context)
+            trade_resolution = resolve_trade_proposal(
+                self.trade_provider, npc.name, trade_context
+            )
             self.trade_provider_label = trade_resolution.provider_name
             dialogue_record["trade"] = {
                 "provider": trade_resolution.provider_name,
@@ -1531,11 +1924,19 @@ class GameSession:
         }
         if self._lore_executor is None:
             self._lore_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        future = self._lore_executor.submit(resolve_lore_extraction, self.lore_provider, context)
+        future = self._lore_executor.submit(
+            resolve_lore_extraction, self.lore_provider, context
+        )
         self._pending_lore.append((future, dialogue_record, claim_quota))
 
     def drain_lore(self, block: bool = False) -> None:
-        remaining: list[tuple[concurrent.futures.Future[LoreExtractionResolution], dict[str, Any], int | None]] = []
+        remaining: list[
+            tuple[
+                concurrent.futures.Future[LoreExtractionResolution],
+                dict[str, Any],
+                int | None,
+            ]
+        ] = []
         for future, dialogue_record, claim_quota in self._pending_lore:
             if not block and not future.done():
                 remaining.append((future, dialogue_record, claim_quota))
@@ -1543,7 +1944,9 @@ class GameSession:
             try:
                 resolution = future.result()
             except Exception as exc:
-                resolution = LoreExtractionResolution([], True, str(exc), self.lore_provider_label)
+                resolution = LoreExtractionResolution(
+                    [], True, str(exc), self.lore_provider_label
+                )
             self.lore_provider_label = resolution.provider_name
             # CONTRACT enforcement: claim quotas are clamped here, not negotiated
             # in the prompt — extra claims are dropped before they can bind.
@@ -1551,7 +1954,9 @@ class GameSession:
                 resolution.promises = resolution.promises[:claim_quota]
             # Snapshot the extraction outputs before add_promises mutates them (binding,
             # merging) so the replay record carries the apply-point inputs.
-            self._promise_apply_buffer.extend(promise.to_dict() for promise in resolution.promises)
+            self._promise_apply_buffer.extend(
+                promise.to_dict() for promise in resolution.promises
+            )
             added = self.engine.add_promises(resolution.promises)
             lore_record = dialogue_record.setdefault("lore", {})
             lore_record.update(
@@ -1584,8 +1989,12 @@ class GameSession:
                 continue
             self._queued_flesh_ids.add(promise.id)
             if self._lore_executor is None:
-                self._lore_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-            future = self._lore_executor.submit(resolve_flesh, self.flesh_provider, flesh_context_for_promise(promise))
+                self._lore_executor = concurrent.futures.ThreadPoolExecutor(
+                    max_workers=1
+                )
+            future = self._lore_executor.submit(
+                resolve_flesh, self.flesh_provider, flesh_context_for_promise(promise)
+            )
             self._pending_flesh.append((future, promise.id))
 
     def drain_flesh(self, block: bool = False) -> None:
@@ -1597,12 +2006,16 @@ class GameSession:
             try:
                 resolution = future.result()
             except Exception as exc:
-                resolution = FleshResolution(None, True, str(exc), self.flesh_provider_label)
+                resolution = FleshResolution(
+                    None, True, str(exc), self.flesh_provider_label
+                )
             self.flesh_provider_label = resolution.provider_name
             if resolution.flesh:
                 applied = self.engine.apply_promise_flesh(promise_id, resolution.flesh)
                 if applied is not None:
-                    self._flesh_apply_buffer.append({"promise_id": promise_id, "flesh": dict(applied.flesh or {})})
+                    self._flesh_apply_buffer.append(
+                        {"promise_id": promise_id, "flesh": dict(applied.flesh or {})}
+                    )
         self._pending_flesh = remaining
 
     def _enqueue_canon_prewarm(self) -> None:
@@ -1619,16 +2032,25 @@ class GameSession:
                 break
             self._queued_canon_ids.add(job.record_id)
             if self._lore_executor is None:
-                self._lore_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-            future = self._lore_executor.submit(resolve_canon, self.background_canon_provider, job.context)
+                self._lore_executor = concurrent.futures.ThreadPoolExecutor(
+                    max_workers=1
+                )
+            future = self._lore_executor.submit(
+                resolve_canon, self.background_canon_provider, job.context
+            )
             self._pending_canon.append((future, job))
 
     def _canon_saturation_candidates(self) -> list[CanonSaturationJob]:
         candidates: list[tuple[int, str, CanonSaturationJob]] = []
-        room = self.engine.room_profile_at(self.engine.state.player.x, self.engine.state.player.y)
+        room = self.engine.room_profile_at(
+            self.engine.state.player.x, self.engine.state.player.y
+        )
         if room is not None:
             record_id = f"canon_room_{normalize_id(room.id)}"
-            if record_id not in self.engine.state.canon_records and record_id not in self._queued_canon_ids:
+            if (
+                record_id not in self.engine.state.canon_records
+                and record_id not in self._queued_canon_ids
+            ):
                 context = self._canon_context_for_room(room, record_id)
                 context["source"] = "background"
                 context["engine_choices"] = dict(context.get("engine_choices") or {})
@@ -1637,7 +2059,9 @@ class GameSession:
                     (
                         0,
                         record_id,
-                        CanonSaturationJob(record_id=record_id, kind="room_flavor", context=context),
+                        CanonSaturationJob(
+                            record_id=record_id, kind="room_flavor", context=context
+                        ),
                     )
                 )
 
@@ -1645,7 +2069,9 @@ class GameSession:
             record_id = f"canon_detail_{normalize_id(entity.id)}_far"
             room = self.engine.room_profile_at(entity.x, entity.y)
             band = "near" if distance <= 4 else "across the room"
-            context = self._canon_context_for_entity(room, None, entity, band, record_id)
+            context = self._canon_context_for_entity(
+                room, None, entity, band, record_id
+            )
             context["source"] = "background"
             context["engine_choices"] = dict(context.get("engine_choices") or {})
             context["engine_choices"]["turn_cost"] = 0
@@ -1708,7 +2134,12 @@ class GameSession:
         player = state.player
         candidates = []
         for entity in state.entities.values():
-            if entity.id == state.player_id or entity.kind not in {"prop", "item", "npc", "actor"}:
+            if entity.id == state.player_id or entity.kind not in {
+                "prop",
+                "item",
+                "npc",
+                "actor",
+            }:
                 continue
             if entity.kind == "actor" and not entity.alive:
                 continue
@@ -1730,7 +2161,9 @@ class GameSession:
         return [(distance, entity) for distance, _entity_id, entity in candidates]
 
     def drain_canon_prewarm(self, block: bool = False) -> None:
-        remaining: list[tuple[concurrent.futures.Future[CanonResolution], CanonSaturationJob]] = []
+        remaining: list[
+            tuple[concurrent.futures.Future[CanonResolution], CanonSaturationJob]
+        ] = []
         for future, job in self._pending_canon:
             if not block and not future.done():
                 remaining.append((future, job))
@@ -1738,12 +2171,17 @@ class GameSession:
             try:
                 resolution = future.result()
             except Exception as exc:
-                resolution = CanonResolution(None, True, str(exc), self.canon_provider_label)
+                resolution = CanonResolution(
+                    None, True, str(exc), self.canon_provider_label
+                )
             self.canon_provider_label = resolution.provider_name
             self._queued_canon_ids.discard(job.record_id)
             if resolution.technical_failure or resolution.record is None:
                 continue
-            if job.superseded_by and job.superseded_by in self.engine.state.canon_records:
+            if (
+                job.superseded_by
+                and job.superseded_by in self.engine.state.canon_records
+            ):
                 continue
             if job.record_id in self.engine.state.canon_records:
                 continue
@@ -1760,7 +2198,9 @@ class GameSession:
             promise_id = str(event.get("promise_id") or "")
             applied = self.engine.apply_promise_flesh(promise_id, event.get("flesh"))
             if applied is not None:
-                self._flesh_apply_buffer.append({"promise_id": promise_id, "flesh": dict(applied.flesh or {})})
+                self._flesh_apply_buffer.append(
+                    {"promise_id": promise_id, "flesh": dict(applied.flesh or {})}
+                )
 
     def _pop_applied_flesh(self) -> list[dict[str, Any]]:
         applied, self._flesh_apply_buffer = self._flesh_apply_buffer, []
@@ -1799,7 +2239,11 @@ class GameSession:
             book.name = record.title
         if record.summary:
             book.description = record.summary
-        author = record.llm_choices.get("author") if isinstance(record.llm_choices, dict) else None
+        author = (
+            record.llm_choices.get("author")
+            if isinstance(record.llm_choices, dict)
+            else None
+        )
         if author and record.summary and author not in record.summary:
             book.description = f"{record.summary} (by {author})"
 
@@ -1817,13 +2261,19 @@ class GameSession:
             self._lore_executor.shutdown(wait=False, cancel_futures=True)
             self._lore_executor = None
 
-    def apply_recorded_promises(self, raw_promises: list[dict[str, Any]] | None) -> None:
+    def apply_recorded_promises(
+        self, raw_promises: list[dict[str, Any]] | None
+    ) -> None:
         """Inject promises recorded at this apply point in a live run.
 
         Binding and merging re-run deterministically against the replayed engine state,
         which matches the live state because apply points are recorded per action.
         """
-        promises = [WorldPromise.from_dict(raw) for raw in raw_promises or [] if isinstance(raw, dict)]
+        promises = [
+            WorldPromise.from_dict(raw)
+            for raw in raw_promises or []
+            if isinstance(raw, dict)
+        ]
         if not promises:
             return
         self._promise_apply_buffer.extend(promise.to_dict() for promise in promises)
@@ -1840,7 +2290,9 @@ class GameSession:
         profile = self.engine.state.npc_profiles.get(npc.id)
         if profile is None or not profile.wares:
             return [f"{npc.name} has nothing to trade."]
-        wares_text = ", ".join(f"{name} x{amount}" for name, amount in sorted(profile.wares.items()))
+        wares_text = ", ".join(
+            f"{name} x{amount}" for name, amount in sorted(profile.wares.items())
+        )
         return [f"{npc.name} has for trade: {wares_text}"]
 
     def to_replay(self) -> dict[str, Any]:
@@ -1915,7 +2367,11 @@ def describe_journal(engine: GameEngine) -> list[str]:
         return ["Your journal is empty. The world talks - listen to people."]
     lines = ["Journal - what the world has told you:"]
     for index, entry in enumerate(entries, 1):
-        source = f" (from {entry['source']})" if entry["source"] and entry["source"] != "unknown" else ""
+        source = (
+            f" (from {entry['source']})"
+            if entry["source"] and entry["source"] != "unknown"
+            else ""
+        )
         line = f"  {index}. [{entry['status']}] {entry['subject']}: {entry['text']}{source}"
         lines.append(line)
         if entry["hint"]:
@@ -1926,34 +2382,65 @@ def describe_journal(engine: GameEngine) -> list[str]:
 def describe_state(engine: GameEngine) -> list[str]:
     state = engine.state
     player = state.player
-    inventory = ", ".join(f"{name} x{amount}" for name, amount in sorted(state.inventory.items())) or "empty"
-    curses = ", ".join(f"{curse.name} x{curse.stacks}" for curse in state.curses.values()) or "none"
+    inventory = (
+        ", ".join(
+            f"{name} x{amount}" for name, amount in sorted(state.inventory.items())
+        )
+        or "empty"
+    )
+    curses = (
+        ", ".join(f"{curse.name} x{curse.stacks}" for curse in state.curses.values())
+        or "none"
+    )
     flags = ", ".join(sorted(state.flags)) or "none"
-    statuses = ", ".join(
-        f"{player.status_display.get(s, s)}:{v}" if v != "permanent" else f"{player.status_display.get(s, s)}:permanent"
-        for s, v in sorted(player.statuses.items())
-    ) or "none"
+    statuses = (
+        ", ".join(
+            f"{player.status_display.get(s, s)}:{v}"
+            if v != "permanent"
+            else f"{player.status_display.get(s, s)}:permanent"
+            for s, v in sorted(player.statuses.items())
+        )
+        or "none"
+    )
     enemies = []
     for enemy in sorted(engine.living_enemies(), key=lambda entity: entity.id):
         e_status_str = ""
         if enemy.statuses:
-            e_parts = ",".join(f"{enemy.status_display.get(k, k)}:{v}" for k, v in sorted(enemy.statuses.items()))
+            e_parts = ",".join(
+                f"{enemy.status_display.get(k, k)}:{v}"
+                for k, v in sorted(enemy.statuses.items())
+            )
             e_status_str = f" [{e_parts}]"
-        enemies.append(f"{enemy.name}({enemy.hp}/{enemy.max_hp}) at {enemy.x},{enemy.y} [{enemy.faction}]{e_status_str}")
+        enemies.append(
+            f"{enemy.name}({enemy.hp}/{enemy.max_hp}) at {enemy.x},{enemy.y} [{enemy.faction}]{e_status_str}"
+        )
     allies = []
     for ally in sorted(
-        (e for e in engine.state.entities.values() if e.kind in {"actor", "npc"} and e.faction == "ally" and e.hp > 0),
+        (
+            e
+            for e in engine.state.entities.values()
+            if e.kind in {"actor", "npc"} and e.faction == "ally" and e.hp > 0
+        ),
         key=lambda entity: entity.id,
     ):
         a_status_str = ""
         if ally.statuses:
-            a_parts = ",".join(f"{ally.status_display.get(k, k)}:{v}" for k, v in sorted(ally.statuses.items()))
+            a_parts = ",".join(
+                f"{ally.status_display.get(k, k)}:{v}"
+                for k, v in sorted(ally.statuses.items())
+            )
             a_status_str = f" [{a_parts}]"
         tag_str = f" tags:{','.join(sorted(ally.tags))}" if ally.tags else ""
-        allies.append(f"{ally.name}({ally.hp}/{ally.max_hp}) at {ally.x},{ally.y}{tag_str}{a_status_str}")
+        allies.append(
+            f"{ally.name}({ally.hp}/{ally.max_hp}) at {ally.x},{ally.y}{tag_str}{a_status_str}"
+        )
     npcs = []
     for npc in sorted(
-        (e for e in engine.state.entities.values() if e.kind == "npc" and engine.is_visible(e.x, e.y)),
+        (
+            e
+            for e in engine.state.entities.values()
+            if e.kind == "npc" and engine.is_visible(e.x, e.y)
+        ),
         key=lambda entity: entity.id,
     ):
         profile = engine.state.npc_profiles.get(npc.id)
@@ -1961,20 +2448,39 @@ def describe_state(engine: GameEngine) -> list[str]:
         npcs.append(f"{npc.name}{role} at {npc.x},{npc.y}")
     props = []
     for prop in sorted(
-        (e for e in engine.state.entities.values() if e.kind == "prop" and engine.is_visible(e.x, e.y)),
+        (
+            e
+            for e in engine.state.entities.values()
+            if e.kind == "prop" and engine.is_visible(e.x, e.y)
+        ),
         key=lambda entity: entity.id,
     ):
-        props.append(f"{prop.name} at {prop.x},{prop.y} ({prop.description}) tags:{','.join(sorted(prop.tags))}")
+        props.append(
+            f"{prop.name} at {prop.x},{prop.y} ({prop.description}) tags:{','.join(sorted(prop.tags))}"
+        )
     current_room = engine.room_profile_at(player.x, player.y)
     visible_rooms = engine.visible_room_profiles(limit=5)
     room_lines = []
     for room in visible_rooms:
         topics = ", ".join(room["topics"][:2])
         topic_text = f" topics:{topics}" if topics else ""
-        room_lines.append(f"{room['type']} [{room['era']}, {room['condition']}]{topic_text}")
-    equipment = ", ".join(f"{slot}: {item}" for slot, item in sorted(player.equipment.items()) if item) or "none"
-    resistances = ", ".join(f"{k}:{v}%" for k, v in sorted(player.resistances.items()) if v) or "none"
-    weaknesses = ", ".join(f"{k}:{v}%" for k, v in sorted(player.weaknesses.items()) if v) or "none"
+        room_lines.append(
+            f"{room['type']} [{room['era']}, {room['condition']}]{topic_text}"
+        )
+    equipment = (
+        ", ".join(
+            f"{slot}: {item}" for slot, item in sorted(player.equipment.items()) if item
+        )
+        or "none"
+    )
+    resistances = (
+        ", ".join(f"{k}:{v}%" for k, v in sorted(player.resistances.items()) if v)
+        or "none"
+    )
+    weaknesses = (
+        ", ".join(f"{k}:{v}%" for k, v in sorted(player.weaknesses.items()) if v)
+        or "none"
+    )
     lines = [
         f"Turn {state.turn} | HP {player.hp}/{player.max_hp} | MP {player.mana}/{player.max_mana}",
         f"Depth {state.depth}/{state.max_depth} | Position {player.x},{player.y} | Scenario {state.scenario}",
@@ -1990,9 +2496,11 @@ def describe_state(engine: GameEngine) -> list[str]:
         "Allies: " + ("; ".join(allies) if allies else "none"),
         "NPCs: " + ("; ".join(npcs) if npcs else "none"),
         "Props: " + ("; ".join(props) if props else "none"),
-        "Current room: " + (
+        "Current room: "
+        + (
             f"{current_room.room_type} [{current_room.era}, {current_room.condition}]"
-            if current_room else "none"
+            if current_room
+            else "none"
         ),
         "Visible rooms: " + ("; ".join(room_lines) if room_lines else "none"),
         f"Canon records: {len(state.canon_records)}",
@@ -2038,11 +2546,15 @@ def summarize_state(engine: GameEngine) -> dict[str, Any]:
         "inventory": dict(sorted(state.inventory.items())),
         "flags": dict(sorted(state.flags.items())),
         "tile_counts": tile_counts(state.tiles),
-        "current_room": current_room.to_public_dict(include_secrets=True) if current_room else None,
+        "current_room": current_room.to_public_dict(include_secrets=True)
+        if current_room
+        else None,
         "visible_rooms": engine.visible_room_profiles(limit=8),
         "canon_records": [
             record.to_dict()
-            for record in sorted(state.canon_records.values(), key=lambda record: record.id)
+            for record in sorted(
+                state.canon_records.values(), key=lambda record: record.id
+            )
         ],
         "event_timers": sorted(
             [
@@ -2054,7 +2566,11 @@ def summarize_state(engine: GameEngine) -> dict[str, Any]:
                 }
                 for event in state.event_timers
             ],
-            key=lambda event: (str(event.get("turns")), str(event.get("event_type")), str(event.get("name"))),
+            key=lambda event: (
+                str(event.get("turns")),
+                str(event.get("event_type")),
+                str(event.get("name")),
+            ),
         ),
         "triggers": sorted(
             [
@@ -2067,7 +2583,11 @@ def summarize_state(engine: GameEngine) -> dict[str, Any]:
                 }
                 for trigger in state.triggers
             ],
-            key=lambda trigger: (str(trigger.get("trigger")), str(trigger.get("target")), str(trigger.get("name"))),
+            key=lambda trigger: (
+                str(trigger.get("trigger")),
+                str(trigger.get("target")),
+                str(trigger.get("name")),
+            ),
         ),
         "curses": {
             curse_id: {

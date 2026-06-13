@@ -5,6 +5,7 @@ prompted: whether it exists (placed at generation as a RoomProfile secret slot),
 what anchors it, what the reward is, and how long searching takes. The LLM only
 words the clue. None of these functions call a provider.
 """
+
 from __future__ import annotations
 
 import random
@@ -134,7 +135,9 @@ def choose_weakness_hint(entity: Any, rng: random.Random) -> dict[str, Any]:
     return {"kind": "flavor", "hint": pool[rng.randrange(len(pool))]}
 
 
-def decoration_menu(room_tags: list[str], rng: random.Random, count: int = 3) -> list[dict[str, str]]:
+def decoration_menu(
+    room_tags: list[str], rng: random.Random, count: int = 3
+) -> list[dict[str, str]]:
     """Engine-built menu of non-blocking prop templates fitting the room's
     tags. A sweep that finds no secret may let the LLM pick ONE of these to
     surface on the map — the engine validates the choice against this menu."""
@@ -149,8 +152,7 @@ def decoration_menu(room_tags: list[str], rng: random.Random, count: int = 3) ->
         return []
     rng.shuffle(pool)
     return [
-        {"template": pid, "name": get_prop_template(pid).name}
-        for pid in pool[:count]
+        {"template": pid, "name": get_prop_template(pid).name} for pid in pool[:count]
     ]
 
 

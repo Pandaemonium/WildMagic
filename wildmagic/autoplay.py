@@ -11,7 +11,14 @@ import time
 import traceback
 from typing import Any, Protocol
 
-from .actions import DIRECTIONS, STANDARD_SPELLS, ActionResult, GameSession, describe_state, split_command
+from .actions import (
+    DIRECTIONS,
+    STANDARD_SPELLS,
+    ActionResult,
+    GameSession,
+    describe_state,
+    split_command,
+)
 from .config import (
     get_agent_model,
     ollama_agent_num_predict,
@@ -87,6 +94,7 @@ THEMES = (
 
 def random_seed_base() -> int:
     return random.SystemRandom().randint(1, MAX_RANDOM_SEED_BASE)
+
 
 PERSONA_GUIDANCE = {
     "cautious": (
@@ -199,26 +207,67 @@ COPIED_INSTRUCTION_COMMANDS = {
 }
 
 EXACT_VERBS = {
-    "inspect", "look", "status", "inventory", "inv", "i",
-    "journal", "rumors", "promises",
-    "examine", "study", "observe",
-    "wares", "browse", "shop",
-    "accept", "yes", "y", "reject", "decline", "no", "n",
-    "wait", ".", "open", "o",
-    "descend", "downstairs", ">",
-    "ascend", "upstairs", "<",
-    "pickup", "get", "take", "grab",
-    "quit", "exit",
+    "inspect",
+    "look",
+    "status",
+    "inventory",
+    "inv",
+    "i",
+    "journal",
+    "rumors",
+    "promises",
+    "examine",
+    "study",
+    "observe",
+    "wares",
+    "browse",
+    "shop",
+    "accept",
+    "yes",
+    "y",
+    "reject",
+    "decline",
+    "no",
+    "n",
+    "wait",
+    ".",
+    "open",
+    "o",
+    "descend",
+    "downstairs",
+    ">",
+    "ascend",
+    "upstairs",
+    "<",
+    "pickup",
+    "get",
+    "take",
+    "grab",
+    "quit",
+    "exit",
 }
 TAIL_VERBS = {
-    "cast", "wild",
-    "talk", "speak", "say",
-    "read", "peruse",
-    "investigate", "search",
-    "drop", "discard",
-    "use", "consume", "drink", "eat",
-    "equip", "wear", "wield",
-    "unequip", "unwield", "remove",
+    "cast",
+    "wild",
+    "talk",
+    "speak",
+    "say",
+    "read",
+    "peruse",
+    "investigate",
+    "search",
+    "drop",
+    "discard",
+    "use",
+    "consume",
+    "drink",
+    "eat",
+    "equip",
+    "wear",
+    "wield",
+    "unequip",
+    "unwield",
+    "remove",
 }
 REQUIRES_TAIL = {"cast", "wild", "talk", "speak", "say"}
 
@@ -407,8 +456,7 @@ class CampaignConfig:
 class PlayerAgent(Protocol):
     name: str
 
-    def choose(self, observation: AgentObservation) -> AgentDecision:
-        ...
+    def choose(self, observation: AgentObservation) -> AgentDecision: ...
 
 
 class StubAgent:
@@ -499,7 +547,9 @@ class OllamaAgent:
             error=error,
         )
 
-    def summarize(self, persona: str, theme: str, turns: int, notes: list[str]) -> str | None:
+    def summarize(
+        self, persona: str, theme: str, turns: int, notes: list[str]
+    ) -> str | None:
         prompt = {
             "persona": persona,
             "theme": theme,
@@ -515,7 +565,10 @@ class OllamaAgent:
             "model": self.model,
             "stream": False,
             "messages": [
-                {"role": "system", "content": "You are an autonomous QA playtester for Wild Magic summarizing an episode."},
+                {
+                    "role": "system",
+                    "content": "You are an autonomous QA playtester for Wild Magic summarizing an episode.",
+                },
                 {"role": "user", "content": json.dumps(prompt, ensure_ascii=True)},
             ],
             "think": ollama_thinking_enabled("agent"),
@@ -529,24 +582,32 @@ class OllamaAgent:
         }
         try:
             data = _post_ollama_chat(self.base_url, payload, self.timeout_seconds)
-            summary = strip_thinking(str(data.get("message", {}).get("content", ""))).strip()
+            summary = strip_thinking(
+                str(data.get("message", {}).get("content", ""))
+            ).strip()
             return summary or None
         except Exception:
             return None
 
-    def _messages(self, observation: AgentObservation, error: str | None) -> list[dict[str, str]]:
+    def _messages(
+        self, observation: AgentObservation, error: str | None
+    ) -> list[dict[str, str]]:
         system = AGENT_SYSTEM_PROMPT + "\n\n" + COMMAND_SURFACE.strip()
         payload = observation.to_prompt_dict()
         if error:
             payload["previous_error"] = error
-            payload["repair_instruction"] = "Return exactly one JSON object with a valid command."
+            payload["repair_instruction"] = (
+                "Return exactly one JSON object with a valid command."
+            )
         return [
             {"role": "system", "content": system},
             {"role": "user", "content": json.dumps(payload, ensure_ascii=True)},
         ]
 
 
-def local_map_view(session: GameSession, radius_x: int = 10, radius_y: int = 6) -> list[str]:
+def local_map_view(
+    session: GameSession, radius_x: int = 10, radius_y: int = 6
+) -> list[str]:
     rows = render_map(session)
     player = session.engine.state.player
     top = max(0, player.y - radius_y)
@@ -555,7 +616,7 @@ def local_map_view(session: GameSession, radius_x: int = 10, radius_y: int = 6) 
     view: list[str] = []
     for y in range(top, bottom):
         row = rows[y]
-        view.append(row[left:min(len(row), player.x + radius_x + 1)])
+        view.append(row[left : min(len(row), player.x + radius_x + 1)])
     return view
 
 
@@ -640,8 +701,14 @@ def avoid_commands_from_history(
         avoid.append(repeated_command)
     if recent_results:
         last = recent_results[-1]
-        messages = " ".join(str(message).lower() for message in last.get("messages", []))
-        if last.get("success") is False or "blocks the way" in messages or "unknown command" in messages:
+        messages = " ".join(
+            str(message).lower() for message in last.get("messages", [])
+        )
+        if (
+            last.get("success") is False
+            or "blocks the way" in messages
+            or "unknown command" in messages
+        ):
             command = str(last.get("command") or "").strip()
             if command:
                 avoid.append(command)
@@ -660,15 +727,25 @@ def decision_hints(prompt_data: dict[str, Any]) -> list[str]:
         mana = int(mp_match.group(1))
         max_mana = int(mp_match.group(2))
         if mana <= 0:
-            hints.append("MP is empty: wild spells with mana costs will take HP. Use wait to recover 1 MP.")
+            hints.append(
+                "MP is empty: wild spells with mana costs will take HP. Use wait to recover 1 MP."
+            )
         elif mana < max_mana:
-            hints.append("Waiting recovers 1 MP; consider waiting before more wild casting if no enemy is urgent.")
+            hints.append(
+                "Waiting recovers 1 MP; consider waiting before more wild casting if no enemy is urgent."
+            )
     spell_focus = str(prompt_data.get("spell_focus") or "").strip()
     if spell_focus:
-        hints.append(f"Current spell focus: {spell_focus}. If casting, invent a fresh situation-specific phrase.")
-    expedition_direction = str(prompt_data.get("expedition_direction") or "").strip().lower()
+        hints.append(
+            f"Current spell focus: {spell_focus}. If casting, invent a fresh situation-specific phrase."
+        )
+    expedition_direction = (
+        str(prompt_data.get("expedition_direction") or "").strip().lower()
+    )
     if expedition_direction:
-        info = adjacent.get(expedition_direction) if isinstance(adjacent, dict) else None
+        info = (
+            adjacent.get(expedition_direction) if isinstance(adjacent, dict) else None
+        )
         if isinstance(info, dict):
             status = info.get("status")
             suggested = info.get("suggested_command")
@@ -681,7 +758,9 @@ def decision_hints(prompt_data: dict[str, Any]) -> list[str]:
                     f"Run heading is {expedition_direction}, but it is blocked now; use a side route, door, investigation, or room exit to regain that heading."
                 )
         else:
-            hints.append(f"Run heading is {expedition_direction}; resume that general direction after local interactions.")
+            hints.append(
+                f"Run heading is {expedition_direction}; resume that general direction after local interactions."
+            )
     open_dirs = [
         direction
         for direction, info in adjacent.items()
@@ -695,13 +774,21 @@ def decision_hints(prompt_data: dict[str, Any]) -> list[str]:
         if isinstance(info, dict) and info.get("status") == "blocked"
     ]
     if blocked_dirs:
-        hints.append("Avoid blocked directions unless intentionally attacking an enemy: " + ", ".join(sorted(blocked_dirs)))
+        hints.append(
+            "Avoid blocked directions unless intentionally attacking an enemy: "
+            + ", ".join(sorted(blocked_dirs))
+        )
     avoid = prompt_data.get("avoid_commands") or []
     if avoid:
-        hints.append("Do not choose these repeated/failed commands now: " + ", ".join(str(command) for command in avoid))
+        hints.append(
+            "Do not choose these repeated/failed commands now: "
+            + ", ".join(str(command) for command in avoid)
+        )
     last = prompt_data.get("last_result") or {}
     if isinstance(last, dict) and last.get("success") is False:
-        hints.append("The last command failed; choose a different command that changes position, state, or information.")
+        hints.append(
+            "The last command failed; choose a different command that changes position, state, or information."
+        )
     if prompt_data.get("nudge"):
         hints.append(str(prompt_data["nudge"]))
     return hints
@@ -741,9 +828,13 @@ def validate_agent_command(command: str) -> str:
         raise ValueError("command is empty")
     lowered = original.lower()
     if any(fragment in lowered for fragment in PLACEHOLDER_FRAGMENTS):
-        raise ValueError("replace placeholder text with a specific command, such as a concrete spell idea or target")
+        raise ValueError(
+            "replace placeholder text with a specific command, such as a concrete spell idea or target"
+        )
     if lowered in COPIED_INSTRUCTION_COMMANDS:
-        raise ValueError("do not copy spell instructions; write a specific original spell after cast")
+        raise ValueError(
+            "do not copy spell instructions; write a specific original spell after cast"
+        )
     tokens = split_command(original)
     if not tokens:
         raise ValueError("command is empty")
@@ -767,7 +858,9 @@ def validate_agent_command(command: str) -> str:
 
 
 class InvariantChecker:
-    def check(self, session: GameSession, result: ActionResult, episode: int) -> list[Finding]:
+    def check(
+        self, session: GameSession, result: ActionResult, episode: int
+    ) -> list[Finding]:
         findings: list[Finding] = []
         base = {
             "episode": episode,
@@ -776,33 +869,44 @@ class InvariantChecker:
             "turn": result.turn_after,
         }
         if result.technical_failure and result.turn_after != result.turn_before:
-            findings.append(Finding(
-                tier=1,
-                kind="technical_failure_consumed_turn",
-                evidence=result.to_record(),
-                **base,
-            ))
+            findings.append(
+                Finding(
+                    tier=1,
+                    kind="technical_failure_consumed_turn",
+                    evidence=result.to_record(),
+                    **base,
+                )
+            )
         if wild_rejected(result) and not result.consumed_turn:
-            findings.append(Finding(
-                tier=1,
-                kind="rejected_spell_did_not_consume_turn",
-                evidence=result.to_record(),
-                **base,
-            ))
-        if result.turn_after < result.turn_before or result.turn_after - result.turn_before > 1:
-            findings.append(Finding(
-                tier=1,
-                kind="turn_counter_jump",
-                evidence=result.to_record(),
-                **base,
-            ))
+            findings.append(
+                Finding(
+                    tier=1,
+                    kind="rejected_spell_did_not_consume_turn",
+                    evidence=result.to_record(),
+                    **base,
+                )
+            )
+        if (
+            result.turn_after < result.turn_before
+            or result.turn_after - result.turn_before > 1
+        ):
+            findings.append(
+                Finding(
+                    tier=1,
+                    kind="turn_counter_jump",
+                    evidence=result.to_record(),
+                    **base,
+                )
+            )
         for error in session.engine.validate_state():
-            findings.append(Finding(
-                tier=1,
-                kind="state_validation_error",
-                evidence={"error": error, "result": result.to_record()},
-                **base,
-            ))
+            findings.append(
+                Finding(
+                    tier=1,
+                    kind="state_validation_error",
+                    evidence={"error": error, "result": result.to_record()},
+                    **base,
+                )
+            )
         for entity in session.engine.state.entities.values():
             if not entity.alive or not entity.blocks:
                 continue
@@ -812,23 +916,31 @@ class InvariantChecker:
                 continue
             tile = session.engine.tile_at(entity.x, entity.y)
             if tile in BLOCKING_TILES:
-                findings.append(Finding(
-                    tier=1,
-                    kind="blocking_actor_on_blocking_tile",
-                    evidence={
-                        "entity": entity.to_public_dict(),
-                        "tile": tile,
-                        "tile_name": TILE_NAMES.get(tile, tile),
-                    },
+                findings.append(
+                    Finding(
+                        tier=1,
+                        kind="blocking_actor_on_blocking_tile",
+                        evidence={
+                            "entity": entity.to_public_dict(),
+                            "tile": tile,
+                            "tile_name": TILE_NAMES.get(tile, tile),
+                        },
+                        **base,
+                    )
+                )
+        if (
+            result.action in {"cast", "talk", "examine", "read", "investigate"}
+            and result.consumed_turn
+            and not result.messages
+        ):
+            findings.append(
+                Finding(
+                    tier=2,
+                    kind="turn_consumed_without_messages",
+                    evidence=result.to_record(),
                     **base,
-                ))
-        if result.action in {"cast", "talk", "examine", "read", "investigate"} and result.consumed_turn and not result.messages:
-            findings.append(Finding(
-                tier=2,
-                kind="turn_consumed_without_messages",
-                evidence=result.to_record(),
-                **base,
-            ))
+                )
+            )
         return findings
 
 
@@ -865,7 +977,9 @@ class EpisodeRunner:
         self.command_path = run_dir / f"{stem}.commands.txt"
 
     def run(self) -> EpisodeSummary:
-        session = GameSession(seed=self.seed, scenario=self.scenario, provider_name=self.config.provider)
+        session = GameSession(
+            seed=self.seed, scenario=self.scenario, provider_name=self.config.provider
+        )
         completion_reason = "max_turns"
         start = time.time()
         last_messages = ["Episode started."]
@@ -939,34 +1053,45 @@ class EpisodeRunner:
                         "direction, fight, descend, or cast a different spell."
                     )
                 if repeated_count >= 6:
-                    self.findings.append(Finding(
-                        tier=2,
-                        kind="possible_softlock",
-                        episode=self.episode_index,
-                        seed=self.seed,
-                        scenario=self.scenario,
-                        turn=session.engine.state.turn,
-                        evidence={"command": command, "repeat_count": repeated_count},
-                    ))
+                    self.findings.append(
+                        Finding(
+                            tier=2,
+                            kind="possible_softlock",
+                            episode=self.episode_index,
+                            seed=self.seed,
+                            scenario=self.scenario,
+                            turn=session.engine.state.turn,
+                            evidence={
+                                "command": command,
+                                "repeat_count": repeated_count,
+                            },
+                        )
+                    )
                     completion_reason = "possible_softlock"
                     break
                 self.command_history.append(command)
                 result, elapsed, exception_text = self._execute(session, command)
                 self.step_count += 1
                 if result is None:
-                    self.findings.append(Finding(
-                        tier=1,
-                        kind="unhandled_exception",
-                        episode=self.episode_index,
-                        seed=self.seed,
-                        scenario=self.scenario,
-                        turn=session.engine.state.turn,
-                        evidence={"command": command, "traceback": exception_text},
-                    ))
-                    self._write_step(observation, decision, None, [], elapsed, agent_seconds)
+                    self.findings.append(
+                        Finding(
+                            tier=1,
+                            kind="unhandled_exception",
+                            episode=self.episode_index,
+                            seed=self.seed,
+                            scenario=self.scenario,
+                            turn=session.engine.state.turn,
+                            evidence={"command": command, "traceback": exception_text},
+                        )
+                    )
+                    self._write_step(
+                        observation, decision, None, [], elapsed, agent_seconds
+                    )
                     completion_reason = "exception"
                     break
-                verb = split_command(command)[0].lower() if split_command(command) else ""
+                verb = (
+                    split_command(command)[0].lower() if split_command(command) else ""
+                )
                 command_counts[verb] = command_counts.get(verb, 0) + 1
                 if result.technical_failure:
                     # Casting failures (the wild resolver) and read/investigate
@@ -983,16 +1108,24 @@ class EpisodeRunner:
                 if decision.note:
                     self.notes.append(f"turn {result.turn_after}: {decision.note}")
                 if decision.bug_suspected:
-                    self.findings.append(Finding(
-                        tier=3,
-                        kind="agent_suspected_bug",
-                        episode=self.episode_index,
-                        seed=self.seed,
-                        scenario=self.scenario,
-                        turn=result.turn_after,
-                        evidence={"command": command, "note": decision.note, "raw_response": decision.raw_response},
-                    ))
-                self._write_step(observation, decision, result, violations, elapsed, agent_seconds)
+                    self.findings.append(
+                        Finding(
+                            tier=3,
+                            kind="agent_suspected_bug",
+                            episode=self.episode_index,
+                            seed=self.seed,
+                            scenario=self.scenario,
+                            turn=result.turn_after,
+                            evidence={
+                                "command": command,
+                                "note": decision.note,
+                                "raw_response": decision.raw_response,
+                            },
+                        )
+                    )
+                self._write_step(
+                    observation, decision, result, violations, elapsed, agent_seconds
+                )
                 summary = result_summary(result)
                 recent_results.append(summary)
                 last_messages = result.messages or ["(no new messages)"]
@@ -1001,9 +1134,17 @@ class EpisodeRunner:
                         f"`{result.command}` did not change the turn. Pick a different command; use the adjacent "
                         "direction table instead of retrying the same blocked action."
                     )
-                recent_casts = sum(1 for item in self.command_history[-4:] if item.lower().startswith("cast "))
+                recent_casts = sum(
+                    1
+                    for item in self.command_history[-4:]
+                    if item.lower().startswith("cast ")
+                )
                 living_enemies = session.engine.living_enemies()
-                visible_enemies = [enemy for enemy in living_enemies if session.engine.is_visible(enemy.x, enemy.y)]
+                visible_enemies = [
+                    enemy
+                    for enemy in living_enemies
+                    if session.engine.is_visible(enemy.x, enemy.y)
+                ]
                 if recent_casts >= 3 and not visible_enemies:
                     nudge = (
                         f"You have cast several spells and no visible enemy remains. Resume exploration toward "
@@ -1020,7 +1161,9 @@ class EpisodeRunner:
             self._write_commands()
             save_replay(session, self.replay_path)
             turns = session.engine.state.turn
-            casts = sum(1 for record in session.records if record.get("action") == "cast")
+            casts = sum(
+                1 for record in session.records if record.get("action") == "cast"
+            )
         finally:
             session.close()
         for finding in self.findings:
@@ -1066,7 +1209,9 @@ class EpisodeRunner:
                 error=str(exc),
             )
 
-    def _execute(self, session: GameSession, command: str) -> tuple[ActionResult | None, float, str | None]:
+    def _execute(
+        self, session: GameSession, command: str
+    ) -> tuple[ActionResult | None, float, str | None]:
         started = time.perf_counter()
         try:
             result = session.execute_command(command)
@@ -1102,7 +1247,10 @@ class EpisodeRunner:
         append_jsonl(self.step_path, asdict(record))
 
     def _write_commands(self) -> None:
-        self.command_path.write_text("\n".join(self.command_history) + ("\n" if self.command_history else ""), encoding="utf-8")
+        self.command_path.write_text(
+            "\n".join(self.command_history) + ("\n" if self.command_history else ""),
+            encoding="utf-8",
+        )
 
     def _drain_background(self, session: GameSession) -> None:
         session.drain_lore(block=True)
@@ -1119,7 +1267,9 @@ class EpisodeRunner:
 class CampaignRunner:
     def __init__(self, config: CampaignConfig) -> None:
         self.config = config
-        self.run_id = config.run_id or datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        self.run_id = config.run_id or datetime.now(timezone.utc).strftime(
+            "%Y%m%dT%H%M%SZ"
+        )
         self.run_dir = config.out / self.run_id
         self.run_dir.mkdir(parents=True, exist_ok=True)
         set_runtime_config_value("WILDMAGIC_AUDIT_DIR", str(self.run_dir))
@@ -1140,12 +1290,19 @@ class CampaignRunner:
             max_episodes = 1
         episode_index = 1
         while True:
-            if self.config.hours is not None and time.time() - start >= self.config.hours * 3600:
+            if (
+                self.config.hours is not None
+                and time.time() - start >= self.config.hours * 3600
+            ):
                 break
             if max_episodes is not None and episode_index > max_episodes:
                 break
-            scenario = self.config.scenarios[(episode_index - 1) % len(self.config.scenarios)]
-            persona = self.config.personas[(episode_index - 1) % len(self.config.personas)]
+            scenario = self.config.scenarios[
+                (episode_index - 1) % len(self.config.scenarios)
+            ]
+            persona = self.config.personas[
+                (episode_index - 1) % len(self.config.personas)
+            ]
             theme = THEMES[(episode_index - 1) % len(THEMES)]
             seed = self.config.seed_base + episode_index - 1
             agent = self._make_agent(seed)
@@ -1165,21 +1322,27 @@ class CampaignRunner:
             except KeyboardInterrupt:
                 raise
             except Exception:
-                runner.findings.append(Finding(
-                    tier=1,
-                    kind="harness_error",
-                    episode=episode_index,
-                    seed=seed,
-                    scenario=scenario,
-                    turn=-1,
-                    evidence={"traceback": traceback.format_exc()},
-                ))
+                runner.findings.append(
+                    Finding(
+                        tier=1,
+                        kind="harness_error",
+                        episode=episode_index,
+                        seed=seed,
+                        scenario=scenario,
+                        turn=-1,
+                        evidence={"traceback": traceback.format_exc()},
+                    )
+                )
             self.findings.extend(runner.findings)
             for finding in runner.findings:
                 append_jsonl(self.findings_path, finding_to_record(finding))
-            serious_kinds = {finding.kind for finding in runner.findings if finding.tier <= 2}
+            serious_kinds = {
+                finding.kind for finding in runner.findings if finding.tier <= 2
+            }
             if serious_kinds:
-                self.regression_entries.setdefault((seed, scenario), set()).update(serious_kinds)
+                self.regression_entries.setdefault((seed, scenario), set()).update(
+                    serious_kinds
+                )
                 self.write_regression_seeds()
             self.write_report()
             episode_index += 1
@@ -1195,15 +1358,24 @@ class CampaignRunner:
         return StubAgent(self.config.stub_commands)
 
     def write_regression_seeds(self) -> None:
-        lines = ["# seed\tscenario\tfinding kinds — re-run with: python -m wildmagic.cli --seed <seed> --scenario <scenario>"]
-        for (seed, scenario), kinds in sorted(self.regression_entries.items(), key=lambda item: (str(item[0][0]), item[0][1])):
+        lines = [
+            "# seed\tscenario\tfinding kinds — re-run with: python -m wildmagic.cli --seed <seed> --scenario <scenario>"
+        ]
+        for (seed, scenario), kinds in sorted(
+            self.regression_entries.items(),
+            key=lambda item: (str(item[0][0]), item[0][1]),
+        ):
             lines.append(f"{seed}\t{scenario}\t{','.join(sorted(kinds))}")
         self.regression_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     def write_report(self) -> None:
         total_turns = sum(summary.turns for summary in self.episode_summaries)
         total_casts = sum(summary.casts for summary in self.episode_summaries)
-        deaths = sum(1 for summary in self.episode_summaries if summary.completion_reason.startswith("death"))
+        deaths = sum(
+            1
+            for summary in self.episode_summaries
+            if summary.completion_reason.startswith("death")
+        )
         lines = [
             "# Autoplay Report",
             "",
@@ -1232,7 +1404,12 @@ class CampaignRunner:
             by_kind: dict[str, int] = {}
             for finding in tier1:
                 by_kind[finding.kind] = by_kind.get(finding.kind, 0) + 1
-            lines.append("Counts: " + ", ".join(f"{kind}={count}" for kind, count in sorted(by_kind.items())))
+            lines.append(
+                "Counts: "
+                + ", ".join(
+                    f"{kind}={count}" for kind, count in sorted(by_kind.items())
+                )
+            )
             lines.append("")
             for finding in tier1:
                 signature = (finding.kind, crash_signature(finding))
@@ -1263,50 +1440,88 @@ class CampaignRunner:
                 )
         lines.extend(["", "## Agent Leads (tier 3, unverified)", ""])
         tier3 = [finding for finding in self.findings if finding.tier == 3]
-        summaries_with_text = [summary for summary in self.episode_summaries if summary.agent_summary]
+        summaries_with_text = [
+            summary for summary in self.episode_summaries if summary.agent_summary
+        ]
         if not tier3 and not summaries_with_text:
             lines.append("None.")
         else:
             for finding in tier3:
                 note = finding.evidence.get("note") or "(no note)"
                 command = finding.evidence.get("command") or ""
-                lines.append(f"- episode {finding.episode:03d} turn {finding.turn}: {note} (after `{command}`)")
+                lines.append(
+                    f"- episode {finding.episode:03d} turn {finding.turn}: {note} (after `{command}`)"
+                )
             for summary in summaries_with_text:
-                lines.append(f"- episode {summary.episode:03d} summary: {summary.agent_summary}")
+                lines.append(
+                    f"- episode {summary.episode:03d} summary: {summary.agent_summary}"
+                )
         lines.extend(["", "## Stats", ""])
         if self.episode_summaries:
             total_steps = sum(summary.steps for summary in self.episode_summaries)
-            total_parse_failures = sum(summary.parse_failures for summary in self.episode_summaries)
-            total_cast_technical = sum(summary.cast_technical_failures for summary in self.episode_summaries)
-            total_canon_technical = sum(summary.canon_technical_failures for summary in self.episode_summaries)
-            total_rejected = sum(summary.rejected_casts for summary in self.episode_summaries)
+            total_parse_failures = sum(
+                summary.parse_failures for summary in self.episode_summaries
+            )
+            total_cast_technical = sum(
+                summary.cast_technical_failures for summary in self.episode_summaries
+            )
+            total_canon_technical = sum(
+                summary.canon_technical_failures for summary in self.episode_summaries
+            )
+            total_rejected = sum(
+                summary.rejected_casts for summary in self.episode_summaries
+            )
             total_canon_actions = sum(
                 count
                 for summary in self.episode_summaries
                 for verb, count in summary.command_counts.items()
                 if verb in {"read", "investigate", "examine"}
             )
-            lines.append(f"- Agent parse-failure rate: {total_parse_failures}/{max(total_steps, 1)} steps")
-            lines.append(f"- Wild-cast technical failures: {total_cast_technical}/{total_casts} casts")
-            lines.append(f"- Wild-cast OP rejections: {total_rejected}/{total_casts} casts")
+            lines.append(
+                f"- Agent parse-failure rate: {total_parse_failures}/{max(total_steps, 1)} steps"
+            )
+            lines.append(
+                f"- Wild-cast technical failures: {total_cast_technical}/{total_casts} casts"
+            )
+            lines.append(
+                f"- Wild-cast OP rejections: {total_rejected}/{total_casts} casts"
+            )
             lines.append(
                 f"- Read/investigate (canon) technical failures: "
                 f"{total_canon_technical}/{total_canon_actions} read/investigate/examine actions"
             )
             by_reason: dict[str, int] = {}
             for summary in self.episode_summaries:
-                by_reason[summary.completion_reason] = by_reason.get(summary.completion_reason, 0) + 1
-            lines.append("- Completion reasons: " + ", ".join(f"{key}={value}" for key, value in sorted(by_reason.items())))
+                by_reason[summary.completion_reason] = (
+                    by_reason.get(summary.completion_reason, 0) + 1
+                )
+            lines.append(
+                "- Completion reasons: "
+                + ", ".join(
+                    f"{key}={value}" for key, value in sorted(by_reason.items())
+                )
+            )
             verb_totals: dict[str, int] = {}
             for summary in self.episode_summaries:
                 for verb, count in summary.command_counts.items():
                     verb_totals[verb] = verb_totals.get(verb, 0) + count
-            top_verbs = sorted(verb_totals.items(), key=lambda item: item[1], reverse=True)[:10]
+            top_verbs = sorted(
+                verb_totals.items(), key=lambda item: item[1], reverse=True
+            )[:10]
             if top_verbs:
-                lines.append("- Command distribution (top 10): " + ", ".join(f"{verb}={count}" for verb, count in top_verbs))
+                lines.append(
+                    "- Command distribution (top 10): "
+                    + ", ".join(f"{verb}={count}" for verb, count in top_verbs)
+                )
             persona_lines = []
-            for persona in sorted({summary.persona for summary in self.episode_summaries}):
-                group = [summary for summary in self.episode_summaries if summary.persona == persona]
+            for persona in sorted(
+                {summary.persona for summary in self.episode_summaries}
+            ):
+                group = [
+                    summary
+                    for summary in self.episode_summaries
+                    if summary.persona == persona
+                ]
                 persona_lines.append(
                     f"{persona}: {len(group)} episode(s), {sum(s.turns for s in group)} turns, {sum(s.findings for s in group)} findings"
                 )
@@ -1323,14 +1538,45 @@ class CampaignRunner:
 
 
 _NOTE_STOPWORDS = {
-    "the", "this", "that", "with", "from", "into", "when", "after", "before", "while",
-    "have", "feel", "feels", "felt", "very", "just", "like", "some", "what", "which",
-    "were", "been", "they", "them", "their", "there", "turn", "game", "spell", "spells",
+    "the",
+    "this",
+    "that",
+    "with",
+    "from",
+    "into",
+    "when",
+    "after",
+    "before",
+    "while",
+    "have",
+    "feel",
+    "feels",
+    "felt",
+    "very",
+    "just",
+    "like",
+    "some",
+    "what",
+    "which",
+    "were",
+    "been",
+    "they",
+    "them",
+    "their",
+    "there",
+    "turn",
+    "game",
+    "spell",
+    "spells",
 }
 
 
 def note_keywords(text: str) -> set[str]:
-    return {word for word in re.findall(r"[a-z']+", text.lower()) if len(word) > 3 and word not in _NOTE_STOPWORDS}
+    return {
+        word
+        for word in re.findall(r"[a-z']+", text.lower())
+        if len(word) > 3 and word not in _NOTE_STOPWORDS
+    }
 
 
 def cluster_notes(notes: list[str], threshold: float = 0.3) -> list[tuple[str, int]]:
@@ -1366,7 +1612,11 @@ def finding_spell(finding: Finding) -> str | None:
 
 
 def crash_signature(finding: Finding) -> str:
-    text = finding.evidence.get("traceback") if isinstance(finding.evidence, dict) else None
+    text = (
+        finding.evidence.get("traceback")
+        if isinstance(finding.evidence, dict)
+        else None
+    )
     if not isinstance(text, str):
         return ""
     for line in reversed(text.splitlines()):
@@ -1393,7 +1643,11 @@ def parse_args(argv: list[str] | None = None) -> CampaignConfig:
     parser.add_argument("--max-turns", type=int, default=120)
     parser.add_argument("--max-steps", type=int, default=None)
     parser.add_argument("--episode-minutes", type=float, default=15.0)
-    parser.add_argument("--scenario", action="append", choices=["dungeon", "test_chamber", "empire_compound", "frontier", "town"])
+    parser.add_argument(
+        "--scenario",
+        action="append",
+        choices=["dungeon", "test_chamber", "empire_compound", "frontier", "town"],
+    )
     parser.add_argument("--persona", action="append", choices=list(PERSONAS))
     parser.add_argument(
         "--seed-base",
@@ -1401,7 +1655,9 @@ def parse_args(argv: list[str] | None = None) -> CampaignConfig:
         default=None,
         help="First episode seed. Defaults to a fresh random seed base for each campaign.",
     )
-    parser.add_argument("--provider", default="mock", choices=["auto", "mock", "ollama"])
+    parser.add_argument(
+        "--provider", default="mock", choices=["auto", "mock", "ollama"]
+    )
     parser.add_argument("--agent", default="stub", choices=["ollama", "stub", "random"])
     parser.add_argument("--out", type=Path, default=Path("logs/autoplay"))
     parser.add_argument("--run-id", default=None)

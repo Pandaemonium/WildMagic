@@ -5,6 +5,7 @@ that LLM materialization (canon.py) consumes. A book placed here has a concrete
 grammar-tier name ("a water-stained ledger of weather law") the moment the map
 exists; its title, author, and pages stay unmaterialized until read or prewarmed.
 """
+
 from __future__ import annotations
 
 import random
@@ -12,75 +13,164 @@ from typing import Any
 
 
 _BOOK_FORMS = (
-    "volume", "ledger", "treatise", "folio", "chapbook", "codex",
-    "commonplace book", "primer", "registry", "breviary",
+    "volume",
+    "ledger",
+    "treatise",
+    "folio",
+    "chapbook",
+    "codex",
+    "commonplace book",
+    "primer",
+    "registry",
+    "breviary",
 )
 
 _BOOK_CONDITIONS = (
-    "water-stained", "soot-darkened", "mouse-chewed", "carefully rebound",
-    "swollen with damp", "annotated in two hands", "missing its cover",
-    "tied shut with twine", "smelling of tallow", "dog-eared",
+    "water-stained",
+    "soot-darkened",
+    "mouse-chewed",
+    "carefully rebound",
+    "swollen with damp",
+    "annotated in two hands",
+    "missing its cover",
+    "tied shut with twine",
+    "smelling of tallow",
+    "dog-eared",
 )
 
 _BOOK_BINDINGS = (
-    "cracked leather", "stiff grey board", "oiled canvas", "scraped vellum",
-    "thin pine slats", "wine-dark cloth",
+    "cracked leather",
+    "stiff grey board",
+    "oiled canvas",
+    "scraped vellum",
+    "thin pine slats",
+    "wine-dark cloth",
 )
 
 _BOOK_GENRES = (
-    "field guide", "court complaint", "sermon cycle", "trial transcript",
-    "household manual", "confession", "travel diary", "guild primer",
-    "mourning book", "saint's life", "tax commentary", "recipe book",
-    "children's lesson", "ship's log", "bestiary notes", "calendar of omens",
+    "field guide",
+    "court complaint",
+    "sermon cycle",
+    "trial transcript",
+    "household manual",
+    "confession",
+    "travel diary",
+    "guild primer",
+    "mourning book",
+    "saint's life",
+    "tax commentary",
+    "recipe book",
+    "children's lesson",
+    "ship's log",
+    "bestiary notes",
+    "calendar of omens",
 )
 
 _BOOK_DISCIPLINES = (
-    "devotional practice", "weather law", "borderkeeping", "funeral custom",
-    "river engineering", "kitchen physic", "market fraud", "saintly etiquette",
-    "wild-magic cautions", "garden rites", "census craft", "military doctrine",
-    "dream interpretation", "glassmaking", "road maintenance", "midwifery",
+    "devotional practice",
+    "weather law",
+    "borderkeeping",
+    "funeral custom",
+    "river engineering",
+    "kitchen physic",
+    "market fraud",
+    "saintly etiquette",
+    "wild-magic cautions",
+    "garden rites",
+    "census craft",
+    "military doctrine",
+    "dream interpretation",
+    "glassmaking",
+    "road maintenance",
+    "midwifery",
 )
 
 _AUTHOR_ROLES = (
-    "retired censor", "field nun", "junior surveyor", "failed playwright",
-    "river pilot", "market clerk", "temple cook", "border widow",
-    "apprentice thaumaturge", "militia quartermaster", "village judge",
-    "itinerant bell-founder", "disgraced tutor", "mushroom factor",
+    "retired censor",
+    "field nun",
+    "junior surveyor",
+    "failed playwright",
+    "river pilot",
+    "market clerk",
+    "temple cook",
+    "border widow",
+    "apprentice thaumaturge",
+    "militia quartermaster",
+    "village judge",
+    "itinerant bell-founder",
+    "disgraced tutor",
+    "mushroom factor",
 )
 
 _AUDIENCES = (
-    "novices", "children who ask too many questions", "provincial magistrates",
-    "pilgrims", "clerks with poor memories", "newly sworn soldiers",
-    "wives of absent officials", "unlicensed witches", "road wardens",
-    "households under inspection", "ship captains", "the author's enemies",
+    "novices",
+    "children who ask too many questions",
+    "provincial magistrates",
+    "pilgrims",
+    "clerks with poor memories",
+    "newly sworn soldiers",
+    "wives of absent officials",
+    "unlicensed witches",
+    "road wardens",
+    "households under inspection",
+    "ship captains",
+    "the author's enemies",
 )
 
 _PURPOSES = (
-    "to correct a famous mistake", "to preserve a forbidden custom",
-    "to settle an old argument", "to train someone who will never meet the author",
-    "to disguise grief as instruction", "to flatter an imperial patron",
-    "to smuggle a local truth through official language", "to warn the careless",
-    "to make ordinary labor sound holy", "to prove the author was there first",
+    "to correct a famous mistake",
+    "to preserve a forbidden custom",
+    "to settle an old argument",
+    "to train someone who will never meet the author",
+    "to disguise grief as instruction",
+    "to flatter an imperial patron",
+    "to smuggle a local truth through official language",
+    "to warn the careless",
+    "to make ordinary labor sound holy",
+    "to prove the author was there first",
 )
 
 _STANCES = (
-    "tender but exacting", "furious and over-footnoted", "dryly comic",
-    "homesick", "pious and suspicious", "practical to the point of cruelty",
-    "secretly romantic", "bureaucratic with cracks of awe", "guilty",
+    "tender but exacting",
+    "furious and over-footnoted",
+    "dryly comic",
+    "homesick",
+    "pious and suspicious",
+    "practical to the point of cruelty",
+    "secretly romantic",
+    "bureaucratic with cracks of awe",
+    "guilty",
     "triumphant over a small enemy",
 )
 
 _INSTITUTIONS = (
-    "Censorate annex", "parish school", "river guild", "border office",
-    "household press", "grave-keepers' lodge", "market court",
-    "pilgrim hostel", "legionary depot", "unlicensed kitchen circle",
-    "road chapel", "glasshouse archive",
+    "Censorate annex",
+    "parish school",
+    "river guild",
+    "border office",
+    "household press",
+    "grave-keepers' lodge",
+    "market court",
+    "pilgrim hostel",
+    "legionary depot",
+    "unlicensed kitchen circle",
+    "road chapel",
+    "glasshouse archive",
 )
 
 _TITLE_SHAPES = (
-    "numbered list", "complaint", "manual", "confession", "registry",
-    "sermon", "letter", "calendar", "trial record", "songbook",
-    "answer to an insult", "instructions for a substitute",
+    "numbered list",
+    "complaint",
+    "manual",
+    "confession",
+    "registry",
+    "sermon",
+    "letter",
+    "calendar",
+    "trial record",
+    "songbook",
+    "answer to an insult",
+    "instructions for a substitute",
 )
 
 _TABOO_LEVELS = ("ordinary", "eccentric", "suppressed", "forbidden")

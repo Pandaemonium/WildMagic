@@ -109,7 +109,10 @@ def test_max_stat_costs_always_bite() -> None:
     player = engine.state.player
 
     base_hp = player.max_hp
-    assert engine._apply_cost({"type": "max_health", "amount": -5}) == "Cost: 5 maximum health."
+    assert (
+        engine._apply_cost({"type": "max_health", "amount": -5})
+        == "Cost: 5 maximum health."
+    )
     assert player.max_hp == base_hp - 5
     assert player.hp <= player.max_hp
 
@@ -118,7 +121,10 @@ def test_max_stat_costs_always_bite() -> None:
     assert player.max_mana == base_mana - 1
 
     base_hp2 = player.max_hp
-    assert engine._apply_cost({"type": "max_health", "amount": 0}) == "Cost: 1 maximum health."
+    assert (
+        engine._apply_cost({"type": "max_health", "amount": 0})
+        == "Cost: 1 maximum health."
+    )
     assert player.max_hp == base_hp2 - 1
 
 
@@ -136,7 +142,9 @@ def test_mana_cost_shortfall_becomes_health_cost() -> None:
     assert outcome.consumed_turn is True
     assert player.mana == 0
     assert player.hp == hp_before - 3
-    assert any("mana shortfall costs 3 health" in message for message in engine.state.messages)
+    assert any(
+        "mana shortfall costs 3 health" in message for message in engine.state.messages
+    )
 
 
 def test_zero_mana_wild_spell_costs_health_instead_of_being_free() -> None:

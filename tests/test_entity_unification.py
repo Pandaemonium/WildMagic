@@ -6,7 +6,9 @@ from wildmagic.models import CharacterProfile
 
 
 def _enemy(engine: GameEngine):
-    return next(e for e in engine.state.entities.values() if e.faction == "enemy" and e.alive)
+    return next(
+        e for e in engine.state.entities.values() if e.faction == "enemy" and e.alive
+    )
 
 
 def test_inventory_is_per_entity_and_aliases_the_controlled_body() -> None:
@@ -32,13 +34,18 @@ def test_caster_profile_in_llm_context_carries_composure_band() -> None:
     context = engine.context_for_llm("a curious little spell")
     profile = context["caster_profile"]
     assert profile["composure_band"] in {"low", "steady", "high"}
-    assert set(profile) >= {"vigor", "attunement", "composure", "appearance", "signature"}
+    assert set(profile) >= {
+        "vigor",
+        "attunement",
+        "composure",
+        "appearance",
+        "signature",
+    }
 
 
 def test_body_swap_moves_control_and_inherits_the_body() -> None:
     engine = GameEngine(seed=3, scenario="test_chamber")
     old_player = engine.state.player
-    old_id = old_player.id
     old_player.inventory["secret token"] = 1  # belongs to the body we're leaving
     enemy = _enemy(engine)
     enemy_id, enemy_name = enemy.id, enemy.name

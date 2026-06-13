@@ -243,10 +243,18 @@ class Entity:
     tags: set[str] = field(default_factory=set)
     resistances: dict[str, int] = field(default_factory=dict)
     weaknesses: dict[str, int] = field(default_factory=dict)
-    equipment: dict[str, str | None] = field(default_factory=lambda: {
-        "weapon": None, "armor": None, "charm": None,
-        "head": None, "chest": None, "legs": None, "feet": None, "hands": None
-    })
+    equipment: dict[str, str | None] = field(
+        default_factory=lambda: {
+            "weapon": None,
+            "armor": None,
+            "charm": None,
+            "head": None,
+            "chest": None,
+            "legs": None,
+            "feet": None,
+            "hands": None,
+        }
+    )
     description: str | None = None
     details: dict[str, Any] = field(default_factory=dict)
     # Per-entity state. Once global on GameState (player-only); now carried by the
@@ -297,7 +305,13 @@ class Entity:
                 }
             )
         else:
-            data.update({"item_type": self.item_type, "material": self.material, "quantity": self.quantity})
+            data.update(
+                {
+                    "item_type": self.item_type,
+                    "material": self.material,
+                    "quantity": self.quantity,
+                }
+            )
         return data
 
 
@@ -364,10 +378,12 @@ class NPCProfile:
                 "quantity": self.wanted_qty,
                 "will_reward_gold": self.reward_gold,
                 "will_reward_item": self.reward_item,
-                "reward_item_quantity": self.reward_qty
+                "reward_item_quantity": self.reward_qty,
             }
         elif self.quest_completed:
-            context["quest_status"] = "I have already received my requested item and rewarded the player."
+            context["quest_status"] = (
+                "I have already received my requested item and rewarded the player."
+            )
         return context
 
 
@@ -481,10 +497,18 @@ class RoomProfile:
             room_type=str(data.get("type") or data.get("room_type") or "room"),
             era=str(data.get("era") or "unknown"),
             condition=str(data.get("condition") or "undisturbed"),
-            topics=[str(topic) for topic in data.get("topics", []) if str(topic).strip()],
+            topics=[
+                str(topic) for topic in data.get("topics", []) if str(topic).strip()
+            ],
             tags=[str(tag) for tag in data.get("tags", []) if str(tag).strip()],
-            secret_slots=[dict(slot) for slot in data.get("secret_slots", []) if isinstance(slot, dict)],
-            promise_hooks=[str(hook) for hook in data.get("promise_hooks", []) if str(hook).strip()],
+            secret_slots=[
+                dict(slot)
+                for slot in data.get("secret_slots", [])
+                if isinstance(slot, dict)
+            ],
+            promise_hooks=[
+                str(hook) for hook in data.get("promise_hooks", []) if str(hook).strip()
+            ],
         )
 
 
@@ -552,7 +576,11 @@ class CanonRecord:
             tags=[str(tag) for tag in data.get("tags", []) if str(tag).strip()],
             source=str(data.get("source") or "grammar_fallback"),
             seed_packet=dict(data.get("seed_packet") or {}),
-            claims_emitted=[str(claim) for claim in data.get("claims_emitted", []) if str(claim).strip()],
+            claims_emitted=[
+                str(claim)
+                for claim in data.get("claims_emitted", [])
+                if str(claim).strip()
+            ],
             engine_choices=dict(data.get("engine_choices") or {}),
             llm_choices=dict(data.get("llm_choices") or data.get("menu_choices") or {}),
             turn_created=int(data.get("turn_created") or 0),

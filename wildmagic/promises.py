@@ -138,7 +138,9 @@ class SpatialHint:
             "mode": self.mode,
             "zone": list(self.zone) if self.zone is not None else None,
             "direction": list(self.direction) if self.direction is not None else None,
-            "anchor_zone": list(self.anchor_zone) if self.anchor_zone is not None else None,
+            "anchor_zone": list(self.anchor_zone)
+            if self.anchor_zone is not None
+            else None,
             "terrain_tag": self.terrain_tag,
             "raw_text": self.raw_text,
         }
@@ -247,8 +249,14 @@ class Reward:
             return None
         return cls(
             gold=max(0, int(data.get("gold") or 0)),
-            items={normalize_id(k): max(0, int(v)) for k, v in dict(data.get("items") or {}).items()},
-            reputation={normalize_id(k): int(v) for k, v in dict(data.get("reputation") or {}).items()},
+            items={
+                normalize_id(k): max(0, int(v))
+                for k, v in dict(data.get("items") or {}).items()
+            },
+            reputation={
+                normalize_id(k): int(v)
+                for k, v in dict(data.get("reputation") or {}).items()
+            },
             flags=dict(data.get("flags") or {}),
         )
 
@@ -306,11 +314,15 @@ class WorldPromise:
             "tags": list(self.tags),
             "source": self.source,
             "source_turn": self.source_turn,
-            "origin_zone": list(self.origin_zone) if self.origin_zone is not None else None,
+            "origin_zone": list(self.origin_zone)
+            if self.origin_zone is not None
+            else None,
             "salience": self.salience,
             "confidence": self.confidence,
             "what": self.what,
-            "claimed_space": self.claimed_space.to_dict() if self.claimed_space else None,
+            "claimed_space": self.claimed_space.to_dict()
+            if self.claimed_space
+            else None,
             "bound_space": self.bound_space.to_dict() if self.bound_space else None,
             "binding": self.binding.to_dict() if self.binding else None,
             "objective": self.objective.to_dict() if self.objective else None,
@@ -331,7 +343,11 @@ class WorldPromise:
             kind=_valid_kind(data.get("kind")),
             subject=str(data.get("subject") or "unknown"),
             text=str(data.get("text") or ""),
-            tags=[normalize_id(str(tag)) for tag in data.get("tags") or [] if str(tag).strip()],
+            tags=[
+                normalize_id(str(tag))
+                for tag in data.get("tags") or []
+                if str(tag).strip()
+            ],
             source=str(data.get("source") or data.get("source_npc") or "unknown"),
             source_turn=int(data.get("source_turn") or 0),
             origin_zone=_pair(data.get("origin_zone")),
@@ -345,7 +361,8 @@ class WorldPromise:
             reward=Reward.from_dict(data.get("reward")),
             giver_npc=str(data.get("giver_npc") or "") or None,
             status=_valid_status(data.get("status")),
-            realized_in=str(data.get("realized_in") or data.get("redeemed_in") or "") or None,
+            realized_in=str(data.get("realized_in") or data.get("redeemed_in") or "")
+            or None,
             source_message=str(data.get("source_message") or ""),
             source_reply=str(data.get("source_reply") or ""),
             location=str(data.get("location") or ""),
@@ -408,7 +425,9 @@ def journal_entry(promise: WorldPromise) -> dict[str, Any]:
     }
 
 
-def promise_context_for_prompt(promises: list[WorldPromise], limit: int = 8, text_limit: int = 240) -> list[dict[str, Any]]:
+def promise_context_for_prompt(
+    promises: list[WorldPromise], limit: int = 8, text_limit: int = 240
+) -> list[dict[str, Any]]:
     ranked = sorted(
         promises,
         key=lambda promise: (
@@ -444,7 +463,12 @@ def bind_promise(
 ) -> PromiseReservation | None:
     if promise.binding is not None:
         if promise.bound_space and promise.bound_space.zone:
-            return PromiseReservation(promise.id, promise.bound_space.zone, promise.binding.blueprint, promise.binding.capacity_cost)
+            return PromiseReservation(
+                promise.id,
+                promise.bound_space.zone,
+                promise.binding.blueprint,
+                promise.binding.capacity_cost,
+            )
         return None
     if promise.confidence < 0.4 or promise.salience <= 1:
         return None
@@ -485,7 +509,11 @@ def bind_promise(
         )
     npc_seed = None
     if blueprint in NPC_BLUEPRINTS:
-        npc_seed = {"subject": promise.subject, "tags": list(promise.tags), "source": promise.text}
+        npc_seed = {
+            "subject": promise.subject,
+            "tags": list(promise.tags),
+            "source": promise.text,
+        }
     promise.claimed_space = promise.claimed_space or claimed
     promise.bound_space = bound_space
     promise.binding = PromiseBinding(blueprint=blueprint, npc_seed=npc_seed)
@@ -510,15 +538,31 @@ def match_blueprint(promise: WorldPromise) -> str | None:
     return None
 
 
-def parse_spatial_hint(raw_text: str | None, *, fallback_text: str, anchor_zone: tuple[int, int]) -> SpatialHint:
+def parse_spatial_hint(
+    raw_text: str | None, *, fallback_text: str, anchor_zone: tuple[int, int]
+) -> SpatialHint:
     text = " ".join([str(raw_text or ""), fallback_text]).lower()
-    for phrase, direction in sorted(DIRECTION_WORDS.items(), key=lambda item: -len(item[0])):
+    for phrase, direction in sorted(
+        DIRECTION_WORDS.items(), key=lambda item: -len(item[0])
+    ):
         if re.search(rf"\b{re.escape(phrase)}\b", text):
-            return SpatialHint(mode="direction", direction=direction, anchor_zone=anchor_zone, raw_text=str(raw_text or phrase))
+            return SpatialHint(
+                mode="direction",
+                direction=direction,
+                anchor_zone=anchor_zone,
+                raw_text=str(raw_text or phrase),
+            )
     for phrase, terrain in TERRAIN_WORDS.items():
         if re.search(rf"\b{re.escape(phrase)}\b", text):
-            return SpatialHint(mode="terrain", terrain_tag=terrain, anchor_zone=anchor_zone, raw_text=str(raw_text or phrase))
-    return SpatialHint(mode="wildcard", anchor_zone=anchor_zone, raw_text=str(raw_text or ""))
+            return SpatialHint(
+                mode="terrain",
+                terrain_tag=terrain,
+                anchor_zone=anchor_zone,
+                raw_text=str(raw_text or phrase),
+            )
+    return SpatialHint(
+        mode="wildcard", anchor_zone=anchor_zone, raw_text=str(raw_text or "")
+    )
 
 
 def choose_bound_zone(
@@ -533,7 +577,10 @@ def choose_bound_zone(
         candidates = [claimed.zone]
     elif claimed.mode == "direction" and claimed.direction is not None:
         dx, dy = claimed.direction
-        candidates = [(anchor[0] + dx * distance, anchor[1] + dy * distance) for distance in range(1, 8)]
+        candidates = [
+            (anchor[0] + dx * distance, anchor[1] + dy * distance)
+            for distance in range(1, 8)
+        ]
     elif claimed.mode == "terrain":
         candidates = _ring_candidates(anchor)
     elif claimed.mode == "wildcard":

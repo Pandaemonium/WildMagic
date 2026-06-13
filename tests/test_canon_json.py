@@ -21,15 +21,18 @@ def test_strips_surrounding_prose_with_regex_fallback():
 
 # Each case is a JSON object truncated at a different syntactic position, mimicking
 # the model running out of output tokens mid-write. All should recover a dict.
-@pytest.mark.parametrize("raw", [
-    '{"title": "x", "text": "hello world',            # cut mid-string value
-    '{"a": "x", "tags": ["one", "two',                # cut mid-array element
-    '{"a": "x", "summary"',                            # dangling key, no colon
-    '{"a": "x", "b":',                                 # dangling colon, no value
-    '{"a": "x",',                                      # trailing comma
-    '{"llm": {"author": "Mother Elara"}',             # complete value, missing outer brace
-    '{"text": "ends with backslash\\',                # dangling escape char
-])
+@pytest.mark.parametrize(
+    "raw",
+    [
+        '{"title": "x", "text": "hello world',  # cut mid-string value
+        '{"a": "x", "tags": ["one", "two',  # cut mid-array element
+        '{"a": "x", "summary"',  # dangling key, no colon
+        '{"a": "x", "b":',  # dangling colon, no value
+        '{"a": "x",',  # trailing comma
+        '{"llm": {"author": "Mother Elara"}',  # complete value, missing outer brace
+        '{"text": "ends with backslash\\',  # dangling escape char
+    ],
+)
 def test_repairs_truncated_json(raw):
     parsed = parse_canon_json(raw)
     assert isinstance(parsed, dict)
