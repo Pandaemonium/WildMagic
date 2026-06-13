@@ -857,7 +857,6 @@ class GameSession:
         """Targeted study of one named thing. Three outcomes: the clued anchor
         opens (deterministic reveal, no provider); a matched visible entity gets
         an LLM detail record; an unmatched name costs nothing."""
-        engine = self.engine
         wanted = normalize_id(target)
         anchor = normalize_id(str(slot.get("anchor") or "")) if slot is not None else ""
         if (
