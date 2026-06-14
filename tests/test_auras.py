@@ -94,7 +94,6 @@ def test_aura_affects_enemies_not_allies() -> None:
 
 def test_conjured_creature_carries_status_aura() -> None:
     engine, enemy = _engine_with_enemy(dx=1)
-    player = engine.state.player
     engine._apply_effect(
         {
             "type": "conjure_creature",
