@@ -62,7 +62,10 @@ from .templates import (
     item_template_ids,
 )
 from .props import get_prop_template, get_all_prop_ids
+from .prop_gen import make_prop_provider, PropProvider, PropSpec, MECHANICAL_TAGS
 from .regions import Region, get_region
+from .config import get_props_provider, ollama_host
+from .llm_client import ollama_reachable
 from .promises import (
     PROMISE_LEDGER_LIMIT,
     PROMISE_RESERVATION_LIMIT,
@@ -303,6 +306,14 @@ class GameState:
             return f"Zone ({self.zone_x},{self.zone_y}) - {self.zone_type}"
         if self.scenario == "town":
             return "Hollowmere"
+        if self.depth == 1:
+            hub_labels = {
+                "bazaar": "the Saltmarket",
+                "warren": "the Warren",
+                "archive": "the Foxed Stacks",
+            }
+            if self.scenario in hub_labels:
+                return hub_labels[self.scenario]
         return f"Depth {self.depth}"
 
     def room_profile_at(self, x: int, y: int) -> RoomProfile | None:
@@ -319,6 +330,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         scenario: str = "dungeon",
         provider_name: str | None = None,
         character: CharacterProfile | None = None,
+        prop_provider: PropProvider | None = None,
     ) -> None:
         self.rng = random.Random(seed)
         self.state = GameState(rng_seed=seed, scenario=scenario)
@@ -336,6 +348,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         from .wild_magic import make_town_provider
 
         self.town_provider = make_town_provider(provider_name)
+        self._setup_prop_generation(provider_name, prop_provider)
         if scenario == "test_chamber":
             self._generate_test_chamber()
         elif scenario == "empire_compound":
@@ -346,6 +359,12 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         elif scenario == "town":
             self._generate_town_start()
             self._maybe_pregenerate_adjacent_towns()
+        elif scenario == "bazaar":
+            self._generate_bazaar_start()
+        elif scenario == "warren":
+            self._generate_warren_start()
+        elif scenario == "archive":
+            self._generate_archive_start()
         else:
             self._generate_new_run()
 
@@ -607,6 +626,192 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             return True
         return "opaque" in self.tile_tags_at(x, y)
 
+    # ------------------------------------------------------------------
+    # Experimental LLM prop set-dressing. A background per-room batch call
+    # (prop_gen.py) generates ambient props for the current floor; results are
+    # swapped in only for props the player has NOT seen yet (freeze-once-seen),
+    # so the world never rewrites itself under the player's eye. On by default
+    # when an Ollama backend is reachable; static props otherwise. See the plan
+    # in docs and prop_gen.py.
+    # ------------------------------------------------------------------
+
+    _PROP_MAX_PENDING = 3  # cap concurrent room calls; nearest rooms go first
+    _PROP_GLYPH_BY_TAG = {
+        "water": "~", "liquid": "~", "acid": "~", "oil": "~",
+        "plant": "p", "fungus": "p", "web": "w", "silk": "w",
+        "bone": ";", "ash": ".", "paper": "~", "cloth": "|",
+        "glass": "o", "crystal": "*", "light": "*", "magic": "*",
+        "metal": "=", "stone": "n", "wood": "n", "sharp": "/",
+    }
+
+    def _setup_prop_generation(
+        self, provider_name: str | None, prop_provider: PropProvider | None
+    ) -> None:
+        self._prop_executor: concurrent.futures.ThreadPoolExecutor | None = None
+        self._pending_prop_rooms: dict[
+            str, concurrent.futures.Future[list[PropSpec]]
+        ] = {}
+        self._prop_rooms_done: set[str] = set()
+        if prop_provider is not None:
+            # Explicit injection (tests, embedders) always wins and is enabled.
+            self._prop_provider: PropProvider | None = prop_provider
+            return
+        self._prop_provider = None
+        resolved = (provider_name or get_props_provider() or "").lower().strip()
+        if resolved in {"ollama", "auto"} and ollama_reachable(ollama_host("props")):
+            # Build lazily here so the unreachable/offline path costs only one probe.
+            self._prop_provider = make_prop_provider("ollama")
+
+    def _glyph_for_tags(self, tags: list[str]) -> str:
+        for tag in tags:
+            if tag in self._PROP_GLYPH_BY_TAG:
+                return self._PROP_GLYPH_BY_TAG[tag]
+        return "*"
+
+    def _prop_seen(self, entity: Entity) -> bool:
+        """A prop is frozen once the player has laid eyes on its tile."""
+        return self.tile_key(entity.x, entity.y) in self.state.explored
+
+    def _replaceable_props_by_room(self) -> dict[str, list[Entity]]:
+        by_room: dict[str, list[Entity]] = {}
+        for entity in self.state.entities.values():
+            if entity.kind != "prop" or "set_dressing" not in entity.tags:
+                continue
+            if "llm_generated" in entity.tags:
+                continue
+            room_id = self.state.tile_rooms.get(self.tile_key(entity.x, entity.y))
+            if room_id:
+                by_room.setdefault(room_id, []).append(entity)
+        return by_room
+
+    def _launch_prop_generation(self) -> None:
+        if self._prop_provider is None:
+            return
+        if len(self._pending_prop_rooms) >= self._PROP_MAX_PENDING:
+            return
+        by_room = self._replaceable_props_by_room()
+        player = self.state.player
+        pending = [
+            (room_id, props)
+            for room_id, props in by_room.items()
+            if room_id not in self._prop_rooms_done
+            and room_id not in self._pending_prop_rooms
+        ]
+        if not pending:
+            return
+
+        def room_distance(item: tuple[str, list[Entity]]) -> int:
+            profile = self.state.room_profiles.get(item[0])
+            if profile is None:
+                return 1_000_000
+            cx, cy = profile.center
+            return abs(cx - player.x) + abs(cy - player.y)
+
+        pending.sort(key=room_distance)
+        slots = self._PROP_MAX_PENDING - len(self._pending_prop_rooms)
+        for room_id, props in pending[:slots]:
+            profile = self.state.room_profiles.get(room_id)
+            if profile is None:
+                self._prop_rooms_done.add(room_id)
+                continue
+            if self._prop_executor is None:
+                self._prop_executor = concurrent.futures.ThreadPoolExecutor(
+                    max_workers=2
+                )
+            context = self._prop_context(profile, props)
+            self._pending_prop_rooms[room_id] = self._prop_executor.submit(
+                self._prop_provider.generate, context
+            )
+
+    def _prop_context(
+        self, profile: RoomProfile, props: list[Entity]
+    ) -> dict[str, Any]:
+        region = self.region
+        # Names already in the room (the ones we'll replace + any kept static props)
+        # become the anti-repetition signal.
+        room_tiles = {
+            self.tile_key(x, y)
+            for y in range(profile.y, profile.y + profile.h)
+            for x in range(profile.x, profile.x + profile.w)
+        }
+        avoid = sorted(
+            {
+                entity.name
+                for entity in self.state.entities.values()
+                if entity.kind == "prop"
+                and self.tile_key(entity.x, entity.y) in room_tiles
+            }
+        )
+        return {
+            "region": region.name,
+            "voice": region.voice,
+            "room": {
+                "room_type": profile.room_type,
+                "era": profile.era,
+                "condition": profile.condition,
+                "topics": list(profile.topics),
+                "tags": list(profile.tags),
+            },
+            "wildness": region.effective_wildness(self.state.depth),
+            "depth": self.state.depth,
+            "count": min(len(props), 4),
+            "avoid": avoid,
+            "mechanical_tags": list(MECHANICAL_TAGS),
+        }
+
+    def _poll_prop_generation(self) -> None:
+        if not self._pending_prop_rooms:
+            return
+        for room_id, future in list(self._pending_prop_rooms.items()):
+            if not future.done():
+                continue
+            self._pending_prop_rooms.pop(room_id, None)
+            self._prop_rooms_done.add(room_id)
+            try:
+                specs = future.result()
+            except Exception:
+                continue  # any failure: keep the static props already in place
+            self._apply_prop_specs(room_id, specs)
+
+    def _apply_prop_specs(self, room_id: str, specs: list[PropSpec]) -> None:
+        if not specs:
+            return
+        by_room = self._replaceable_props_by_room()
+        # Freeze-once-seen: only swap props the player has not yet laid eyes on.
+        eligible = [
+            entity for entity in by_room.get(room_id, []) if not self._prop_seen(entity)
+        ]
+        for entity, spec in zip(eligible, specs):
+            self._replace_prop_with_spec(entity, spec)
+
+    def _replace_prop_with_spec(self, entity: Entity, spec: PropSpec) -> None:
+        entity.name = spec.name
+        entity.description = spec.description
+        entity.char = spec.char or self._glyph_for_tags(spec.tags)
+        entity.blocks = spec.blocks
+        # Keep set_dressing for consistency; llm_generated marks it frozen against
+        # re-generation and records the spec for saves/audit.
+        entity.tags = set(spec.tags) | {"set_dressing", "llm_generated"}
+        entity.details["prop_spec"] = {
+            "name": spec.name,
+            "description": spec.description,
+            "char": entity.char,
+            "blocks": spec.blocks,
+            "tags": list(spec.tags),
+        }
+
+    def close(self) -> None:
+        """Release background executors. Idempotent; safe to call more than once."""
+        for future in self._pending_prop_rooms.values():
+            future.cancel()
+        self._pending_prop_rooms.clear()
+        if self._prop_executor is not None:
+            self._prop_executor.shutdown(wait=False, cancel_futures=True)
+            self._prop_executor = None
+        if self._town_executor is not None:
+            self._town_executor.shutdown(wait=False, cancel_futures=True)
+            self._town_executor = None
+
     def update_fov(self) -> None:
         player = self.state.player
         visible: set[str] = set()
@@ -621,6 +826,9 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                     visible.add(self.tile_key(x, y))
         self.state.visible = visible
         self.state.explored.update(visible)
+        if self._prop_provider is not None:
+            self._poll_prop_generation()
+            self._launch_prop_generation()
 
     def has_line_of_sight(self, x1: int, y1: int, x2: int, y2: int) -> bool:
         for x, y in bresenham_line(x1, y1, x2, y2)[1:-1]:

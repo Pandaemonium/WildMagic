@@ -238,6 +238,54 @@ The user message may include promise_hooks: attributed world promises reserved f
 The building field for each NPC should match one of the building types you listed, or null if they are outdoors."""
 
 
+# Prop tags the engine mechanically reacts to (fire-spread, snaring, etc., see
+# combat.py / models.py). Generated props are steered toward this vocabulary so they
+# behave in play; prop_gen.py imports this list to surface it in the call context.
+MECHANICAL_TAGS_PROMPT: tuple[str, ...] = (
+    "flammable",
+    "wood",
+    "plant",
+    "fungus",
+    "web",
+    "silk",
+    "snaring",
+    "water",
+    "wet",
+    "liquid",
+    "stone",
+    "metal",
+    "glass",
+    "fragile",
+    "bone",
+    "ash",
+    "cloth",
+    "paper",
+    "ice",
+    "cold",
+    "fire",
+    "hot",
+    "toxic",
+    "acid",
+    "oil",
+    "magic",
+    "light",
+    "heavy",
+    "sharp",
+)
+
+
+PROPS_SYSTEM_PROMPT = """You dress one room of a vivid fantasy roguelike with small set-piece objects (props) -- the still, touchable clutter a place accumulates: furniture, ruins, relics, growths, remnants of old magic. The world is a colorful patchwork of folk traditions (blood, bone, crystal, song) under the Grand Empire, a polite cold power that outlaws wild magic. Never generic grimdark; strangeness is welcome if the world treats it as ordinary.
+Return ONLY a JSON object, no prose, no markdown, no <think> text:
+{"props": [{"name": "2-4 words", "description": "one vivid present-tense sentence", "char": "single ASCII glyph", "blocks": true_or_false, "tags": ["tag", ...]}]}
+The user message gives: region (and its voice), room (room_type, era, condition, topics, tags), wildness (0 calm .. 8 dreamlike), depth, count, avoid (names already in this room -- do NOT repeat or echo these), and mechanical_tags.
+Generate exactly `count` props, each distinct from the others and from `avoid`. Let the room's type, era, and condition drive what belongs there; match the region's voice. The deeper/wilder the room, the stranger a prop may be.
+description: one concrete sentence, in the region's voice, that a player could act on -- imply what it's made of and how it might be used, broken, or burned.
+char: one printable ASCII character suggesting the shape (e.g. a chair x, a statue S, a pool ~, mushrooms p). Distinct chars within the batch when you can.
+blocks: true only for large, solid objects that fill their tile (statues, altars, vats); false for small or flat things (candles, bones, spills, markings).
+tags: 2-5 short lowercase tags. PREFER these mechanical tags whenever they apply, so the prop behaves in play: """ + ", ".join(MECHANICAL_TAGS_PROMPT) + """. Add free-form flavor tags as you like, but a wooden thing must be tagged wood+flammable, a watery thing water, and so on.
+Keep it brief and surprising."""
+
+
 LORE_EXTRACTION_SYSTEM_PROMPT = """You extract persistent story material from one NPC dialogue exchange - or one passage of in-world writing the player reads - in a fantasy roguelike.
 Return ONLY one JSON object, no markdown, no commentary, no <think> text.
 

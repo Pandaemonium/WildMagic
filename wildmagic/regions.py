@@ -331,9 +331,478 @@ _GLASSWILD = Region(
 )
 
 
+_SALTMARKET = Region(
+    id="saltmarket",
+    name="the Saltmarket",
+    voice=(
+        "This is the Saltmarket, a jewel-toned bazaar that runs on barter and rumor: awnings, "
+        "spice-smoke, coin and curio. Keep outcomes lush, mercantile, and crowded -- wonder you "
+        "could haggle over, magic that smells of saffron and hot brass."
+    ),
+    example_outcomes=(
+        "The spell unrolls like a bolt of impossible cloth, and three merchants are already pricing it.",
+        "Coins leap from a dozen purses and orbit your hand, deciding whether they like you.",
+        "Where it lands, the cobbles bloom into a stall selling the smell of rain.",
+    ),
+    enemy_templates=(
+        (
+            "cutpurse",
+            "g",
+            8,
+            3,
+            0,
+            "goblin",
+            {"humanoid", "thief", "flesh"},
+            {},
+            {},
+        ),
+        (
+            "tariff-wraith",
+            "w",
+            7,
+            3,
+            0,
+            "bat",
+            {"spirit", "empire", "swift"},
+            {"physical": 25},
+            {"radiant": 25},
+        ),
+        (
+            "haggling imp",
+            "i",
+            6,
+            2,
+            0,
+            "goblin",
+            {"fiend", "trickster", "caster"},
+            {"fire": 25},
+            {"radiant": 25},
+        ),
+        (
+            "coin-glutton slime",
+            "s",
+            11,
+            2,
+            1,
+            "slime",
+            {"slime", "magic", "greedy"},
+            {"poison": 50},
+            {"frost": 25},
+        ),
+        (
+            "spice-drunk brawler",
+            "b",
+            12,
+            4,
+            1,
+            "simple",
+            {"humanoid", "flesh", "brawler"},
+            {},
+            {"frost": 25},
+        ),
+        (
+            "carpet serpent",
+            "j",
+            9,
+            3,
+            0,
+            "simple",
+            {"beast", "swift", "woven"},
+            {"poison": 25},
+            {"fire": 50},
+        ),
+        (
+            "ledger-golem",
+            "n",
+            14,
+            3,
+            3,
+            "stationary",
+            {"construct", "empire", "stationary"},
+            {"physical": 25, "poison": 100},
+            {"force": 50},
+        ),
+        (
+            "rumor-swarm",
+            "v",
+            5,
+            2,
+            0,
+            "bat",
+            {"swarm", "spirit", "swift"},
+            {},
+            {"force": 25},
+        ),
+    ),
+    imperial_presence=0.25,
+    floor_themes=(
+        (2, {"furniture": 4, "infrastructure": 3, "imperial": 2, "alchemical": 1}),
+        (4, {"alchemical": 3, "arcane": 3, "furniture": 2, "traditions": 2, "imperial": 1}),
+        (999, {"arcane": 4, "traditions": 3, "alchemical": 2, "religious": 2, "natural": 1}),
+    ),
+    ambient_by_tag={
+        **_COMMON_SOUNDS_BY_TAG,
+        "empire": (
+            "A tax-clerk's bell rings twice, and a hundred stalls go quiet at once.",
+            "Somewhere, a seal is being stamped with great patience.",
+            "You hear the soft scratch of a ledger pen, closer than it should be.",
+        ),
+        "thief": (
+            "A purse-string parts somewhere with a sound like a plucked harp.",
+            "Footsteps match yours for three beats, then are gone.",
+            "Coins clink, very deliberately, behind you.",
+        ),
+    },
+    ambient_default=(
+        "Haggling rises and falls like surf, never quite stopping.",
+        "Spice-smoke drifts past, carrying the names of far ports.",
+        "Someone, somewhere, swears they have exactly what you need.",
+    ),
+    wonder_by_wildness=(
+        (
+            2,
+            (
+                "An awning's shadow spells out a fair price, then thinks better of it.",
+                "The smell of saffron and hot brass settles over everything.",
+                "A merchant offers to sell you back the time you just spent looking.",
+            ),
+        ),
+        (
+            4,
+            (
+                "A stall appears between two others that were always adjacent before.",
+                "Your reflection in a brass tray is busy bargaining without you.",
+                "Coins in the gutter arrange themselves into a small, hopeful pile.",
+            ),
+        ),
+        (
+            999,
+            (
+                "The bazaar folds a street into your pocket as a free sample.",
+                "Every price tag here is written in a language you only read when hungry.",
+                "A caravan passes selling distances; the far wall is suddenly nearer.",
+            ),
+        ),
+    ),
+    wildness_base=1,
+)
+
+
+_WARREN = Region(
+    id="warren",
+    name="the Warren",
+    voice=(
+        "This is the Warren, a packed honeycomb of small rooms gnawed into older rooms -- buried "
+        "strata, hoarded junk, things nesting in things. Keep outcomes close, cluttered, and "
+        "tactile: wonder in a tight space, magic that knocks the shelves over."
+    ),
+    example_outcomes=(
+        "The spell ricochets off four close walls and comes back wearing some of the room.",
+        "Dust and old coins leap from every shelf at once, briefly a small bright storm.",
+        "The wall gives up a doorway it had been hiding, embarrassed to be caught.",
+    ),
+    enemy_templates=(
+        (
+            "warren rat",
+            "r",
+            4,
+            2,
+            0,
+            "bat",
+            {"beast", "vermin", "swift"},
+            {"poison": 50},
+            {},
+        ),
+        (
+            "hoarder goblin",
+            "g",
+            9,
+            3,
+            0,
+            "goblin",
+            {"goblin", "humanoid", "flesh", "thief"},
+            {},
+            {},
+        ),
+        (
+            "den slime",
+            "s",
+            11,
+            2,
+            1,
+            "slime",
+            {"slime", "ash"},
+            {"poison": 50, "fire": 25},
+            {"frost": 25},
+        ),
+        (
+            "shelf spider",
+            "x",
+            7,
+            3,
+            0,
+            "simple",
+            {"beast", "spider", "swift"},
+            {"poison": 25},
+            {"fire": 50},
+        ),
+        (
+            "midden lurker",
+            "h",
+            10,
+            3,
+            1,
+            "simple",
+            {"humanoid", "flesh", "ambusher"},
+            {},
+            {"radiant": 25},
+        ),
+        (
+            "rubble crawler",
+            "c",
+            8,
+            2,
+            2,
+            "simple",
+            {"beast", "stone", "armored"},
+            {"physical": 25, "poison": 100},
+            {"force": 50},
+        ),
+        (
+            "packrat swarm",
+            "v",
+            5,
+            2,
+            0,
+            "bat",
+            {"swarm", "vermin", "swift"},
+            {},
+            {"force": 25},
+        ),
+        (
+            "bone skeleton",
+            "k",
+            7,
+            3,
+            1,
+            "simple",
+            {"undead", "bone"},
+            {"poison": 100, "frost": 50},
+            {"radiant": 50},
+        ),
+    ),
+    imperial_presence=0.1,
+    floor_themes=(
+        (2, {"ruined": 4, "furniture": 3, "infrastructure": 2, "natural": 1}),
+        (4, {"ruined": 3, "traditions": 3, "furniture": 2, "natural": 2, "arcane": 1}),
+        (999, {"traditions": 4, "arcane": 3, "ruined": 2, "religious": 2, "natural": 1}),
+    ),
+    ambient_by_tag={
+        **_COMMON_SOUNDS_BY_TAG,
+        "vermin": (
+            "Small claws scrabble through the wall at your elbow, both ways at once.",
+            "Something behind the shelves redistributes its hoard, item by item.",
+            "A trickle of dust marks where the ceiling is thinking it over.",
+        ),
+    },
+    ambient_default=(
+        "The close air smells of old paper, rat, and rust.",
+        "Two rooms over, something settles with a contented clatter.",
+        "The walls are near enough that your breath comes back to you.",
+    ),
+    wonder_by_wildness=(
+        (
+            3,
+            (
+                "A doorway you are sure you used is brick now, and politely so.",
+                "The junk on a shelf is arranged by a logic you almost recognize.",
+                "Your shadow is too big for this room and has to stoop.",
+            ),
+        ),
+        (
+            6,
+            (
+                "The next room is the last room again, refurnished from memory.",
+                "Something has been collecting the sounds you make and stacking them neatly.",
+                "A draft carries the smell of a market that is many floors and years away.",
+            ),
+        ),
+        (
+            999,
+            (
+                "The Warren grows a room around you while you blink, apologetic.",
+                "Every door here leads to the same room, which is fine with the room.",
+                "The hoard rearranges into your own face, briefly, then loses interest.",
+            ),
+        ),
+    ),
+    wildness_base=2,
+)
+
+
+_STACKS = Region(
+    id="stacks",
+    name="the Foxed Stacks",
+    voice=(
+        "This is the Foxed Stacks, a hill-town drowning in hoarded books: reading-rooms, ladders, "
+        "marginalia, scholars who have forgotten to leave. Keep outcomes literate and investigative "
+        "-- wonder that wants to be footnoted, magic that smells of foxed paper and lamp oil."
+    ),
+    example_outcomes=(
+        "The spell prints itself across the air in a fair scholar's hand, complete with one wrong citation.",
+        "Every book in reach opens to the same page, eager to be of use.",
+        "The dust rises into a diagram of exactly what you meant, then asks a follow-up question.",
+    ),
+    enemy_templates=(
+        (
+            "errata wisp",
+            "w",
+            5,
+            2,
+            0,
+            "bat",
+            {"spirit", "magic", "swift"},
+            {},
+            {"force": 25},
+        ),
+        (
+            "ink-blot horror",
+            "s",
+            10,
+            3,
+            0,
+            "slime",
+            {"slime", "magic", "ink"},
+            {"poison": 50, "shadow": 50},
+            {"radiant": 50},
+        ),
+        (
+            "censor's enforcer",
+            "l",
+            10,
+            4,
+            1,
+            "legion",
+            {"empire", "human", "soldier", "disciplined"},
+            {"physical": 15},
+            {"force": 25},
+        ),
+        (
+            "paper wyrm",
+            "j",
+            8,
+            3,
+            0,
+            "simple",
+            {"beast", "paper", "woven"},
+            {"poison": 25},
+            {"fire": 75},
+        ),
+        (
+            "marginalia imp",
+            "i",
+            6,
+            2,
+            0,
+            "goblin",
+            {"fiend", "trickster", "caster"},
+            {},
+            {"radiant": 25},
+        ),
+        (
+            "silence warden",
+            "h",
+            9,
+            3,
+            1,
+            "simple",
+            {"spirit", "undead", "shadow"},
+            {"physical": 25, "poison": 100},
+            {"radiant": 50},
+        ),
+        (
+            "foxed-folio swarm",
+            "v",
+            5,
+            2,
+            0,
+            "bat",
+            {"swarm", "paper", "swift"},
+            {},
+            {"fire": 75},
+        ),
+        (
+            "footnote golem",
+            "n",
+            13,
+            3,
+            3,
+            "stationary",
+            {"construct", "paper", "stationary"},
+            {"physical": 25, "poison": 100},
+            {"fire": 75},
+        ),
+    ),
+    imperial_presence=0.2,
+    floor_themes=(
+        (2, {"furniture": 4, "arcane": 2, "imperial": 2, "religious": 1}),
+        (4, {"arcane": 3, "furniture": 3, "traditions": 2, "religious": 1, "imperial": 1}),
+        (999, {"arcane": 4, "traditions": 3, "religious": 2, "furniture": 2, "alchemical": 1}),
+    ),
+    ambient_by_tag={
+        **_COMMON_SOUNDS_BY_TAG,
+        "paper": (
+            "Pages turn somewhere with no hand and no hurry.",
+            "A quill scratches a margin you cannot find.",
+            "The smell of foxed paper thickens, as if a great book just opened.",
+        ),
+        "empire": (
+            "A censor's seal closes somewhere with a sound like a held breath.",
+            "You hear a careful page being removed from a binding.",
+            "Lamp oil and brass: the reading-room is being inspected.",
+        ),
+    },
+    ambient_default=(
+        "The hush here is the deliberate kind, kept by everything at once.",
+        "Lamp oil and old vellum hang in the still air.",
+        "Somewhere, a reader who never leaves turns another page.",
+    ),
+    wonder_by_wildness=(
+        (
+            2,
+            (
+                "A book leans off its shelf to be noticed, then settles when you look.",
+                "Dust motes hold the shape of a sentence, briefly legible.",
+                "A margin note in the air finishes the thought you hadn't.",
+            ),
+        ),
+        (
+            4,
+            (
+                "The catalogue here lists a book you are about to need.",
+                "Your footnotes have footnotes; you can hear them disagreeing.",
+                "A reading-lamp lights itself over the one shelf that matters.",
+            ),
+        ),
+        (
+            999,
+            (
+                "The Stacks reshelve the room around you by a system only they know.",
+                "Every book is the same book, read by someone who became the binding.",
+                "The marginalia have started writing about you, and the hand is kind.",
+            ),
+        ),
+    ),
+    wildness_base=2,
+)
+
+
 REGIONS: dict[str, Region] = {
     _FRONTIER.id: _FRONTIER,
     _GLASSWILD.id: _GLASSWILD,
+    _SALTMARKET.id: _SALTMARKET,
+    _WARREN.id: _WARREN,
+    _STACKS.id: _STACKS,
 }
 
 DEFAULT_REGION_ID = _FRONTIER.id

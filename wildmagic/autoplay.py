@@ -39,7 +39,16 @@ from .replay import save_replay
 
 
 PERSONAS = ("cautious", "wild", "stress")
-SCENARIOS = ("dungeon", "dungeon", "dungeon", "test_chamber", "town")
+SCENARIOS = (
+    "dungeon",
+    "dungeon",
+    "dungeon",
+    "test_chamber",
+    "town",
+    "bazaar",
+    "warren",
+    "archive",
+)
 CARDINAL_DIRECTIONS = {
     "north": (0, -1),
     "south": (0, 1),
@@ -1646,7 +1655,16 @@ def parse_args(argv: list[str] | None = None) -> CampaignConfig:
     parser.add_argument(
         "--scenario",
         action="append",
-        choices=["dungeon", "test_chamber", "empire_compound", "frontier", "town"],
+        choices=[
+            "dungeon",
+            "test_chamber",
+            "empire_compound",
+            "frontier",
+            "town",
+            "bazaar",
+            "warren",
+            "archive",
+        ],
     )
     parser.add_argument("--persona", action="append", choices=list(PERSONAS))
     parser.add_argument(

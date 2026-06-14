@@ -40,6 +40,32 @@ _FIELD_LABELS = {
 }
 _GENDER_OPTIONS = GENDER_OPTIONS
 
+# Starting zones the player can begin a run in. The first is the default
+# (Hollowmere); the rest are the alternative hubs wired in generation.py /
+# engine.py. (scenario, display name, one-line blurb.)
+START_ZONES: tuple[tuple[str, str, str], ...] = (
+    (
+        "town",
+        "Hollowmere",
+        "A frontier town at an old dungeon stair, already under imperial attack as you arrive.",
+    ),
+    (
+        "bazaar",
+        "the Saltmarket",
+        "A jewel-toned bazaar of crowded stalls, merchants, and rumor. Trade-focused and calm.",
+    ),
+    (
+        "warren",
+        "the Warren",
+        "A packed honeycomb of small adjoining rooms, thick with props and prowling things.",
+    ),
+    (
+        "archive",
+        "the Foxed Stacks",
+        "A hill-town drowning in hoarded books, scholars, and quiet investigation.",
+    ),
+)
+
 
 class CharacterCreationScene:
     def __init__(self, host) -> None:
@@ -57,6 +83,7 @@ class CharacterCreationScene:
             "fields": {field: "" for field in _FIELDS},
             "gender_mode": 0,  # index into _GENDER_OPTIONS; 2 == "Other" (custom)
             "gender_other": "",
+            "zone_index": 0,  # index into START_ZONES; 0 == Hollowmere (default)
             "focus": 0,
             "portrait_request": None,
             "portrait_status": None,  # None | working | done | error
@@ -80,8 +107,12 @@ class CharacterCreationScene:
         order = ["origins", "random", *STATS, *_FIELDS, "gender"]
         if self.host.portraits.available():
             order.append("portrait")
+        order.append("zone")
         order.append("begin")
         return order
+
+    def _scenario(self) -> str:
+        return START_ZONES[self.s["zone_index"]][0]
 
     def _focused(self) -> str:
         order = self._focus_order()
@@ -124,7 +155,10 @@ class CharacterCreationScene:
                 self.s["spend"] = {stat: 0 for stat in STATS}
                 self._set_focus("origins")
             elif cid == "random":
-                self.host.finish_creation(None)
+                self.host.finish_creation(None, self._scenario())
+            elif cid.startswith("zone_"):
+                self.s["zone_index"] = int(cid.split("_")[1])
+                self._set_focus("zone")
             elif cid.endswith("_minus"):
                 self._adjust(cid[:-6], -1)
                 self._set_focus(cid[:-6])
@@ -160,10 +194,12 @@ class CharacterCreationScene:
                 s["spend"][focus] -= 1
         elif focus == "gender":
             s["gender_mode"] = (s["gender_mode"] + delta) % len(_GENDER_OPTIONS)
+        elif focus == "zone":
+            s["zone_index"] = (s["zone_index"] + delta) % len(START_ZONES)
 
     def _activate(self, focus: str) -> None:
         if focus == "random":
-            self.host.finish_creation(None)
+            self.host.finish_creation(None, self._scenario())
         elif focus == "portrait":
             self._request_portrait()
         elif focus in ("begin", "origins"):
@@ -198,7 +234,7 @@ class CharacterCreationScene:
         )
         profile.gender = self._gender()
         profile.portrait_path = s.get("portrait_path", "")
-        self.host.finish_creation(profile)
+        self.host.finish_creation(profile, self._scenario())
 
     # -- portrait -----------------------------------------------------------
     def _request_portrait(self) -> None:
@@ -274,13 +310,46 @@ class CharacterCreationScene:
         self._draw_left(left_x, left_w, top, focus)
         self._draw_middle(mid_x, mid_w, top, focus)
         self._draw_right(right_x, right_w, top, focus)
+        self._draw_zone_strip(margin, screen.get_height() - 108, width - 2 * margin, focus)
 
         hint = (
             "Tab/Arrows: move  ·  Left/Right: adjust  ·  type to edit  ·  Enter: begin"
         )
         if host.portraits.available():
             hint += "  ·  F2: portrait"
-        self._text(hint, margin, screen.get_height() - 40, host.small_font, MUTED)
+        self._text(hint, margin, screen.get_height() - 28, host.small_font, MUTED)
+
+    def _draw_zone_strip(self, x, y, w, focus) -> None:
+        """A full-width row of selectable starting zones, with the selection's blurb."""
+        host = self.host
+        active = focus == "zone"
+        self._text(
+            "Begin in:",
+            x,
+            y,
+            host.ui_font,
+            ACCENT if active else GOLD,
+        )
+        chip_y = y + 24
+        gap = 10
+        chip_w = (w - gap * (len(START_ZONES) - 1)) // len(START_ZONES)
+        for i, (_scenario, name, _blurb) in enumerate(START_ZONES):
+            chip_x = x + i * (chip_w + gap)
+            rect = pygame.Rect(chip_x, chip_y, chip_w, 30)
+            selected = i == self.s["zone_index"]
+            if selected:
+                pygame.draw.rect(host.screen, SELECTED, rect, border_radius=4)
+            border = ACCENT if (selected and active) else PANEL_EDGE
+            pygame.draw.rect(host.screen, border, rect, width=2, border_radius=4)
+            label_color = ACCENT if selected else TEXT
+            surf = host.ui_font.render(name, True, label_color)
+            host.screen.blit(
+                surf,
+                (rect.centerx - surf.get_width() // 2, rect.centery - surf.get_height() // 2),
+            )
+            self.hitboxes[f"zone_{i}"] = rect
+        blurb = START_ZONES[self.s["zone_index"]][2]
+        self._text(blurb, x, chip_y + 36, host.small_font, MUTED)
 
     def _draw_left(self, x, w, y, focus) -> None:
         host = self.host
