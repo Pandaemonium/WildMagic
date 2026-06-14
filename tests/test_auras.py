@@ -46,8 +46,15 @@ def test_self_aura_expires_after_its_turns() -> None:
     # "force" rather than "fire": fire damage also ignites (a lingering burning tick),
     # which would mask whether the aura itself stopped firing.
     engine._apply_effect(
-        {"type": "aura", "target": "player", "kind": "damage", "amount": 1,
-         "damage_type": "force", "radius": 3, "turns": 2}
+        {
+            "type": "aura",
+            "target": "player",
+            "kind": "damage",
+            "amount": 1,
+            "damage_type": "force",
+            "radius": 3,
+            "turns": 2,
+        }
     )
     engine.finish_player_turn()  # turn 1 fires, ttl -> 1
     engine.finish_player_turn()  # turn 2 fires, ttl -> 0, pruned
@@ -64,14 +71,22 @@ def test_aura_affects_enemies_not_allies() -> None:
         "loyal hound", "h", player.x - 1, player.y, 10, 2, 0, "ally", None
     )
     engine._apply_effect(
-        {"type": "aura", "target": "player", "kind": "damage", "amount": 2,
-         "damage_type": "force", "radius": 4, "affects": "enemies", "turns": 1}
+        {
+            "type": "aura",
+            "target": "player",
+            "kind": "damage",
+            "amount": 2,
+            "damage_type": "force",
+            "radius": 4,
+            "affects": "enemies",
+            "turns": 1,
+        }
     )
     friend_hp0 = friend.hp
     enemy_hp0 = enemy.hp
     engine.finish_player_turn()
     assert enemy.hp == enemy_hp0 - 2  # foe burns
-    assert friend.hp == friend_hp0    # ally untouched
+    assert friend.hp == friend_hp0  # ally untouched
 
 
 # --- aura borne by a conjured creature --------------------------------------------------
@@ -79,7 +94,6 @@ def test_aura_affects_enemies_not_allies() -> None:
 
 def test_conjured_creature_carries_status_aura() -> None:
     engine, enemy = _engine_with_enemy(dx=1)
-    player = engine.state.player
     engine._apply_effect(
         {
             "type": "conjure_creature",
@@ -96,7 +110,9 @@ def test_conjured_creature_carries_status_aura() -> None:
             },
         }
     )
-    summoned = [e for e in engine.state.entities.values() if e.faction == "ally" and e.auras]
+    summoned = [
+        e for e in engine.state.entities.values() if e.faction == "ally" and e.auras
+    ]
     assert summoned, "the conjured creature should carry the nested aura"
     engine.finish_player_turn()
     assert enemy.statuses.get("slowed")  # the haze slowed the foe
@@ -136,8 +152,12 @@ def test_aura_without_a_mechanic_is_dropped() -> None:
     normalized = engine._normalize_auras({"radius": 3, "label": "pretty glow"})
     assert normalized == []
     # And the standalone effect reports the fizzle rather than anchoring an empty aura.
-    messages = engine._apply_effect({"type": "aura", "target": "player", "label": "pretty glow"})
-    assert messages and "anchor" in messages[0].lower() or "gutter" in messages[0].lower()
+    messages = engine._apply_effect(
+        {"type": "aura", "target": "player", "label": "pretty glow"}
+    )
+    assert (
+        messages and "anchor" in messages[0].lower() or "gutter" in messages[0].lower()
+    )
     assert not engine.state.player.auras
 
 

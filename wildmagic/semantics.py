@@ -55,9 +55,9 @@ def faction_anchor(faction: str) -> str:
 # compound across subsystems instead of fragmenting.
 SEMANTIC_PREAMBLE = (
     "NARRATIVE TRAITS & WORLD NOTES. Entities, places, and the world may carry traits and "
-    "notes -- descriptive facts with no fixed mechanical rule (e.g. \"a righteous, "
-    "goblin-hating hat\", \"this floor remembers a murder\", \"the captain is secretly "
-    "afraid of crows\"). Let them color tone, targeting, plausibility, and reactions. You "
+    'notes -- descriptive facts with no fixed mechanical rule (e.g. "a righteous, '
+    'goblin-hating hat", "this floor remembers a murder", "the captain is secretly '
+    'afraid of crows"). Let them color tone, targeting, plausibility, and reactions. You '
     "MAY turn one into a concrete effect when the situation squarely calls for it (and then "
     "price that effect normally), but do not manufacture power from flavor on every action. "
     "Weigh them; do not mechanically apply them."

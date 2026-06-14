@@ -55,7 +55,10 @@ def test_bare_tile_target_has_no_entity_but_resolves_position() -> None:
     # No occupant, so resolve_target yields None...
     assert engine.resolve_target("there") is None
     # ...but the position resolvers honor the clicked square.
-    assert engine.effect_position({"type": "area_damage", "target": "there"}) == (tx, ty)
+    assert engine.effect_position({"type": "area_damage", "target": "there"}) == (
+        tx,
+        ty,
+    )
     assert engine.resolve_placement(
         {"placement": "selected_target"}, prefer_unblocked=False
     ) == (tx, ty)
@@ -143,12 +146,26 @@ def test_standard_bolt_prefers_marked_enemy_over_nearest() -> None:
     engine = GameEngine(seed=12, scenario="test_chamber")
     player = engine.state.player
     near = engine.spawn_actor(
-        "near rat", "r", player.x + 1, player.y, hp=6, attack=1, defense=0,
-        faction="enemy", ai="hunt",
+        "near rat",
+        "r",
+        player.x + 1,
+        player.y,
+        hp=6,
+        attack=1,
+        defense=0,
+        faction="enemy",
+        ai="hunt",
     )
     far = engine.spawn_actor(
-        "far rat", "R", player.x + 3, player.y, hp=6, attack=1, defense=0,
-        faction="enemy", ai="hunt",
+        "far rat",
+        "R",
+        player.x + 3,
+        player.y,
+        hp=6,
+        attack=1,
+        defense=0,
+        faction="enemy",
+        ai="hunt",
     )
     engine.set_target(far.x, far.y)
     engine.cast_standard_bolt()

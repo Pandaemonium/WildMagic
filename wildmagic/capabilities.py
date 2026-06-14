@@ -167,16 +167,24 @@ class CapabilityCard:
     triggers: tuple[str, ...]  # lowercase substrings for tier-1 keyword routing
     embed_description: str  # natural-language gloss for tier-2 (embedding) routing
     index_line: str  # the ONE line shown in the always-on capability index
-    effect_types: tuple[str, ...]  # SUPPORTED_EFFECTS keys this card unlocks (may be empty
+    effect_types: tuple[
+        str, ...
+    ]  # SUPPORTED_EFFECTS keys this card unlocks (may be empty
     #                                for a prompt-only card that refines a core effect)
-    prompt_block: str  # schema fragment + balance rules + limits, injected when selected
+    prompt_block: (
+        str  # schema fragment + balance rules + limits, injected when selected
+    )
     examples: tuple[str, ...] = ()  # 1-2 few-shot JSON examples, injected when selected
     cost_hint: str = ""
     # Composition + scoping (docs §5.0/§5.3/§5.5):
-    common_combos: tuple[str, ...] = ()  # specialist partners the engine auto-loads (one hop)
+    common_combos: tuple[
+        str, ...
+    ] = ()  # specialist partners the engine auto-loads (one hop)
     required_context: tuple[str, ...] = ()  # game-state keys to inject when selected
     version: int = 1  # bump on any schema/balance change; spellbook cache keys on it
-    integrated: bool = True  # False = planned card whose engine handler does not exist yet
+    integrated: bool = (
+        True  # False = planned card whose engine handler does not exist yet
+    )
 
 
 # ----------------------------------------------------------------------------------------
@@ -188,11 +196,43 @@ class CapabilityCard:
 _CONJURE_CREATURE = CapabilityCard(
     name="conjure_creature",
     triggers=(
-        "summon", "conjure", "call ", "call a", "call up", "call forth", "call down",
-        "raise", "spawn", "elemental", "wolf", "wolves", "spirit", "golem", "construct",
-        "swarm", "ward", "totem", "sentinel", "guardian", "minion", "ally", "servant",
-        "familiar", "hound", "creature", "beast", "ooze", "slime", "wraith", "demon",
-        "skeleton", "scarecrow", "font", "beacon", "anchor", "radiator",
+        "summon",
+        "conjure",
+        "call ",
+        "call a",
+        "call up",
+        "call forth",
+        "call down",
+        "raise",
+        "spawn",
+        "elemental",
+        "wolf",
+        "wolves",
+        "spirit",
+        "golem",
+        "construct",
+        "swarm",
+        "ward",
+        "totem",
+        "sentinel",
+        "guardian",
+        "minion",
+        "ally",
+        "servant",
+        "familiar",
+        "hound",
+        "creature",
+        "beast",
+        "ooze",
+        "slime",
+        "wraith",
+        "demon",
+        "skeleton",
+        "scarecrow",
+        "font",
+        "beacon",
+        "anchor",
+        "radiator",
     ),
     embed_description=(
         "Summoning living or semi-living helpers, hazards, wards, and aura-bearers: wolves, "
@@ -211,7 +251,7 @@ _CONJURE_CREATURE = CapabilityCard(
         "  'aura_heal_N', 'aura_fear_N', 'aura_slow_N', 'aura_poison_N', 'aura_bleed_N', 'aura_reveal_N',\n"
         "  'aura_mana_N', 'aura_damage_N', 'aura_confuse_N' emit that effect each turn in radius N;\n"
         "  'explode_on_death', 'shatter_on_death', 'poison_cloud_on_death', 'freeze_on_death', 'spawn_on_death'.\n"
-        "For an aura the fixed 'aura_*' tags don't cover (a specific damage_type, an unusual status, a tuned radius/lifetime), nest an \"aura\" object inside the conjure_creature/summon effect instead: {\"aura\": {\"kind\": \"damage\", \"amount\": 2, \"damage_type\": \"shadow\", \"radius\": 1, \"affects\": \"enemies\", \"label\": \"burning shadow\"}}. Use this for spells like 'a hound whose shadow burns nearby foes'.\n"
+        'For an aura the fixed \'aura_*\' tags don\'t cover (a specific damage_type, an unusual status, a tuned radius/lifetime), nest an "aura" object inside the conjure_creature/summon effect instead: {"aura": {"kind": "damage", "amount": 2, "damage_type": "shadow", "radius": 1, "affects": "enemies", "label": "burning shadow"}}. Use this for spells like \'a hound whose shadow burns nearby foes\'.\n'
         "Prefer template-backed conjuration for arbitrary creatures; creative names/materials/tags are fine but mechanics come from the template."
     ),
     examples=(
@@ -225,9 +265,22 @@ _CONJURE_CREATURE = CapabilityCard(
 _CONJURE_ITEM = CapabilityCard(
     name="conjure_item",
     triggers=(
-        "conjure", "create item", "spawn", "glass", "tooth", "teeth", "shard",
-        "key", "coin", "weapon", "potion", "vial", "trinket", "webbing",
-        "transmute", "turn my",
+        "conjure",
+        "create item",
+        "spawn",
+        "glass",
+        "tooth",
+        "teeth",
+        "shard",
+        "key",
+        "coin",
+        "weapon",
+        "potion",
+        "vial",
+        "trinket",
+        "webbing",
+        "transmute",
+        "turn my",
     ),
     embed_description=(
         "Conjuring or transmuting objects and materials: glass teeth, a key, webbing, a "
@@ -253,9 +306,25 @@ _CONJURE_ITEM = CapabilityCard(
 _TRANSFORM_ENTITY = CapabilityCard(
     name="transform_entity",
     triggers=(
-        "polymorph", "turn the", "turn it into", "turn him", "turn her", "turn them",
-        "transform", "become a", "into a chicken", "into a", "petrify", "petrified",
-        "statue", "shrink", "chicken", "frog", "toad", "sheep", "mouse",
+        "polymorph",
+        "turn the",
+        "turn it into",
+        "turn him",
+        "turn her",
+        "turn them",
+        "transform",
+        "become a",
+        "into a chicken",
+        "into a",
+        "petrify",
+        "petrified",
+        "statue",
+        "shrink",
+        "chicken",
+        "frog",
+        "toad",
+        "sheep",
+        "mouse",
     ),
     embed_description=(
         "Turning an existing creature INTO something else — polymorph into a harmless "
@@ -283,15 +352,67 @@ _TRANSFORM_ENTITY = CapabilityCard(
 _DISFIGURE = CapabilityCard(
     name="disfigure",
     triggers=(
-        "disfigure", "maim", "mutilate", "cripple", "mangle", "deform", "warp his",
-        "warp her", "boil", "melt", "wither", "rot", "necrose", "gangrene", "flay",
-        "sever", "shatter his", "shatter her", "harden his", "harden her", "soften his",
-        "soften her", "twist his", "twist her", "calcify", "liquefy", "rupture", "palsy",
+        "disfigure",
+        "maim",
+        "mutilate",
+        "cripple",
+        "mangle",
+        "deform",
+        "warp his",
+        "warp her",
+        "boil",
+        "melt",
+        "wither",
+        "rot",
+        "necrose",
+        "gangrene",
+        "flay",
+        "sever",
+        "shatter his",
+        "shatter her",
+        "harden his",
+        "harden her",
+        "soften his",
+        "soften her",
+        "twist his",
+        "twist her",
+        "calcify",
+        "liquefy",
+        "rupture",
+        "palsy",
         # body parts -- the strongest signal a spell is a targeted maiming
-        "legs", "leg", "arm", "arms", "hand", "hands", "fingers", "knees", "knee",
-        "spine", "brain", "skull", "eyes", "eye", "tongue", "throat", "mouth", "flesh",
-        "skin", "hide", "carapace", "bones", "guts", "organs", "heart", "sinew",
-        "muscles", "muscle", "limbs", "limb", "veins", "nerves",
+        "legs",
+        "leg",
+        "arm",
+        "arms",
+        "hand",
+        "hands",
+        "fingers",
+        "knees",
+        "knee",
+        "spine",
+        "brain",
+        "skull",
+        "eyes",
+        "eye",
+        "tongue",
+        "throat",
+        "mouth",
+        "flesh",
+        "skin",
+        "hide",
+        "carapace",
+        "bones",
+        "guts",
+        "organs",
+        "heart",
+        "sinew",
+        "muscles",
+        "muscle",
+        "limbs",
+        "limb",
+        "veins",
+        "nerves",
     ),
     embed_description=(
         "Maiming one specific part of a living target -- boiling a brain, withering an "
@@ -311,10 +432,10 @@ _DISFIGURE = CapabilityCard(
         "  flesh/wound (rot) -> poisoned; veins/arteries -> bleeding.\n"
         "  mouth/tongue/throat -> silenced; eyes -> confused; nerve/courage -> frightened.\n"
         "  skin/hide/carapace made brittle -> add_weakness (name a damage_type) and/or marked.\n"
-        "Choose duration for severity; a permanent maiming uses duration \"permanent\" and "
+        'Choose duration for severity; a permanent maiming uses duration "permanent" and '
         "MUST carry a heavy cost. Disfigurement is cruel and major: always pair it with a "
         "real cost (mana plus a curse, health, or max-resource loss). Use display_name to "
-        "show the wound (e.g. \"legs of iron\", \"boiled mind\", \"withered arm\") and "
+        'show the wound (e.g. "legs of iron", "boiled mind", "withered arm") and '
         "expiry_text for when it mends."
     ),
     examples=(
@@ -328,9 +449,21 @@ _DISFIGURE = CapabilityCard(
 _FACTION_CHARM = CapabilityCard(
     name="faction_charm",
     triggers=(
-        "charm", "befriend", "convince the", "make it my", "make them my", "turn the enemy ally",
-        "ally for one turn", "defect", "turn against", "oath", "bind it", "make a friend",
-        "change side", "take sides", "loyal",
+        "charm",
+        "befriend",
+        "convince the",
+        "make it my",
+        "make them my",
+        "turn the enemy ally",
+        "ally for one turn",
+        "defect",
+        "turn against",
+        "oath",
+        "bind it",
+        "make a friend",
+        "change side",
+        "take sides",
+        "loyal",
     ),
     embed_description=(
         "Changing whose side a creature is on: charming an enemy into an ally, binding it "
@@ -353,9 +486,22 @@ _FACTION_CHARM = CapabilityCard(
 _BARRIER_SHAPING = CapabilityCard(
     name="barrier_shaping",
     triggers=(
-        "wall", "barrier", "line of", "in a line", "between me and", "path", "bridge",
-        "corridor", "channel", "wall of", "row of", "seal the", "block the", "divide",
-        "cone", "beam",
+        "wall",
+        "barrier",
+        "line of",
+        "in a line",
+        "between me and",
+        "path",
+        "bridge",
+        "corridor",
+        "channel",
+        "wall of",
+        "row of",
+        "seal the",
+        "block the",
+        "divide",
+        "cone",
+        "beam",
     ),
     embed_description=(
         "Directional terrain shaped as a wall, line, barrier, path, cone, or beam between "
@@ -380,9 +526,24 @@ _BARRIER_SHAPING = CapabilityCard(
 _DIVINATION = CapabilityCard(
     name="divination",
     triggers=(
-        "reveal", "sense", "detect", "locate", "find", "show me", "track", "mark the",
-        "mark every", "see through", "scout", "vision", "glowing", "where the", "hidden",
-        "invisible things", "weakness", "weaknesses",
+        "reveal",
+        "sense",
+        "detect",
+        "locate",
+        "find",
+        "show me",
+        "track",
+        "mark the",
+        "mark every",
+        "see through",
+        "scout",
+        "vision",
+        "glowing",
+        "where the",
+        "hidden",
+        "invisible things",
+        "weakness",
+        "weaknesses",
     ),
     embed_description=(
         "Revealing, tracking, locating, or marking: exposing hidden or invisible enemies, "
@@ -405,9 +566,21 @@ _DIVINATION = CapabilityCard(
 _TRIGGERS_REACTIONS = CapabilityCard(
     name="triggers_reactions",
     triggers=(
-        "next time", "whenever", "when an enemy", "when they", "the next attack",
-        "next attack against", "react", "reaction", "contingency", "if i am hit",
-        "when i bleed", "ward that", "trap that", "retaliate", "counter",
+        "next time",
+        "whenever",
+        "when an enemy",
+        "when they",
+        "the next attack",
+        "next attack against",
+        "react",
+        "reaction",
+        "contingency",
+        "if i am hit",
+        "when i bleed",
+        "ward that",
+        "trap that",
+        "retaliate",
+        "counter",
     ),
     embed_description=(
         "Conditional 'next time X happens, Y happens' magic: retaliation wards, traps that "
@@ -431,9 +604,21 @@ _TRIGGERS_REACTIONS = CapabilityCard(
 _DELAYED_EFFECTS = CapabilityCard(
     name="delayed_effects",
     triggers=(
-        "in three turns", "in five turns", "later", "delayed", "after a few", "soon",
-        "comes back", "will arrive", "ticking", "fuse", "countdown", "in a moment",
-        "next turn", "future", "debt",
+        "in three turns",
+        "in five turns",
+        "later",
+        "delayed",
+        "after a few",
+        "soon",
+        "comes back",
+        "will arrive",
+        "ticking",
+        "fuse",
+        "countdown",
+        "in a moment",
+        "next turn",
+        "future",
+        "debt",
     ),
     embed_description=(
         "Effects that pay off on a timer rather than a condition: a summon that arrives in "
@@ -457,9 +642,20 @@ _DELAYED_EFFECTS = CapabilityCard(
 _PROPHECY = CapabilityCard(
     name="prophecy",
     triggers=(
-        "prophesy", "prophecy", "i foretell", "somewhere north", "somewhere east",
-        "somewhere south", "somewhere west", "speak into existence", "i prophesy",
-        "destined", "fate", "beyond this map", "out in the", "waits for me",
+        "prophesy",
+        "prophecy",
+        "i foretell",
+        "somewhere north",
+        "somewhere east",
+        "somewhere south",
+        "somewhere west",
+        "speak into existence",
+        "i prophesy",
+        "destined",
+        "fate",
+        "beyond this map",
+        "out in the",
+        "waits for me",
     ),
     embed_description=(
         "Speaking a place, person, danger, or treasure into existence somewhere beyond this "
@@ -485,9 +681,20 @@ _PROPHECY = CapabilityCard(
 _POSSESSION = CapabilityCard(
     name="possession",
     triggers=(
-        "possess", "take over", "take control", "control the", "seize control",
-        "see through the eyes", "inhabit", "step into", "ride the", "puppet",
-        "become the", "take the body", "wear the", "into its body",
+        "possess",
+        "take over",
+        "take control",
+        "control the",
+        "seize control",
+        "see through the eyes",
+        "inhabit",
+        "step into",
+        "ride the",
+        "puppet",
+        "become the",
+        "take the body",
+        "wear the",
+        "into its body",
     ),
     embed_description=(
         "Leaving your own body to take control of another creature — possessing an enemy, "
@@ -510,11 +717,33 @@ _POSSESSION = CapabilityCard(
 _STRUCTURE_ANIMATION = CapabilityCard(
     name="structure_animation",
     triggers=(
-        "animate", "come alive", "bring to life", "bring it to life", "awaken", "rouse",
-        "wake the", "make the door", "make the wall", "door", "statue", "gargoyle",
-        "furniture", "the chair", "the table", "the brazier", "the gate", "the chains",
-        "the pillar", "to life", "rise up and", "give it legs", "tear the", "rip the",
-        "pull the", "pry the", "out of the wall",
+        "animate",
+        "come alive",
+        "bring to life",
+        "bring it to life",
+        "awaken",
+        "rouse",
+        "wake the",
+        "make the door",
+        "make the wall",
+        "door",
+        "statue",
+        "gargoyle",
+        "furniture",
+        "the chair",
+        "the table",
+        "the brazier",
+        "the gate",
+        "the chains",
+        "the pillar",
+        "to life",
+        "rise up and",
+        "give it legs",
+        "tear the",
+        "rip the",
+        "pull the",
+        "pry the",
+        "out of the wall",
     ),
     embed_description=(
         "Bringing an existing object or piece of scenery to life as a creature: a door "
@@ -542,9 +771,23 @@ _STRUCTURE_ANIMATION = CapabilityCard(
 _MEMORY_EDIT = CapabilityCard(
     name="memory_edit",
     triggers=(
-        "remember", "forget", "memory", "memories", "recall", "mind", "convince",
-        "erase", "implant", "amnesia", "recollect", "believe", "make him think",
-        "make her think", "make it think", "wipe", "plant a memory",
+        "remember",
+        "forget",
+        "memory",
+        "memories",
+        "recall",
+        "mind",
+        "convince",
+        "erase",
+        "implant",
+        "amnesia",
+        "recollect",
+        "believe",
+        "make him think",
+        "make her think",
+        "make it think",
+        "wipe",
+        "plant a memory",
     ),
     embed_description=(
         "Spells that change what a person knows or remembers: planting a false memory, "
@@ -595,9 +838,24 @@ CAPABILITY_CARDS: tuple[CapabilityCard, ...] = (
 _SIZE_MODIFICATION = CapabilityCard(
     name="size_modification",
     triggers=(
-        "bigger", "smaller", "grow", "enlarge", "enlarged", "giant", "gigantic",
-        "colossal", "huge", "swell", "tiny", "miniature", "shrink", "dwindle",
-        "miniaturize", "the size of", "no taller than", "twice the size",
+        "bigger",
+        "smaller",
+        "grow",
+        "enlarge",
+        "enlarged",
+        "giant",
+        "gigantic",
+        "colossal",
+        "huge",
+        "swell",
+        "tiny",
+        "miniature",
+        "shrink",
+        "dwindle",
+        "miniaturize",
+        "the size of",
+        "no taller than",
+        "twice the size",
     ),
     embed_description=(
         "Changing the SCALE of a creature or object while it stays itself — making a foe "
@@ -605,7 +863,9 @@ _SIZE_MODIFICATION = CapabilityCard(
         "swelling or miniaturizing without changing what it is."
     ),
     index_line="size_modification — scale a creature or object up or down (bigger/smaller) without changing what it is",
-    effect_types=("resize_entity",),  # NEW SUPPORTED_EFFECTS key + engine handler (not built)
+    effect_types=(
+        "resize_entity",
+    ),  # NEW SUPPORTED_EFFECTS key + engine handler (not built)
     prompt_block=(
         "resize_entity: target (creature/object id or 'nearest_enemy'), scale (a multiplier, "
         "e.g. 0.4 to shrink, 2.0 to enlarge), plus the stat shifts that follow from scale "
@@ -624,11 +884,35 @@ _SIZE_MODIFICATION = CapabilityCard(
 _GRAVITY_CONTROL = CapabilityCard(
     name="gravity_control",
     triggers=(
-        "gravity", "levitate", "levitation", "float", "floating", "weightless",
-        "hover", "lift him", "lift her", "lift it", "lift them", "pin him", "pin her",
-        "pin them", "pin it", "weigh down", "crush", "crushing", "heavier", "lighter",
-        "fall up", "fall upward", "reverse gravity", "press down", "pull down",
-        "anchor to the floor", "rise into the air", "slam to the ground", "plummet",
+        "gravity",
+        "levitate",
+        "levitation",
+        "float",
+        "floating",
+        "weightless",
+        "hover",
+        "lift him",
+        "lift her",
+        "lift it",
+        "lift them",
+        "pin him",
+        "pin her",
+        "pin them",
+        "pin it",
+        "weigh down",
+        "crush",
+        "crushing",
+        "heavier",
+        "lighter",
+        "fall up",
+        "fall upward",
+        "reverse gravity",
+        "press down",
+        "pull down",
+        "anchor to the floor",
+        "rise into the air",
+        "slam to the ground",
+        "plummet",
     ),
     embed_description=(
         "Altering weight, falling, and pull: levitating a creature off the floor, pinning "
@@ -636,7 +920,9 @@ _GRAVITY_CONTROL = CapabilityCard(
         "heavy or feather-light. A STANDING field that persists, not a one-shot shove."
     ),
     index_line="gravity_control — levitate, pin, crush, lighten, or reverse the pull on creatures and a region (standing field)",
-    effect_types=("set_gravity",),  # NEW SUPPORTED_EFFECTS key + engine handler (not built)
+    effect_types=(
+        "set_gravity",
+    ),  # NEW SUPPORTED_EFFECTS key + engine handler (not built)
     prompt_block=(
         "set_gravity: target ('player', a creature id, 'nearest_enemy', or 'tile' + x/y for "
         "a region), mode ('levitate' lifts and disables ground attacks; 'pin'/'crush' roots "
@@ -657,9 +943,22 @@ _GRAVITY_CONTROL = CapabilityCard(
 _PORTAL_GATES = CapabilityCard(
     name="portal_gates",
     triggers=(
-        "portal", "gateway", "gate ", "rift", "doorway", "threshold", "rip a hole",
-        "tear a hole", "open a passage", "wormhole", "warp gate", "escape hole",
-        "linked door", "step through here and out", "fold space to", "shortcut through",
+        "portal",
+        "gateway",
+        "gate ",
+        "rift",
+        "doorway",
+        "threshold",
+        "rip a hole",
+        "tear a hole",
+        "open a passage",
+        "wormhole",
+        "warp gate",
+        "escape hole",
+        "linked door",
+        "step through here and out",
+        "fold space to",
+        "shortcut through",
     ),
     embed_description=(
         "Opening a PERSISTENT doorway between two places that stays open and links them: step "
@@ -667,7 +966,9 @@ _PORTAL_GATES = CapabilityCard(
         "unlike teleport (a one-shot jump), a portal endures and can be used repeatedly."
     ),
     index_line="portal_gates — open a persistent linked doorway between two tiles (repeatable, unlike one-shot teleport)",
-    effect_types=("create_portal",),  # NEW SUPPORTED_EFFECTS key + engine handler (not built)
+    effect_types=(
+        "create_portal",
+    ),  # NEW SUPPORTED_EFFECTS key + engine handler (not built)
     prompt_block=(
         "create_portal: anchor (x/y or 'player' for the near mouth) and destination (x/y, or "
         "'known' to land at a remembered/visible location), plus turns (how long it stays open; "
@@ -687,10 +988,32 @@ _PORTAL_GATES = CapabilityCard(
 _PLANT_GROWTH = CapabilityCard(
     name="plant_growth",
     triggers=(
-        "vine", "vines", "thorn", "thorns", "thicket", "bramble", "brambles", "root",
-        "roots", "creeper", "ivy", "overgrow", "overgrowth", "sprout", "blossom",
-        "grow plants", "grow a", "entangle", "ensnaring vines", "grasping roots",
-        "wall of thorns", "fruit", "branches", "moss", "weeds", "verdant",
+        "vine",
+        "vines",
+        "thorn",
+        "thorns",
+        "thicket",
+        "bramble",
+        "brambles",
+        "root",
+        "roots",
+        "creeper",
+        "ivy",
+        "overgrow",
+        "overgrowth",
+        "sprout",
+        "blossom",
+        "grow plants",
+        "grow a",
+        "entangle",
+        "ensnaring vines",
+        "grasping roots",
+        "wall of thorns",
+        "fruit",
+        "branches",
+        "moss",
+        "weeds",
+        "verdant",
     ),
     embed_description=(
         "Forcing sudden plant growth into the scene: ensnaring vines and grasping roots that "
@@ -731,13 +1054,22 @@ PLANNED_CARDS: tuple[CapabilityCard, ...] = (
 # Compositional connectives signal multi-mechanic intent ("wall of fire AND make them
 # forget me") and raise the selected-set cap.
 _CONNECTIVES: tuple[str, ...] = (
-    " and ", " while ", " then ", "but also", " except ", " into ", " after ", " before ",
+    " and ",
+    " while ",
+    " then ",
+    "but also",
+    " except ",
+    " into ",
+    " after ",
+    " before ",
 )
 
 _HARD_CEILING = 7
 
 
-def _keyword_hits(text: str, cards: tuple[CapabilityCard, ...]) -> list[tuple[CapabilityCard, int]]:
+def _keyword_hits(
+    text: str, cards: tuple[CapabilityCard, ...]
+) -> list[tuple[CapabilityCard, int]]:
     """Cards whose triggers appear in the (lowercased) spell text, with hit counts, ranked
     most-hits-first (a proxy for confidence) and then by registry order for stability."""
     scored: list[tuple[CapabilityCard, int]] = []
@@ -779,7 +1111,9 @@ def select_cards(
     selected: list[CapabilityCard] = list(primary)
     if enable_combos:
         seen = {card.name for card in selected}
-        for card in primary:  # one hop only — bonus cards do not pull in their own combos
+        for (
+            card
+        ) in primary:  # one hop only — bonus cards do not pull in their own combos
             for combo_name in card.common_combos:
                 combo = by_name.get(combo_name)
                 if combo is not None and combo.name not in seen:

@@ -34,7 +34,9 @@ def test_integrated_cards_only_unlock_real_effects() -> None:
     for card in cap.CAPABILITY_CARDS:
         assert card.integrated is True
         for effect in card.effect_types:
-            assert effect in SUPPORTED_EFFECTS, f"{card.name} unlocks unknown effect {effect}"
+            assert effect in SUPPORTED_EFFECTS, (
+                f"{card.name} unlocks unknown effect {effect}"
+            )
 
 
 def test_core_effect_types_are_real() -> None:
@@ -120,7 +122,9 @@ def test_trigger_phrasing_selects_triggers_reactions() -> None:
 
 
 def test_possession_phrasing_selects_possession() -> None:
-    selected = cap.select_cards("take over the nearest enemy's body and leave my own behind")
+    selected = cap.select_cards(
+        "take over the nearest enemy's body and leave my own behind"
+    )
     assert "possession" in _names(selected)
 
 
@@ -132,7 +136,9 @@ def test_memory_phrasing_selects_memory_edit() -> None:
 def test_animate_phrasing_selects_structure_animation() -> None:
     # Regression: "nearest door" (bare noun) must route to structure_animation, not only
     # barrier_shaping via "wall". A live cast that missed this conjured a new creature.
-    selected = cap.select_cards("tear the nearest door from the wall and make it fight for me")
+    selected = cap.select_cards(
+        "tear the nearest door from the wall and make it fight for me"
+    )
     assert "structure_animation" in _names(selected)
 
 
@@ -185,7 +191,9 @@ def test_compositional_spell_selects_multiple_cards() -> None:
     """A spell that fuses mechanics should pull in all of them — the recall bias in action."""
     pool = cap.CAPABILITY_CARDS + cap.PLANNED_CARDS
     selected = _names(
-        cap.select_cards("raise a wall of fire and make them forget I was here", cards=pool)
+        cap.select_cards(
+            "raise a wall of fire and make them forget I was here", cards=pool
+        )
     )
     assert "barrier_shaping" in selected
     assert "memory_edit" in selected
@@ -267,7 +275,9 @@ def test_capability_index_has_one_line_per_card() -> None:
 def test_each_live_card_documents_the_effects_it_unlocks() -> None:
     for card in cap.CAPABILITY_CARDS:
         for effect in card.effect_types:
-            assert effect in card.prompt_block, f"{card.name} unlocks {effect} but never documents it"
+            assert effect in card.prompt_block, (
+                f"{card.name} unlocks {effect} but never documents it"
+            )
 
 
 def test_carve_preserves_specialist_catalog_and_tags() -> None:
@@ -276,16 +286,31 @@ def test_carve_preserves_specialist_catalog_and_tags() -> None:
     text = _union_text()
     must_survive = [
         # specialist effect catalog entries
-        "summon:", "conjure_creature:", "conjure_item:", "transform_entity:",
-        "create_trigger", "schedule_event", "create_promise", "change_faction",
-        "possess:", "edit_memory:", "animate_object:",
+        "summon:",
+        "conjure_creature:",
+        "conjure_item:",
+        "transform_entity:",
+        "create_trigger",
+        "schedule_event",
+        "create_promise",
+        "change_faction",
+        "possess:",
+        "edit_memory:",
+        "animate_object:",
         # creature behavior tags
-        "aura_burn_N", "explode_on_death", "ranged", "guardian", "stationary",
+        "aura_burn_N",
+        "explode_on_death",
+        "ranged",
+        "guardian",
+        "stationary",
         "spawn_on_death",
         # templates
-        "hazard_creature", "body_part",
+        "hazard_creature",
+        "body_part",
         # fidelity rules we fought for
-        '"shape": "wall"', '"shape": "line"', "revealed",
+        '"shape": "wall"',
+        '"shape": "line"',
+        "revealed",
     ]
     for needle in must_survive:
         assert needle in text, f"carve dropped: {needle!r}"
@@ -294,10 +319,20 @@ def test_carve_preserves_specialist_catalog_and_tags() -> None:
 def test_core_prompt_keeps_universals_and_drops_specialists() -> None:
     core = cap.CORE_PROMPT
     # Universals stay in core.
-    for needle in ["Wild Magic referee", "area_damage:", "Cost catalog", "Supported statuses:"]:
+    for needle in [
+        "Wild Magic referee",
+        "area_damage:",
+        "Cost catalog",
+        "Supported statuses:",
+    ]:
         assert needle in core
     # Specialist catalog definitions and the behavior-tag block move OUT of core.
-    for needle in ["transform_entity:", "conjure_creature:", "Behavior tags", "aura_burn_N"]:
+    for needle in [
+        "transform_entity:",
+        "conjure_creature:",
+        "Behavior tags",
+        "aura_burn_N",
+    ]:
         assert needle not in core
     # The status placeholder was substituted, not left literal.
     assert "{supported_statuses}" not in core
@@ -316,7 +351,9 @@ def test_assembled_prompt_loads_routed_card_mechanics() -> None:
 
 
 def test_assembled_prompt_for_plain_spell_loads_no_card_block() -> None:
-    system = cap.assemble_resolver_system_prompt("hurl a roaring fireball at the goblin")
+    system = cap.assemble_resolver_system_prompt(
+        "hurl a roaring fireball at the goblin"
+    )
     assert "Wild Magic referee" in system
     assert "Capability index" in system  # index still shown
     assert "transform_entity:" not in system  # nothing routed
@@ -325,7 +362,9 @@ def test_assembled_prompt_for_plain_spell_loads_no_card_block() -> None:
 
 def test_assembled_prompt_appends_region_and_caster_blocks() -> None:
     system = cap.assemble_resolver_system_prompt(
-        "summon a wolf", region_block="\nREGION_MARKER\n", caster_block="\nCASTER_MARKER\n"
+        "summon a wolf",
+        region_block="\nREGION_MARKER\n",
+        caster_block="\nCASTER_MARKER\n",
     )
     assert system.rstrip().endswith("CASTER_MARKER")
     assert "REGION_MARKER" in system
@@ -338,7 +377,9 @@ def test_wild_prompt_messages_routes_by_spell() -> None:
     from wildmagic.wild_magic import _wild_prompt_messages
 
     routed = _wild_prompt_messages("turn the goblin into a chicken", {})[0]["content"]
-    plain = _wild_prompt_messages("hurl a roaring fireball at the goblin", {})[0]["content"]
+    plain = _wild_prompt_messages("hurl a roaring fireball at the goblin", {})[0][
+        "content"
+    ]
     # Both share the always-on core; only the polymorph loads the transform_entity card.
     assert "Wild Magic referee" in routed
     assert "Wild Magic referee" in plain

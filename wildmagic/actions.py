@@ -322,7 +322,9 @@ class GameSession:
                         label = occupant.name if occupant is not None else "that square"
                         self.engine.state.add_message(f"Target marked: {label}.")
                     else:
-                        explicit_messages = [f"Can't target ({tx}, {ty}) - out of bounds."]
+                        explicit_messages = [
+                            f"Can't target ({tx}, {ty}) - out of bounds."
+                        ]
             elif verb in {"untarget", "cleartarget", "clear_target", "unmark"}:
                 action = "untarget"
                 had_target = self.engine.has_target()

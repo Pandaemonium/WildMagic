@@ -41,7 +41,9 @@ def test_ledger_caps_per_anchor_evicting_lowest_salience() -> None:
     ledger.record("place:0,0", "trivial a", turn=0, salience=1)
     ledger.record("place:0,0", "big thing", turn=0, salience=5)
     ledger.record("place:0,0", "trivial b", turn=0, salience=1)
-    ledger.record("place:0,0", "trivial c", turn=0, salience=2)  # pushes out a salience-1
+    ledger.record(
+        "place:0,0", "trivial c", turn=0, salience=2
+    )  # pushes out a salience-1
     texts = {n.text for n in ledger.notes["place:0,0"]}
     assert "big thing" in texts
     assert len(ledger.notes["place:0,0"]) == 3
@@ -80,28 +82,43 @@ def test_anchor_helpers() -> None:
 def test_add_trait_writes_to_entity_and_ledger() -> None:
     engine = GameEngine(seed=7, scenario="test_chamber")
     player = engine.state.player
-    foe = engine.spawn_actor("goblin", "g", player.x + 1, player.y, 10, 2, 0, "enemy", None)
+    foe = engine.spawn_actor(
+        "goblin", "g", player.x + 1, player.y, 10, 2, 0, "enemy", None
+    )
     engine._apply_effect(
-        {"type": "add_trait", "target": foe.id, "text": "branded a coward", "salience": 4}
+        {
+            "type": "add_trait",
+            "target": foe.id,
+            "text": "branded a coward",
+            "salience": 4,
+        }
     )
     assert "branded a coward" in foe.traits  # rides on the entity (free surfacing)
-    notes = engine.state.semantics.for_anchors([entity_anchor(foe.id)], turn=engine.state.turn)
+    notes = engine.state.semantics.for_anchors(
+        [entity_anchor(foe.id)], turn=engine.state.turn
+    )
     assert any("coward" in n.text for n in notes)  # also in the shared ledger
 
 
 def test_add_trait_dedupes_on_entity() -> None:
     engine = GameEngine(seed=7, scenario="test_chamber")
     player = engine.state.player
-    foe = engine.spawn_actor("goblin", "g", player.x + 1, player.y, 10, 2, 0, "enemy", None)
+    foe = engine.spawn_actor(
+        "goblin", "g", player.x + 1, player.y, 10, 2, 0, "enemy", None
+    )
     for _ in range(3):
-        engine._apply_effect({"type": "add_trait", "target": foe.id, "text": "smells of brimstone"})
+        engine._apply_effect(
+            {"type": "add_trait", "target": foe.id, "text": "smells of brimstone"}
+        )
     assert foe.traits.count("smells of brimstone") == 1
 
 
 def test_entity_traits_surface_in_public_dict() -> None:
     engine = GameEngine(seed=7, scenario="test_chamber")
     player = engine.state.player
-    foe = engine.spawn_actor("goblin", "g", player.x + 1, player.y, 10, 2, 0, "enemy", None)
+    foe = engine.spawn_actor(
+        "goblin", "g", player.x + 1, player.y, 10, 2, 0, "enemy", None
+    )
     foe.traits.append("righteously feared by rats")
     assert foe.to_public_dict().get("traits") == ["righteously feared by rats"]
 
@@ -112,11 +129,15 @@ def test_entity_traits_surface_in_public_dict() -> None:
 def test_slaying_a_foe_leaves_a_place_note() -> None:
     engine = GameEngine(seed=7, scenario="test_chamber")
     player = engine.state.player
-    foe = engine.spawn_actor("goblin", "g", player.x + 1, player.y, 3, 2, 0, "enemy", None)
+    foe = engine.spawn_actor(
+        "goblin", "g", player.x + 1, player.y, 3, 2, 0, "enemy", None
+    )
     fx, fy = foe.x, foe.y
     engine.damage_entity(foe, 99, "physical", source=player)
     assert foe.hp <= 0
-    notes = engine.state.semantics.for_anchors([place_anchor(fx, fy)], turn=engine.state.turn)
+    notes = engine.state.semantics.for_anchors(
+        [place_anchor(fx, fy)], turn=engine.state.turn
+    )
     assert any("slain here" in n.text for n in notes)
 
 
@@ -129,7 +150,9 @@ def test_scene_notes_reach_both_resolver_and_dialogue() -> None:
     engine = GameEngine(seed=7, scenario="test_chamber")
     player = engine.state.player
     # Mint a world-scoped note (in scope for any scene).
-    engine.record_note(WORLD_ANCHOR, "the air tastes of iron today", kind="mood", salience=4)
+    engine.record_note(
+        WORLD_ANCHOR, "the air tastes of iron today", kind="mood", salience=4
+    )
 
     # Resolver context sees it.
     ctx = engine.context_for_llm("a small spark")
@@ -138,8 +161,13 @@ def test_scene_notes_reach_both_resolver_and_dialogue() -> None:
 
     # Dialogue context (for some NPC) sees the SAME note from the SAME ledger.
     npc = engine.spawn_npc(
-        "Watchman", "W", player.x + 1, player.y, role="guard",
-        backstory="keeps the gate", faction="neutral",
+        "Watchman",
+        "W",
+        player.x + 1,
+        player.y,
+        role="guard",
+        backstory="keeps the gate",
+        faction="neutral",
     )
     dctx = engine.dialogue_context_for_llm(npc, "what's the news?")
     dialogue_texts = {n["text"] for n in dctx["scene_notes"]}
@@ -153,8 +181,13 @@ def test_player_trait_reaches_dialogue_partner() -> None:
     player = engine.state.player
     player.traits.append("wears an obviously goblin-hating hat")
     npc = engine.spawn_npc(
-        "Goblin Trader", "t", player.x + 1, player.y, role="merchant",
-        backstory="sells trinkets", faction="neutral",
+        "Goblin Trader",
+        "t",
+        player.x + 1,
+        player.y,
+        role="merchant",
+        backstory="sells trinkets",
+        faction="neutral",
     )
     dctx = engine.dialogue_context_for_llm(npc, "got anything to sell?")
     assert "wears an obviously goblin-hating hat" in dctx["player"].get("traits", [])

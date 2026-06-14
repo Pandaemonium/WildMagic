@@ -879,7 +879,9 @@ class _EffectsMixin:
         if target is None or target.kind != "npc":
             target = self._nearest_npc()
         if target is None:
-            return ["The spell reaches for a mind, but finds no one here who keeps one."]
+            return [
+                "The spell reaches for a mind, but finds no one here who keeps one."
+            ]
         profile = self.state.npc_profiles.get(target.id)
         if profile is None:
             return [f"{target.name} has nothing the spell can take hold of."]
@@ -890,8 +892,15 @@ class _EffectsMixin:
         subject_lower = subject.lower()
         player_name = (self.state.player.name or "").lower()
         caster_aliases = {
-            "the caster", "caster", "me", "you", "the player", "the stranger",
-            "my face", "the spellcaster", "the intruder",
+            "the caster",
+            "caster",
+            "me",
+            "you",
+            "the player",
+            "the stranger",
+            "my face",
+            "the spellcaster",
+            "the intruder",
         }
         refers_to_caster = (
             subject_lower in caster_aliases
@@ -904,7 +913,9 @@ class _EffectsMixin:
             if subject_lower and subject_lower in padded:
                 return True
             if refers_to_caster and (
-                (player_name and player_name in padded) or " you " in padded or " your " in padded
+                (player_name and player_name in padded)
+                or " you " in padded
+                or " your " in padded
             ):
                 return True
             return False
@@ -928,7 +939,9 @@ class _EffectsMixin:
             if not text:
                 return ["The false memory has no shape to take, and slips away."]
             profile.remember(text)
-            return [f"A memory that never happened settles into {target.name}'s mind as if it always lived there."]
+            return [
+                f"A memory that never happened settles into {target.name}'s mind as if it always lived there."
+            ]
 
         # alter (default): drop what matched, then plant the new recollection.
         if subject_lower or refers_to_caster:
@@ -967,7 +980,9 @@ class _EffectsMixin:
             effect.get("faction"), default="ally", neutral_is_ally=True
         )
         base = prop.name if prop is not None else "object"
-        name = (str(effect.get("name") or f"animated {base}")).strip()[:40] or f"animated {base}"
+        name = (str(effect.get("name") or f"animated {base}")).strip()[
+            :40
+        ] or f"animated {base}"
         hp = clamp_int(effect.get("hp") or 8, 1, 30)
         attack = clamp_int(effect.get("attack") or 3, 0, 12)
         defense = clamp_int(effect.get("defense") or 1, 0, 8)
@@ -1020,7 +1035,11 @@ class _EffectsMixin:
             kind = normalize_id(str(a.get("kind") or a.get("mode") or "").strip())
             if kind not in {"damage", "status"}:
                 # Infer from the fields the model actually supplied.
-                if a.get("amount") is not None or a.get("damage_type") or a.get("element"):
+                if (
+                    a.get("amount") is not None
+                    or a.get("damage_type")
+                    or a.get("element")
+                ):
                     kind = "damage"
                 elif a.get("status"):
                     kind = "status"
@@ -1030,7 +1049,9 @@ class _EffectsMixin:
                 "kind": kind,
                 "radius": clamp_int(a.get("radius", 2), 1, 8),
                 "affects": normalize_id(str(a.get("affects") or "enemies")),
-                "label": " ".join(str(a.get("label") or a.get("name") or "").split())[:40],
+                "label": " ".join(str(a.get("label") or a.get("name") or "").split())[
+                    :40
+                ],
             }
             if spec["affects"] not in {"enemies", "allies", "all"}:
                 spec["affects"] = "enemies"
@@ -1048,7 +1069,9 @@ class _EffectsMixin:
                 spec["status"] = status
                 spec["duration"] = clamp_int(a.get("duration", 2), 1, 8)
                 display = " ".join(
-                    str(a.get("display_name") or a.get("label") or a.get("name") or "").split()
+                    str(
+                        a.get("display_name") or a.get("label") or a.get("name") or ""
+                    ).split()
                 )
                 if display:
                     spec["display_name"] = display[:40]
@@ -1085,7 +1108,11 @@ class _EffectsMixin:
             self.state.tile_auras.setdefault(key, []).extend(auras)
             return ["The ground takes on a charged, waiting hush."]
         target = self.resolve_target(str(effect.get("target") or "player"))
-        if target is None or target.kind in {"item"} or not getattr(target, "alive", True):
+        if (
+            target is None
+            or target.kind in {"item"}
+            or not getattr(target, "alive", True)
+        ):
             target = self.state.player
         target.auras.extend(auras)
         who = "you" if target.id == self.state.player_id else target.name
@@ -1133,7 +1160,11 @@ class _EffectsMixin:
         self, ox: int, oy: int, owner: "Entity | None", affects: str, radius: int
     ) -> list["Entity"]:
         victims: list[Entity] = []
-        owner_has_side = owner is not None and owner.faction in {"player", "ally", "enemy"}
+        owner_has_side = owner is not None and owner.faction in {
+            "player",
+            "ally",
+            "enemy",
+        }
         for ent in self.entities_in_radius(ox, oy, radius):
             if ent.kind in {"item", "prop"} or ent.hp <= 0:
                 continue
@@ -1185,7 +1216,9 @@ class _EffectsMixin:
                 victim.statuses[status] = max(current_turns, duration)
                 if display and display != status.replace("_", " "):
                     victim.status_display[status] = display
-            self._announce_aura(owner, label or display or status.replace("_", " "), victims)
+            self._announce_aura(
+                owner, label or display or status.replace("_", " "), victims
+            )
 
     def _announce_aura(
         self, owner: "Entity | None", label: str, victims: list["Entity"]
@@ -1195,7 +1228,9 @@ class _EffectsMixin:
         player_id = self.state.player_id
         if any(victim.id == player_id for victim in victims):
             source = owner.name if owner is not None else "the charged ground"
-            self.state.add_message(f"{source}'s {label} bites into you.", is_danger=True)
+            self.state.add_message(
+                f"{source}'s {label} bites into you.", is_danger=True
+            )
         elif owner is not None and owner.id == player_id:
             names = ", ".join(victim.name for victim in victims)
             self.state.add_message(f"Your {label} washes over {names}.")
@@ -1207,11 +1242,17 @@ class _EffectsMixin:
         wildmagic/semantics.py and docs/SEMANTIC_EFFECTS.md. Stored on the entity (so it rides
         into prompts for free) AND in the ledger (so place/faction queries can find it)."""
         target = self.resolve_target(str(effect.get("target") or "nearest_enemy"))
-        if target is None or target.kind in {"item"} and not getattr(target, "alive", True):
+        if (
+            target is None
+            or target.kind in {"item"}
+            and not getattr(target, "alive", True)
+        ):
             target = None
         if target is None:
             target = self.resolve_target("nearest_enemy") or self.state.player
-        text = " ".join(str(effect.get("text") or effect.get("trait") or "").split())[:120]
+        text = " ".join(str(effect.get("text") or effect.get("trait") or "").split())[
+            :120
+        ]
         if not text:
             return ["The trait has no shape to take, and fades."]
         # De-dupe on the entity, cap the narrative channel so it never silts up.

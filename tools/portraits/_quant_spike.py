@@ -47,7 +47,9 @@ if device == "xpu":
     print(f"peak_xpu_GB {torch.xpu.max_memory_allocated() / 1e9:.2f}", flush=True)
 
 ext = img.getextrema()
-spread = max(hi - lo for lo, hi in ext) if isinstance(ext[0], tuple) else ext[1] - ext[0]
+spread = (
+    max(hi - lo for lo, hi in ext) if isinstance(ext[0], tuple) else ext[1] - ext[0]
+)
 print(f"spread {spread}", flush=True)
 out = Path(__file__).resolve().parent / "out" / "quant_test.png"
 img.save(out)
