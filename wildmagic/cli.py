@@ -133,7 +133,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--scenario",
         default="dungeon",
-        choices=["dungeon", "test_chamber", "empire_compound", "frontier", "town"],
+        choices=[
+            "dungeon",
+            "test_chamber",
+            "empire_compound",
+            "frontier",
+            "town",
+            "bazaar",
+            "warren",
+            "archive",
+        ],
     )
     parser.add_argument("--provider", default=None, choices=["auto", "mock", "ollama"])
     parser.add_argument(

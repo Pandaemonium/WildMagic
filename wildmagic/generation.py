@@ -1009,6 +1009,601 @@ class _GenerationMixin:
         self.update_fov()
 
     # ------------------------------------------------------------------
+    # Alternative starting hubs (besides Hollowmere). Each is a single,
+    # calm surface zone living in its own Region (regions.py), with a
+    # stair down into that region's themed dungeon -- so the place you
+    # start in flavors the depths you descend into. Inhabitants are a
+    # mix of hand-authored named NPCs and procedural fill. See
+    # docs/AESTHETICS_AND_TONE.md (decision 7: dungeons vary by region).
+    # ------------------------------------------------------------------
+
+    def _reset_surface_zone(self, region_id: str) -> None:
+        """Shared setup for the open-ground starting hubs: clear the zone to bare
+        floor, drop the old population, and enter the chosen Region."""
+        state = self.state
+        state.tiles = [[FLOOR for _ in range(state.width)] for _ in range(state.height)]
+        state.visible.clear()
+        state.tile_tags.clear()
+        state.tile_durations.clear()
+        state.room_profiles.clear()
+        state.tile_rooms.clear()
+        state.entities = {}
+        state.npc_profiles = {}
+        state.region_id = region_id
+
+    def _register_hub_room(
+        self,
+        room: Room,
+        room_id: str,
+        room_type: str,
+        archetype_id: str,
+        extra_tags: set[str],
+        force_secret: bool = False,
+    ) -> RoomProfile:
+        """Label a hub building from an archetype, then re-tag it as a named place.
+        force_secret guarantees an investigation slot even when the archetype roll
+        would have skipped one (used by the book/investigation hub)."""
+        archetype = next(a for a in ROOM_ARCHETYPES if a.id == archetype_id)
+        label_rng = random.Random(
+            stable_seed(self.state.rng_seed, "hub_room_profile", room_id)
+        )
+        base = self._profile_from_archetype(room, room_id, archetype, label_rng)
+        secret_slots = list(base.secret_slots)
+        if force_secret and not secret_slots and archetype.secret_kinds:
+            kind = label_rng.choice(archetype.secret_kinds)
+            secret_slots.append(
+                {
+                    "id": f"{room_id}_{kind}",
+                    "kind": kind,
+                    "reveal_difficulty": label_rng.choice(
+                        ["plain", "careful", "demanding"]
+                    ),
+                    "clue_style": label_rng.choice(
+                        ["scratches", "draft", "mismatched dust", "odd repetition"]
+                    ),
+                    "possible_reward_tags": sorted({"lore", *archetype.tags[:2]}),
+                }
+            )
+        profile = RoomProfile(
+            id=base.id,
+            x=base.x,
+            y=base.y,
+            w=base.w,
+            h=base.h,
+            room_type=room_type,
+            era=base.era,
+            condition=base.condition,
+            topics=base.topics,
+            tags=sorted({*base.tags, *extra_tags}),
+            secret_slots=secret_slots,
+            promise_hooks=base.promise_hooks,
+        )
+        self._register_room_profile(profile)
+        return profile
+
+    def _place_free_buildings(
+        self,
+        zone_rng: random.Random,
+        count: int,
+        size_choices: list[tuple[int, int]],
+    ) -> list[Room]:
+        """Place up to `count` non-overlapping walled buildings (each with one door)
+        on the open ground, clear of the outer ring so zone edges stay walkable."""
+        state = self.state
+        margin = 3
+        placed: list[Room] = []
+        attempts = 0
+        while len(placed) < count and attempts < 160:
+            attempts += 1
+            w, h = zone_rng.choice(size_choices)
+            x = zone_rng.randint(margin, state.width - w - margin)
+            y = zone_rng.randint(margin, state.height - h - margin)
+            room = Room(x, y, w, h)
+            if any(room.intersects(existing) for existing in placed):
+                continue
+            self._build_common_structure(room, zone_rng)
+            placed.append(room)
+        return placed
+
+    def _place_hub_player_and_stair(
+        self, stair_room: Room
+    ) -> tuple[int, int]:
+        """Drop the player at the open center of the zone and sink the down-stair
+        into the given building. Returns the player's tile."""
+        state = self.state
+        px, py = state.width // 2, state.height // 2
+        player = self._make_player(px, py)
+        state.entities[player.id] = player
+        if not self.can_occupy(px, py):
+            player.x, player.y = self._find_entry_tile(px, py)
+        sx, sy = stair_room.center
+        state.tiles[sy][sx] = STAIRS_DOWN
+        return player.x, player.y
+
+    def _generate_bazaar_start(self) -> None:
+        """The Saltmarket: a jewel-toned bazaar that runs on barter. Stalls crowd an
+        open plaza; merchants outnumber threats; the only way down is the old market
+        cellar. A trading hub -- calm on arrival, with wares everywhere."""
+        self._reset_surface_zone("saltmarket")
+        state = self.state
+        zone_rng = random.Random(stable_seed(state.rng_seed, "saltmarket"))
+        self._scatter_terrain_features(zone_rng)
+
+        stalls = self._place_free_buildings(
+            zone_rng, count=7, size_choices=[(4, 4), (5, 4), (4, 5), (5, 5)]
+        )
+        if not stalls:
+            stalls = [Room(4, 4, 5, 5)]
+        for index, room in enumerate(stalls, 1):
+            self._register_hub_room(
+                room,
+                f"saltmarket_stall_{index:02d}",
+                "market stall" if index < len(stalls) else "market cellar stair",
+                "scriptorium" if index % 2 else "storeroom",
+                {"saltmarket", "market_stall", "town_building"},
+            )
+
+        self._place_hub_player_and_stair(stalls[-1])
+
+        # Hand-authored anchors first; procedural peddlers fill the rest.
+        named = [
+            dict(
+                name="Saffira Doss",
+                char="D",
+                role="spice merchant",
+                backstory=(
+                    "Came up the salt roads with one chest of saffron and a gift for "
+                    "remembering exactly who owes whom. Now half the Saltmarket prices "
+                    "itself by what she paid yesterday."
+                ),
+                appearance=(
+                    "A broad woman in layered ochre and turquoise, rings on every "
+                    "finger and one through her nose, smelling permanently of saffron "
+                    "and hot brass."
+                ),
+                traits=["shrewd", "warm", "never forgets a debt"],
+                wares={
+                    "dried herbs": 4,
+                    "smoke vial": 3,
+                    "healing potion": 2,
+                    "mana potion": 2,
+                    "gold": 40,
+                },
+                wanted_item="Imperial Tariff Seal",
+                reward_gold=30,
+                reward_item="mana potion",
+                memory="A tariff-clerk has been circling her stall for three days, counting.",
+            ),
+            dict(
+                name="Two-Coin Bartle",
+                char="B",
+                role="curio dealer",
+                backstory=(
+                    "Buys oddments nobody wants and sells them to people who didn't "
+                    "know they did. Claims everything is 'two coin' until you actually "
+                    "want it."
+                ),
+                appearance=(
+                    "A wiry man draped in his own stock -- spyglasses, charms, a "
+                    "birdcage with no bird -- grinning under a hat one size too grand."
+                ),
+                traits=["chatty", "slippery", "genuinely curious"],
+                wares={
+                    "trinket": 5,
+                    "lockpick": 2,
+                    "blink scroll": 1,
+                    "bone charm": 2,
+                    "gold": 25,
+                },
+                wanted_item="Glass Eye of Hollowmere",
+                reward_gold=25,
+                reward_item="blink scroll",
+                memory="Swears he once sold the same lamp back to its owner four times.",
+            ),
+            dict(
+                name="Madame Velline",
+                char="V",
+                role="charm-seller",
+                backstory=(
+                    "Sells small magics dressed as souvenirs, keeping just inside what "
+                    "the Censorate will tolerate. Knows which charms work and sells "
+                    "those quietly, from under the counter."
+                ),
+                appearance=(
+                    "A poised elder in indigo, hung with charms that chime when she "
+                    "moves, eyes lined in kohl and missing nothing."
+                ),
+                traits=["serene", "discreet", "quietly subversive"],
+                wares={
+                    "mana crystal": 3,
+                    "grave salt": 2,
+                    "bone charm": 3,
+                    "silk robe": 1,
+                    "gold": 30,
+                },
+                wanted_item="Amulet of the Old Saints",
+                reward_gold=20,
+                reward_item="mana crystal",
+                memory="A wild mage's bounty was posted at dawn; she took the notice down herself.",
+            ),
+        ]
+        occupied: set[tuple[int, int]] = {(state.player.x, state.player.y)}
+        for spec, room in zip(named, stalls):
+            spot = self._random_unoccupied_open_tile_in_room(room, occupied)
+            if spot is None:
+                continue
+            npc = self.spawn_npc(
+                spec["name"],
+                spec["char"],
+                spot[0],
+                spot[1],
+                role=spec["role"],
+                backstory=spec["backstory"],
+                appearance=spec["appearance"],
+                traits=spec["traits"],
+                tags={"human", "saltmarket_folk", "merchant"},
+                wares=dict(spec["wares"]),
+                wanted_item=spec.get("wanted_item"),
+                wanted_qty=1 if spec.get("wanted_item") else 0,
+                reward_gold=spec.get("reward_gold", 0),
+                reward_item=spec.get("reward_item"),
+                reward_qty=1 if spec.get("reward_item") else 0,
+            )
+            occupied.add(spot)
+            if spec.get("memory"):
+                self.state.npc_profiles[npc.id].remember(spec["memory"])
+
+        self._populate_hub_vendors(zone_rng, stalls[len(named):], occupied)
+        self._place_books_in_labeled_rooms()
+        state.add_message(
+            "The Saltmarket opens around you -- a riot of awnings, spice-smoke, and "
+            "haggling that never quite stops."
+        )
+        state.add_message(
+            "Buy, sell, and ask after rumors. The old market cellar stair is the only way down."
+        )
+        self.update_fov()
+
+    def _populate_hub_vendors(
+        self,
+        zone_rng: random.Random,
+        rooms: list[Room],
+        occupied: set[tuple[int, int]],
+    ) -> None:
+        """Procedural peddlers to flesh out the bazaar beyond the named anchors."""
+        pool = [
+            ("Reedwhistle the Peddler", "rope-and-tin trader", {"trinket": 3, "smoke vial": 1, "gold": 12}),
+            ("Coppin Slate", "salt-fish monger", {"dried herbs": 3, "healing potion": 1, "gold": 10}),
+            ("The Veiled Vendor", "incense seller", {"grave salt": 2, "mana crystal": 1, "gold": 14}),
+            ("Old Pelf", "rag-and-bone dealer", {"bone charm": 2, "trinket": 2, "gold": 8}),
+        ]
+        zone_rng.shuffle(pool)
+        for room, (name, role, wares) in zip(rooms, pool):
+            spot = self._random_unoccupied_open_tile_in_room(room, occupied)
+            if spot is None:
+                continue
+            self.spawn_npc(
+                name,
+                "p",
+                spot[0],
+                spot[1],
+                role=role,
+                backstory=(
+                    f"One of the Saltmarket's countless small traders, working a "
+                    f"{role}'s stall and selling whatever the day brought in."
+                ),
+                appearance="A weather-worn trader half-hidden behind a heap of stock.",
+                traits=["talkative", "hopeful"],
+                tags={"human", "saltmarket_folk", "merchant"},
+                wares=dict(wares),
+            )
+            occupied.add(spot)
+
+    def _generate_warren_start(self) -> None:
+        """The Warren: a packed honeycomb of small rooms gnawed into older rooms.
+        Compact adjoining chambers (shared walls, doors between neighbours -- no long
+        corridors), thick with props and prowling things. The player wakes in a
+        sealed-feeling entry pocket; the danger is in the rooms all around."""
+        state = self.state
+        state.tiles = [[WALL for _ in range(state.width)] for _ in range(state.height)]
+        state.visible.clear()
+        state.tile_tags.clear()
+        state.tile_durations.clear()
+        state.room_profiles.clear()
+        state.tile_rooms.clear()
+        state.entities = {}
+        state.npc_profiles = {}
+        state.region_id = "warren"
+
+        rng = random.Random(stable_seed(state.rng_seed, "warren"))
+        rw, rh = 5, 4  # room interior; +1 gives the shared wall to the next room
+        grid: list[list[Room]] = []
+        y = 1
+        while y + rh <= state.height - 1:
+            row: list[Room] = []
+            x = 1
+            while x + rw <= state.width - 1:
+                room = Room(x, y, rw, rh)
+                self._carve_room(room)
+                row.append(room)
+                x += rw + 1
+            if row:
+                grid.append(row)
+            y += rh + 1
+        if not grid:  # degenerate map; fall back to one big room
+            fallback = Room(2, 2, state.width - 4, state.height - 4)
+            self._carve_room(fallback)
+            grid = [[fallback]]
+
+        rows, cols = len(grid), len(grid[0])
+        flat: list[Room] = [room for row in grid for room in row]
+
+        # Connect the honeycomb: a door to the right and down neighbour of every
+        # room (which fully connects the grid), plus a scattering of extra doors so
+        # routes loop back on themselves rather than forming a tree.
+        def punch_door(a: Room, b: Room) -> None:
+            if a.x == b.x:  # vertically stacked -> shared wall row between them
+                wall_y = a.y + a.h if a.y < b.y else b.y + b.h
+                door_x = rng.randint(a.x + 1, a.x + a.w - 2)
+                self.state.tiles[wall_y][door_x] = DOOR
+            else:  # horizontally adjacent -> shared wall column
+                wall_x = a.x + a.w if a.x < b.x else b.x + b.w
+                door_y = rng.randint(a.y + 1, a.y + a.h - 2)
+                self.state.tiles[door_y][wall_x] = DOOR
+
+        for gy in range(rows):
+            for gx in range(cols):
+                if gx + 1 < cols:
+                    punch_door(grid[gy][gx], grid[gy][gx + 1])
+                if gy + 1 < len(grid) and gx < len(grid[gy + 1]):
+                    punch_door(grid[gy][gx], grid[gy + 1][gx])
+        for _ in range((rows * cols) // 4):
+            gy = rng.randint(0, rows - 1)
+            gx = rng.randint(0, len(grid[gy]) - 1)
+            if gx + 1 < len(grid[gy]):
+                punch_door(grid[gy][gx], grid[gy][gx + 1])
+
+        # Label every chamber, then fill it with props -- the Warren is cluttered.
+        for index, room in enumerate(flat, 1):
+            archetype = rng.choice(ROOM_ARCHETYPES)
+            self._register_hub_room(
+                room,
+                f"warren_room_{index:02d}_{normalize_id(archetype.room_type)}",
+                archetype.room_type,
+                archetype.id,
+                {"warren"},
+            )
+        for room in flat:
+            self._spawn_props_in_room(room, 1)
+
+        # Entry pocket (top-left) is safe; the far corner holds the stair down.
+        start_room = grid[0][0]
+        stair_room = grid[-1][-1]
+        safe_rooms = {id(start_room)}
+        if cols > 1:
+            safe_rooms.add(id(grid[0][1]))
+        if rows > 1:
+            safe_rooms.add(id(grid[1][0]))
+
+        px, py = start_room.center
+        player = self._make_player(px, py)
+        state.entities[player.id] = player
+        if not self.can_occupy(px, py):
+            player.x, player.y = self._find_entry_tile(px, py)
+        sx, sy = stair_room.center
+        state.tiles[sy][sx] = STAIRS_DOWN
+
+        # A lone hand-authored survivor near the entrance, plus the dense bestiary.
+        occupied: set[tuple[int, int]] = {(player.x, player.y)}
+        keeper_room = grid[0][1] if cols > 1 else start_room
+        spot = self._random_unoccupied_open_tile_in_room(keeper_room, occupied)
+        if spot is not None:
+            tally = self.spawn_npc(
+                "Old Tally",
+                "T",
+                spot[0],
+                spot[1],
+                role="warren scavenger",
+                backstory=(
+                    "Went down into the Warren after salvage years ago and never quite "
+                    "found the way back up -- or stopped looking for the next good find. "
+                    "Knows which rooms move and which only pretend to."
+                ),
+                appearance=(
+                    "A grime-dark figure swaddled in salvaged cloth, pockets clinking "
+                    "with sorted oddments, eyes bright in a lamp-lit squint."
+                ),
+                traits=["hoarder", "canny", "lonely"],
+                tags={"human", "warren_folk", "scavenger"},
+                wares={"trinket": 3, "lockpick": 2, "healing potion": 1, "gold": 10},
+                wanted_item="Stolen Silver Seal",
+                wanted_qty=1,
+                reward_gold=20,
+                faction="neutral",
+            )
+            occupied.add(spot)
+            self.state.npc_profiles[tally.id].remember(
+                "Counts the doors each morning. There were thirty yesterday and thirty-one today."
+            )
+
+        for room in flat:
+            if id(room) in safe_rooms:
+                continue
+            if self.rng.random() < 0.65:
+                spot = self._random_unoccupied_open_tile_in_room(room, occupied)
+                if spot is None:
+                    continue
+                self._spawn_from_template(
+                    self.rng.choice(list(self.region.enemy_templates)),
+                    spot[0],
+                    spot[1],
+                )
+                occupied.add(spot)
+
+        self._place_books_in_labeled_rooms()
+        state.add_message(
+            "You come to in a cramped pocket of the Warren -- close walls, old dust, "
+            "and rooms crowding away in every direction."
+        )
+        state.add_message(
+            "Something is moving in the chambers nearby. The way down is somewhere in the press of rooms."
+        )
+        self.update_fov()
+
+    def _generate_archive_start(self) -> None:
+        """The Foxed Stacks: a hill-town drowning in hoarded books. Reading-rooms
+        packed with readable volumes, scholars who never left, and quiet investigation
+        -- hidden compartments, loose pages, marginalia. Calm; the archive vault stair
+        descends into the deeper stacks."""
+        self._reset_surface_zone("stacks")
+        state = self.state
+        zone_rng = random.Random(stable_seed(state.rng_seed, "foxed_stacks"))
+        self._scatter_terrain_features(zone_rng)
+
+        rooms = self._place_free_buildings(
+            zone_rng, count=6, size_choices=[(5, 5), (6, 5), (5, 6), (7, 5)]
+        )
+        if not rooms:
+            rooms = [Room(4, 4, 6, 5)]
+        for index, room in enumerate(rooms, 1):
+            self._register_hub_room(
+                room,
+                f"stacks_reading_room_{index:02d}",
+                "reading-room" if index < len(rooms) else "archive vault stair",
+                "scriptorium",
+                {"stacks", "reading_room", "books", "town_building"},
+                force_secret=True,
+            )
+
+        self._place_hub_player_and_stair(rooms[-1])
+
+        named = [
+            dict(
+                name="Mother Foss",
+                char="F",
+                role="over-reader",
+                backstory=(
+                    "Has catalogued the Foxed Stacks for forty years and refuses to "
+                    "admit the catalogue is no longer finishable. Lends books to those "
+                    "who'll bring them back and remembers those who didn't."
+                ),
+                appearance=(
+                    "A spare elder in ink-stained grey, spectacles pushed up into white "
+                    "hair, a stub of red chalk always behind one ear."
+                ),
+                traits=["exacting", "kind", "endlessly curious"],
+                wares={"healing potion": 1, "mana potion": 1, "grave salt": 1, "gold": 20},
+                wanted_item="Imperial Campaign Map",
+                reward_gold=25,
+                reward_item="mana potion",
+                memory="A Censorate reader came to 'audit' the shelves; three volumes have gone missing since.",
+            ),
+            dict(
+                name="Pell the Margin-boy",
+                char="P",
+                role="apprentice reader",
+                backstory=(
+                    "Runs ladders and fetches volumes, reading every one on the way "
+                    "and writing in the margins when he thinks no one will notice. "
+                    "Knows where the interesting books are actually shelved."
+                ),
+                appearance=(
+                    "A reedy youth with ink to the elbows and a half-dozen ribbons "
+                    "marking pages in books he is technically only carrying."
+                ),
+                traits=["eager", "nosy", "sharp-eyed"],
+                wares={"trinket": 2, "smoke vial": 1, "gold": 6},
+                wanted_item="Glass Eye of Hollowmere",
+                reward_gold=15,
+                memory="Found a page that wasn't there yesterday, in a hand he doesn't recognize.",
+            ),
+            dict(
+                name="the Hollow Reader",
+                char="R",
+                role="resident scholar",
+                backstory=(
+                    "Came to research one question and stayed so long the Stacks count "
+                    "them as fixtures. Speaks mostly in citations and remembers things "
+                    "that have not happened to them yet."
+                ),
+                appearance=(
+                    "A still figure at a lamp-lit desk, robes the exact grey of dust, "
+                    "turning pages of a book that seems always open to the same place."
+                ),
+                traits=["distant", "precise", "unsettlingly helpful"],
+                wares={"mana crystal": 2, "bone charm": 1, "gold": 12},
+                wanted_item="Amulet of the Old Saints",
+                reward_gold=20,
+                reward_item="mana crystal",
+                memory="Insists a book you have not yet read will tell you exactly what you came to learn.",
+            ),
+        ]
+        occupied: set[tuple[int, int]] = {(state.player.x, state.player.y)}
+        for spec, room in zip(named, rooms):
+            spot = self._random_unoccupied_open_tile_in_room(room, occupied)
+            if spot is None:
+                continue
+            npc = self.spawn_npc(
+                spec["name"],
+                spec["char"],
+                spot[0],
+                spot[1],
+                role=spec["role"],
+                backstory=spec["backstory"],
+                appearance=spec["appearance"],
+                traits=spec["traits"],
+                tags={"human", "stacks_folk", "scholar"},
+                wares=dict(spec["wares"]),
+                wanted_item=spec.get("wanted_item"),
+                wanted_qty=1 if spec.get("wanted_item") else 0,
+                reward_gold=spec.get("reward_gold", 0),
+                reward_item=spec.get("reward_item"),
+                reward_qty=1 if spec.get("reward_item") else 0,
+            )
+            occupied.add(spot)
+            if spec.get("memory"):
+                self.state.npc_profiles[npc.id].remember(spec["memory"])
+
+        # A procedural reader or two, and the Censorate's standing notice for flavor.
+        for name, role in (("Quire the Copyist", "copyist"), ("Sister Vellum", "annotator")):
+            room = zone_rng.choice(rooms)
+            spot = self._random_unoccupied_open_tile_in_room(room, occupied)
+            if spot is None:
+                continue
+            self.spawn_npc(
+                name,
+                "c",
+                spot[0],
+                spot[1],
+                role=role,
+                backstory=(
+                    f"A {role} of the Foxed Stacks, bent over a desk that has not been "
+                    "clear of paper in living memory."
+                ),
+                appearance="A quiet reader nearly walled in by stacked volumes.",
+                traits=["studious", "soft-spoken"],
+                tags={"human", "stacks_folk", "scholar"},
+                wares={"trinket": 1, "gold": 5},
+            )
+            occupied.add(spot)
+        notice_spot = self._random_unoccupied_open_tile_in_room(rooms[0], occupied)
+        if notice_spot is not None:
+            notice = self.spawn_prop("posted_notice", notice_spot[0], notice_spot[1])
+            if notice is not None:
+                notice.description = CLERK_NOTICES[0]
+                occupied.add(notice_spot)
+
+        self._place_books_in_labeled_rooms()
+        state.add_message(
+            "The Foxed Stacks rise around you -- ladders, lamplight, and more hoarded "
+            "books than anyone has ever finished counting."
+        )
+        state.add_message(
+            "Read, ask, and search the shelves. The archive vault stair leads down into the deeper stacks."
+        )
+        self.update_fov()
+
+    # ------------------------------------------------------------------
     # Frontier: a Qud-style grid of open-country zones you cross by foot,
     # each an open stretch of ground dotted with standalone buildings
     # rather than a wall-filled warren of rooms and corridors.
@@ -2521,7 +3116,13 @@ class _GenerationMixin:
             for _ in range(count):
                 prop_id = self._pick_themed_prop_id(depth, preferred_categories)
                 x, y = self._random_open_tile_in_room(room)
-                self.spawn_prop(prop_id, x, y)
+                prop = self.spawn_prop(prop_id, x, y)
+                # Individual (non-scene) ambient props are the swappable set-dressing
+                # the experimental LLM prop generator may replace (engine.py). Scenes,
+                # books, notices, and structural/quest props are deliberately left
+                # unmarked so they stay static.
+                if prop is not None:
+                    prop.tags.add("set_dressing")
 
     def _save_dungeon_floor(self, depth: int) -> None:
         state = self.state

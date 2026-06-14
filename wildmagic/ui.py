@@ -124,6 +124,7 @@ LLM_AUDIT_FILES = (
     "dialogue_audit.jsonl",
     "trade_audit.jsonl",
     "town_audit.jsonl",
+    "prop_audit.jsonl",
     "canon_audit.jsonl",
     "lore_audit.jsonl",
     "flesh_audit.jsonl",
@@ -625,10 +626,14 @@ class GameUI:
     def _close_menu(self) -> None:
         self.menu_active = False
 
-    def finish_creation(self, profile) -> None:
-        """Apply the chosen profile to the already-built player and dismiss the creation
-        scene. profile=None ('Random') keeps the default player the session rolled."""
-        if profile is not None:
+    def finish_creation(self, profile, scenario: str = "town") -> None:
+        """Apply the chosen profile and starting zone, then dismiss the creation scene.
+        If the chosen zone matches the session's (Hollowmere by default), the player is
+        restamped in place; otherwise the whole world is rebuilt in the new zone. profile
+        =None ('Random') keeps a default rolled character."""
+        if scenario != self.session.scenario:
+            self._load_session(scenario, profile)
+        elif profile is not None:
             self.engine.restamp_player(profile)
         self.creation_scene.active = False
         self.input_active = True
@@ -1372,8 +1377,16 @@ class GameUI:
     # ------------------------------------------------------------------
 
     def restart_run(self) -> None:
+        self._load_session("town", None)
+
+    def _load_session(self, scenario: str, profile) -> None:
+        """Tear down the current session and start a fresh one in the chosen starting
+        zone (scenario), stamping the chosen character profile. Used both by restart
+        and by character creation when the player picks a non-default start."""
         self.session.close()
-        self.session = GameSession(scenario="town")
+        self.session = GameSession(
+            scenario=scenario, character=profile, seed=self.session.seed
+        )
         self.engine = self.session.engine
         self.input_text = ""
         self.log_scroll_offset = 0

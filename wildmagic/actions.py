@@ -2289,6 +2289,7 @@ class GameSession:
         if self._lore_executor is not None:
             self._lore_executor.shutdown(wait=False, cancel_futures=True)
             self._lore_executor = None
+        self.engine.close()
 
     def apply_recorded_promises(
         self, raw_promises: list[dict[str, Any]] | None

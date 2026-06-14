@@ -190,6 +190,10 @@ def get_lore_model() -> str:
     return get_config_value("WILDMAGIC_LORE_MODEL") or DEFAULT_LORE_MODEL
 
 
+def get_props_model() -> str:
+    return get_config_value("WILDMAGIC_PROPS_MODEL") or _shared_model()
+
+
 def get_canon_model() -> str:
     return get_config_value("WILDMAGIC_CANON_MODEL") or _shared_model()
 
@@ -229,6 +233,14 @@ def get_town_provider() -> str:
 def get_lore_provider() -> str:
     return (
         get_config_value("WILDMAGIC_LORE_PROVIDER") or get_wild_magic_provider()
+    ).lower()
+
+
+def get_props_provider() -> str:
+    # Experimental LLM prop set-dressing. On by default wherever the wild-magic
+    # provider is (auto -> use Ollama when reachable, else the static prop list).
+    return (
+        get_config_value("WILDMAGIC_PROPS_PROVIDER") or get_wild_magic_provider()
     ).lower()
 
 
@@ -299,6 +311,18 @@ def ollama_town_num_predict() -> int:
 
 def ollama_lore_num_predict() -> int:
     return _int_value("WILDMAGIC_LORE_NUM_PREDICT", 700, 64, 2048)
+
+
+def ollama_props_num_predict() -> int:
+    """A trim budget: a per-room batch is a handful of one-line props, so keep the
+    response small to keep the call fast. Truncation just yields fewer props."""
+    return _int_value("WILDMAGIC_PROPS_NUM_PREDICT", 512, 64, 2048)
+
+
+def ollama_props_temperature() -> float:
+    """Set-dressing wants surprise and variety; run hot like canon prose (0.85)
+    rather than the cautious wild-magic default (0.25)."""
+    return _float_value("WILDMAGIC_PROPS_TEMPERATURE", 0.9, 0.0, 1.5)
 
 
 def ollama_canon_num_predict() -> int:

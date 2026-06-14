@@ -17,6 +17,8 @@ from .config import (
     ollama_num_ctx,
     ollama_num_gpu,
     ollama_num_predict,
+    ollama_props_num_predict,
+    ollama_props_temperature,
     ollama_resolution_attempts,
     ollama_temperature,
     ollama_thinking_enabled,
@@ -125,6 +127,23 @@ def _post_ollama_chat(
         body = exc.read().decode("utf-8", errors="replace")
         detail = parse_ollama_error_body(body)
         raise ValueError(f"Ollama HTTP {exc.code}: {detail or exc.reason}") from exc
+
+
+def ollama_reachable(base_url: str, timeout_seconds: float = 0.5) -> bool:
+    """Cheap, non-autostarting check that an Ollama server is already listening.
+    Unlike ensure_ollama_running this never spawns a subprocess — use it to gate
+    optional background work that should simply be skipped when offline."""
+    import socket
+    from urllib.parse import urlparse
+
+    parsed = urlparse(base_url)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or 11434
+    try:
+        with socket.create_connection((host, port), timeout=timeout_seconds):
+            return True
+    except OSError:
+        return False
 
 
 def strip_thinking(raw: str) -> str:
