@@ -34,7 +34,12 @@ def test_edit_memory_remove_forgets_caster_and_calms_hostile_npc() -> None:
         ["You walked in carrying chalk.", "The old well is dry."]
     )
     engine._apply_effect(
-        {"type": "edit_memory", "target": npc.id, "op": "remove", "subject": "the caster"}
+        {
+            "type": "edit_memory",
+            "target": npc.id,
+            "op": "remove",
+            "subject": "the caster",
+        }
     )
     memory = engine.state.npc_profiles[npc.id].memory
     # The caster-referencing memory is gone; the unrelated one survives.
@@ -64,7 +69,12 @@ def test_edit_memory_on_non_npc_is_harmless() -> None:
     engine = GameEngine(seed=7, scenario="test_chamber")
     # nearest_enemy with no NPCs around resolves to nothing editable -> a graceful message.
     messages = engine._apply_effect(
-        {"type": "edit_memory", "target": "nearest_enemy", "op": "remove", "subject": "the caster"}
+        {
+            "type": "edit_memory",
+            "target": "nearest_enemy",
+            "op": "remove",
+            "subject": "the caster",
+        }
     )
     assert messages and isinstance(messages[0], str)
 
@@ -158,7 +168,9 @@ def test_weakened_attacker_still_lands_at_least_one() -> None:
     engine = GameEngine(seed=7, scenario="test_chamber")
     player = engine.state.player
     # A 1-attack foe that is also weakened would otherwise compute negative damage.
-    foe = engine.spawn_actor("frail thing", "f", player.x + 1, player.y, 8, 1, 0, "enemy", None)
+    foe = engine.spawn_actor(
+        "frail thing", "f", player.x + 1, player.y, 8, 1, 0, "enemy", None
+    )
     foe.statuses["weakened"] = 5
     hp_before = player.hp
     engine.attack(foe, player)
@@ -169,7 +181,9 @@ def test_disfigure_applies_weakened_via_flavor_alias() -> None:
     """'withered' (a flavor alias) must resolve to the mechanical 'weakened' status."""
     engine = GameEngine(seed=7, scenario="test_chamber")
     player = engine.state.player
-    foe = engine.spawn_actor("goblin", "g", player.x + 1, player.y, 12, 6, 0, "enemy", None)
+    foe = engine.spawn_actor(
+        "goblin", "g", player.x + 1, player.y, 12, 6, 0, "enemy", None
+    )
     engine._apply_effect(
         {
             "type": "add_status",

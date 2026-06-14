@@ -2872,7 +2872,9 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         add(WORLD_ANCHOR)
         return anchors
 
-    def collect_scene_notes(self, anchors: list[str], limit: int = 8) -> list[dict[str, Any]]:
+    def collect_scene_notes(
+        self, anchors: list[str], limit: int = 8
+    ) -> list[dict[str, Any]]:
         """Gather, rank, and budget the notes for a scene's anchors, ready to splice into a
         prompt. Logged as part of the call's context, so we can audit which facts surfaced."""
         notes = self.state.semantics.for_anchors(
