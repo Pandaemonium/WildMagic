@@ -193,16 +193,35 @@ Server-side variables worth setting (these are Ollama's, not ours — see Ollama
 ### Two-server setups
 
 Per-purpose `OLLAMA_HOST` means purposes can use entirely separate servers, e.g. a GPU
-server for play and a CPU-only server for background work:
+server for play and a CPU-only server for background work. Point the whole background
+route at a second port:
 
 ```dotenv
-WILDMAGIC_LORE_OLLAMA_HOST=http://127.0.0.1:11435
+WILDMAGIC_BACKGROUND_OLLAMA_HOST=http://127.0.0.1:11435
 ```
 
-Start the second server with `OLLAMA_HOST=127.0.0.1:11435 ollama serve`. Two servers
-never evict each other's models. Usually unnecessary — one server with
-`OLLAMA_MAX_LOADED_MODELS` set is simpler — but it's the robust fallback when a build
-ignores that variable.
+This routes `lore`, `town`, and background-canon prewarm to `:11435` while the urgent
+purposes (`wild`, `dialogue`, `trade`, `canon`) stay on the default `:11434`. You don't
+have to launch the second server yourself: the game's autostart (`ensure_ollama_running`)
+spins it up on the first background call, inheriting `.env` — so it costs only a one-time
+startup wait on that first call. Because background requests force `num_gpu=0`, that
+server only ever runs models on the CPU even though it inherits the GPU/Vulkan env. If
+you'd rather start it ahead of time, run `OLLAMA_HOST=127.0.0.1:11435 ollama serve` (or
+`$env:OLLAMA_HOST="127.0.0.1:11435"; ollama serve` in PowerShell).
+
+**Why reach for this:** two servers never queue behind or evict each other, so a slow
+background CPU job (a book, a town) can never block a foreground GPU spell — concurrency
+is *guaranteed*, independent of `OLLAMA_MAX_LOADED_MODELS`/`OLLAMA_NUM_PARALLEL` and of
+any scheduler quirks in forked builds. On a single shared server those settings *should*
+let a CPU model and a GPU model run at once, but some builds (notably the Intel Arc
+Vulkan fork) serialize anyway — the GPU spell stalls until the CPU book finishes. The
+two-server split is the robust fix.
+
+> Verify the split actually took with `ollama ps` against each port: the GPU model at
+> `100% GPU` on `:11434` and the CPU model at `100% CPU` on `:11435`, generating
+> simultaneously. Only an **autostarted** server gets `.env` — if a tray/desktop Ollama
+> is already holding `:11434`, the game attaches to it and your GPU/Vulkan env never
+> applies there, so quit any externally-started Ollama first.
 
 ## Feature toggles and logging
 
