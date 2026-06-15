@@ -312,7 +312,9 @@ class _ItemsMixin:
                 return False, {}
             if kind == "damage_nearest":
                 damage_type = normalize_id(str(effect.get("damage_type") or "physical"))
-                actual = self.damage_entity(target, amount, damage_type)
+                actual = self.damage_entity(
+                    target, amount, damage_type, source=self.state.player
+                )
                 return True, {
                     "target": target.name,
                     "amount": actual,

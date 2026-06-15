@@ -290,6 +290,27 @@ Keep it brief and surprising."""
 )
 
 
+DEED_INTERPRETER_SYSTEM_PROMPT = """You judge whether one wild-magic spell outcome is a memorable DEED - an act the world's powers would react to - in a fantasy roguelike where the player fights the Grand Empire, a polite cold power that outlaws wild magic.
+Return ONLY one JSON object, no markdown, no commentary, no <think> text.
+
+Shape:
+{"deed_type": "one of the listed types, or none", "magnitude": 0.0, "summary": "one short past-tense clause describing what the player did", "target_tags": ["short_tag"]}
+
+deed_type MUST be exactly one of:
+- raised_dead - the player animated or reanimated the dead (skeletons, corpses, undead servants).
+- razed_building - the player destroyed or collapsed a structure (a building, wall, tower, bridge).
+- desecration - the player defiled something sacred (a shrine, altar, grave, holy ground).
+- cast_atrocity - the player unleashed catastrophic, terrifying destruction (a firestorm, a cataclysm) beyond an ordinary attack.
+- none - ordinary, beneficial, or minor magic; the great majority of outcomes are none.
+
+Do NOT report simple kills or attacks - those are already counted elsewhere. Judge only the listed extraordinary acts.
+magnitude is 0.1 (slight) to 1.0 (world-shaking), your sense of the scale of the act.
+summary is a short clause the way a rumor would put it: "raised the dead to walk", "brought the watchtower down in rubble", "defiled the roadside shrine". Empty when deed_type is none.
+target_tags: 0-3 short lowercase tags for what was affected (empire, shrine, civilian, structure, dead), or [].
+When in doubt, return none. Most spells are not deeds.
+"""
+
+
 LORE_EXTRACTION_SYSTEM_PROMPT = """You extract persistent story material from one NPC dialogue exchange - or one passage of in-world writing the player reads - in a fantasy roguelike.
 Return ONLY one JSON object, no markdown, no commentary, no <think> text.
 

@@ -50,6 +50,16 @@ from .semantics import (
     place_anchor,
     WORLD_ANCHOR,
 )
+from .bonds import DRIFT_THRESHOLD, drift_bond
+from .deeds import Deed, DeedLedger, interpret_deed_rules
+from .factions import (
+    EMPIRE_PATROLS_START,
+    REBELLION_CELLS_START,
+    Faction,
+    FactionLedger,
+    seed_phase0_factions,
+)
+from .legend import LegendLedger
 from .combat import _CombatMixin
 from .ai import _AIMixin
 from .generation import _GenerationMixin
@@ -190,6 +200,90 @@ _PROP_GENERIC_AFFORDANCES = [
 ]
 
 
+# Phase E — the consequence renderer. When you return to a place where you did something
+# the world remembers, it *shows*. One evocative mark per kind of deed per zone (not a pile
+# of stains), placed deterministically. (name, glyph, tags, base description.)
+_DEED_CONSEQUENCE_PROPS: dict[str, tuple[str, str, set[str], str]] = {
+    "killed_imperials": (
+        "bloodstained ground",
+        ",",
+        {"consequence", "blood"},
+        "Dark stains and a hasty cairn mark where the Empire's dead were left.",
+    ),
+    "killed_civilians": (
+        "makeshift memorial",
+        ",",
+        {"consequence"},
+        "Wilted flowers and a scrap of cloth mark where the unarmed fell.",
+    ),
+    "razed_building": (
+        "rubble and scorch",
+        "%",
+        {"consequence", "stone"},
+        "Charred timbers and broken stone - something stood here before it came down.",
+    ),
+    "raised_dead": (
+        "disturbed graves",
+        ",",
+        {"consequence"},
+        "The earth is turned and broken, the way ground looks after the dead have walked.",
+    ),
+    "desecration": (
+        "defiled ground",
+        ",",
+        {"consequence"},
+        "Salt, ash, and broken icons - this place has been profaned, and the air flinches.",
+    ),
+    "cast_atrocity": (
+        "blasted ground",
+        "%",
+        {"consequence"},
+        "The ground is fused glassy and black where catastrophe was called down.",
+    ),
+    "freed_captive": (
+        "broken shackles",
+        ",",
+        {"consequence"},
+        "Snapped chains and an open cell - someone was freed here, and folk remember who.",
+    ),
+    "defended_townsfolk": (
+        "chalked thanks",
+        ",",
+        {"consequence"},
+        "A symbol chalked low on the wall - a quiet thanks from folk you stood for.",
+    ),
+}
+
+
+# Time (EMERGENT_WORLD_IMPLEMENTATION.md §0.3 / §1.6).
+#
+# The canonical unit is the **tick**: 10 ticks make one **round** (a standard action,
+# read as ~one minute), and a day is 1440 rounds = 14400 ticks. Modelling the tick as the
+# floor leaves headroom for actions up to 10x faster than a standard move (1-tick actions).
+#
+# Until sub-round-cost actions exist, every action is exactly one round, so the wall clock
+# is derived from `state.turn` (the action/round counter) — `TURNS_PER_DAY` rounds per day
+# — which keeps every turn-advancing path in sync for free. When faster actions land, the
+# clock moves onto a real tick accumulator advanced by each action's tick cost.
+TICKS_PER_ROUND = 10
+TURNS_PER_DAY = (
+    1440  # rounds per day (a round ~= 1 minute); the clock counts rounds today
+)
+TICKS_PER_DAY = TICKS_PER_ROUND * TURNS_PER_DAY  # 14400 — the tick-floor framing
+DAWN_HOUR = 5  # turn_of_day 0 == 05:00; the world Simulator runs its daily tick at dawn
+
+# How fast the Empire's defenses bleed under pressure (D9, §0.5): each daily tick the
+# Empire loses this many points of `defense` per point of the player's imperial_threat
+# standing. The higher your threat, the faster the road to the emperor opens.
+EMPIRE_PRESSURE_RATE = 1.0
+
+# Backlash thresholds (Phase D, strategy §5.2): standing at which a faction will spend an
+# action resource to act. The Empire cracks down on a threat; the people rise for an ally.
+CRACKDOWN_THRESHOLD = 1.0  # empire imperial_threat
+UPRISING_THRESHOLD = 1.0  # rebellion gratitude
+MAX_PENDING_BACKLASH = 4  # the world can only have so much in motion at once
+
+
 @dataclass
 class GameState:
     width: int = MAP_WIDTH
@@ -223,6 +317,32 @@ class GameState:
     # The shared semantic substrate: world notes/traits keyed by anchor, read and
     # written by every LLM consumer. See wildmagic/semantics.py.
     semantics: SemanticLedger = field(default_factory=SemanticLedger)
+    # The emergent-world ledgers (EMERGENT_WORLD_IMPLEMENTATION.md §1). The DeedLedger
+    # is the append-only record of what the player's soul has done; the FactionLedger
+    # holds standing/resources for the world's powers. Both are serialized inside a run
+    # (summarize_state + deterministic replay) but never carried between runs.
+    deed_ledger: DeedLedger = field(default_factory=DeedLedger)
+    faction_ledger: FactionLedger = field(default_factory=seed_phase0_factions)
+    # The mechanical legend: bounded-vocab weighted tags per actor soul, distilled from
+    # deeds and read by the simulator/dialogue/scores (legend.py). The prose mirror lives
+    # in the semantic ledger (§1.3).
+    legend_ledger: LegendLedger = field(default_factory=LegendLedger)
+    # The world Simulator's idempotency cursor (§1.8): the last turn whose deeds it has
+    # consumed. The daily tick applies each deed exactly once; reloads/replays/repeat
+    # ticks never double-apply.
+    simulated_through_turn: int = 0
+    # The daily-cadence cursor: the last day number whose 05:00 tick has fired. The run
+    # opens on day 1 at dawn (nothing to simulate yet), so this starts at 1; the first
+    # automatic tick is the start of day 2.
+    ticked_through_day: int = 1
+    # Backlash events the factions have decided on but not yet realized in the world
+    # (Phase D). Minted by the daily tick when standing crosses a threshold and the faction
+    # can spend; realized (spawned) when the player next enters a zone.
+    pending_backlash: list[dict[str, Any]] = field(default_factory=list)
+    # A stable handle for the player's *soul*, independent of the body being worn.
+    # Body-swap reassigns player_id (the controlled body) but leaves this untouched, so
+    # deeds and legend bind to the actor across possessions (§1.7).
+    player_soul_id: str = "player"
     event_timers: list[dict[str, Any]] = field(default_factory=list)
     triggers: list[dict[str, Any]] = field(default_factory=list)
     game_over: bool = False
@@ -315,6 +435,41 @@ class GameState:
             if self.scenario in hub_labels:
                 return hub_labels[self.scenario]
         return f"Depth {self.depth}"
+
+    # --- The day/night clock (§0.3). Derived from `turn` so it never desyncs. --------
+    @property
+    def day(self) -> int:
+        return self.turn // TURNS_PER_DAY + 1
+
+    @property
+    def turn_of_day(self) -> int:
+        return self.turn % TURNS_PER_DAY
+
+    @property
+    def hour_of_day(self) -> float:
+        """The wall-clock hour (0..24), with turn_of_day 0 mapped to 05:00 (dawn)."""
+        return (self.turn_of_day / TURNS_PER_DAY * 24 + DAWN_HOUR) % 24
+
+    @property
+    def day_phase(self) -> str:
+        hour = self.hour_of_day
+        if 5 <= hour < 8:
+            return "dawn"
+        if 8 <= hour < 18:
+            return "day"
+        if 18 <= hour < 21:
+            return "dusk"
+        return "night"
+
+    def clock_label(self) -> str:
+        hour = int(self.hour_of_day)
+        minute = int((self.hour_of_day - hour) * 60)
+        return f"Day {self.day} {hour:02d}:{minute:02d} ({self.day_phase})"
+
+    def current_place_key(self) -> str:
+        """A location key finer than the overworld zone: distinguishes dungeon levels /
+        the surface above them so deed consequences don't blur across depth."""
+        return f"{self.zone_x},{self.zone_y}@{self.depth}"
 
     def room_profile_at(self, x: int, y: int) -> RoomProfile | None:
         room_id = self.tile_rooms.get(f"{x},{y}")
@@ -535,6 +690,575 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         self.state.entities[entity.id] = entity
         return entity
 
+    # --- Emergent world: deeds, the daily tick, and legibility --------------------
+    # The Phase-0 micro-loop (EMERGENT_WORLD_IMPLEMENTATION.md §3): a witnessed kill is
+    # recorded as a Deed; the daily tick applies its proposed standing shifts exactly
+    # once; the world then *shows* it (a rumor on entry, an NPC's memory, a wanted
+    # poster, the standing readout). Deterministic and replay-safe — no LLM here.
+
+    #: How close a creature must be (Chebyshev tiles) to witness a deed. A Phase-0
+    #: stand-in for FOV + NPC perception, which Phase A.1 substitutes.
+    WITNESS_RADIUS = 8
+
+    def _deed_witnesses(self, x: int, y: int, exclude: set[str]) -> list[Entity]:
+        """Living NPCs/actors near enough to have seen something happen at (x, y)."""
+        witnesses: list[Entity] = []
+        for entity in self.state.entities.values():
+            if entity.id in exclude or entity.kind not in {"npc", "actor"}:
+                continue
+            if not entity.alive:
+                continue
+            if max(abs(entity.x - x), abs(entity.y - y)) <= self.WITNESS_RADIUS:
+                witnesses.append(entity)
+        return sorted(witnesses, key=lambda e: e.id)
+
+    def legend_words(self, actor: str, n: int = 3) -> list[str]:
+        """A soul's strongest legend tags as plain words — the shorthand dialogue,
+        rumors, and readouts use (e.g. ['defiant', 'uncanny'])."""
+        return [tag for tag, _weight in self.state.legend_ledger.top_tags(actor, n)]
+
+    def record_deed(
+        self,
+        deed_type: str,
+        *,
+        magnitude: float,
+        summary: str,
+        at: tuple[int, int] | None = None,
+        source: str = "combat",
+        target_tags: list[str] | None = None,
+        evidence_tags: list[str] | None = None,
+        interpretation_source: str = "rules",
+    ) -> Deed | None:
+        """The general deed-emission path (Phase A): an emission site describes *what
+        happened* (type, magnitude, where, what it touched); the rules interpreter
+        (`interpret_deed_rules`) decides *what it means* (multi-axis standing + legend),
+        and the tick applies it once. Witnesses are detected at the deed moment and
+        remember it immediately (legibility). Returns the recorded deed.
+
+        ``interpretation_source`` records *who judged* the deed: "rules" for the
+        deterministic table (combat), or "llm"/"fallback" when the A.2 interpreter
+        classified an ambiguous spell outcome — the consequences still come from the
+        bounded rules table either way (keeps the world coherent and replay-safe).
+
+        Deeds are always attributed to the player's **soul** (§1.7). ``at`` defaults to
+        the controlled body's tile (where most deeds happen)."""
+        state = self.state
+        x, y = at if at is not None else (state.player.x, state.player.y)
+        witnesses = self._deed_witnesses(x, y, exclude={state.player_id})
+        deed = Deed(
+            id=state.deed_ledger.next_id(state.turn),
+            turn=state.turn,
+            zone=(state.zone_x, state.zone_y),
+            type=deed_type,
+            magnitude=magnitude,
+            actor=state.player_soul_id,
+            source=source,
+            place_key=state.current_place_key(),
+            target_tags=list(target_tags or []),
+            visibility="witnessed" if witnesses else "secret",
+            witnesses=[w.id for w in witnesses],
+            evidence_tags=list(evidence_tags or []),
+            summary=summary,
+        )
+        interpret_deed_rules(
+            deed
+        )  # consequences from the bounded rules table (by role)
+        deed.standing_deltas = self._resolve_role_deltas(deed.standing_deltas)
+        deed.interpretation_source = interpretation_source  # who *judged* it (D5)
+        state.deed_ledger.record(deed)
+        # NPC memory line (legibility): witnesses carry it even before the tick, so it
+        # surfaces naturally in their dialogue context.
+        for witness in witnesses:
+            profile = state.npc_profiles.get(witness.id)
+            if profile is not None:
+                profile.remember(f"I saw you {deed.summary}.")
+        return deed
+
+    def _resolve_role_deltas(
+        self, role_deltas: dict[str, dict[str, float]]
+    ) -> dict[str, dict[str, float]]:
+        """Turn role-keyed consequence deltas (from DEED_RULES) into concrete per-faction
+        deltas, applying each role's shift to every faction that fills it. On the two-pole
+        scaffold this is 1:1; once Phase C seeds the full roster, the whole imperial bloc
+        feels a strike at the same deed with no rule changes. Unknown roles fall back to a
+        literal id (keeps ad-hoc/test deltas working)."""
+        resolved: dict[str, dict[str, float]] = {}
+        ledger = self.state.faction_ledger
+        for role, axes in role_deltas.items():
+            targets = ledger.ids_by_role(role) or [role]
+            for faction_id in targets:
+                dest = resolved.setdefault(faction_id, {})
+                for axis, delta in axes.items():
+                    dest[axis] = round(dest.get(axis, 0.0) + delta, 4)
+        return resolved
+
+    def _deed_attributed_to_player(self, source: Entity | None) -> bool:
+        """Whether a kill counts as the player soul's deed. Direct kills always do; the
+        ``owner_soul_id`` seam lets *indirect* kills (a summon, a triggered ward, a charmed
+        agent) count too once those carriers stamp the player's soul as owner. NOTE: that
+        owner-stamping isn't threaded through summons/triggers/timers yet — tracked as a
+        follow-up; today this captures direct kills and any future owned-carrier."""
+        if source is None:
+            return False
+        if source.id == self.state.player_id:
+            return True
+        return getattr(source, "owner_soul_id", None) == self.state.player_soul_id
+
+    def _record_kill_deed(self, victim: Entity, source: Entity | None) -> None:
+        """Translate a combat kill the player's soul is responsible for into a deed.
+        Imperial dead and slain civilians read very differently (the rules table sorts
+        out the consequences); other creatures aren't (yet) deed-worthy."""
+        if not self._deed_attributed_to_player(source):
+            return
+        if "empire" in victim.tags:
+            self.record_deed(
+                "killed_imperials",
+                magnitude=0.2,  # one imperial; Phase A may scale by count/severity
+                summary=f"cut down {victim.name}, one of the Empire's own",
+                at=(victim.x, victim.y),
+                target_tags=["empire"],
+                evidence_tags=["bloodstain"],
+            )
+        elif victim.kind == "npc" or "civilian" in victim.tags:
+            self.record_deed(
+                "killed_civilians",
+                magnitude=0.2,
+                summary=f"struck down {victim.name}, who bore no arms",
+                at=(victim.x, victim.y),
+                target_tags=["civilian"],
+                evidence_tags=["bloodstain", "survivor_testimony"],
+            )
+
+    def run_world_tick(self, day: int | None = None) -> bool:
+        """The world Simulator's daily beat. Applies every unapplied deed's proposed
+        consequences **exactly once** (idempotency, §1.8): repeated ticks, reloads, or a
+        replay boundary never double-count. Phase 0 only moves standing; Phase D fills
+        this with backlash, off-screen assignments, and region re-skins (seeded by
+        ``day`` via ``stable_seed`` — the param is threaded now for that determinism).
+
+        Returns True if any deed was applied this tick."""
+        state = self.state
+        applied_any = False
+        for deed in state.deed_ledger.unapplied():
+            for faction_id, axes in deed.standing_deltas.items():
+                for axis, delta in axes.items():
+                    state.faction_ledger.adjust_standing(faction_id, axis, delta)
+            # The legend (mechanical tags) grows from the same deeds; a prose mirror is
+            # written for the prompts to read (§1.3).
+            for tag, weight in deed.legend_tags.items():
+                state.legend_ledger.add_tag(deed.actor, tag, weight)
+            if deed.legend_tags and deed.summary:
+                self.record_note(
+                    WORLD_ANCHOR,
+                    f"It is said of you that you {deed.summary}.",
+                    kind="legend",
+                    source="legend",
+                    salience=2,
+                    ttl=600,
+                )
+            deed.applied = True
+            applied_any = True
+        # Causal compression keeps the chronicle/voices reading a few arcs, not raw deeds.
+        state.deed_ledger.compress()
+        state.simulated_through_turn = max(state.simulated_through_turn, state.turn)
+        return applied_any
+
+    def _maybe_run_daily_tick(self) -> bool:
+        """Fire the 05:00 daily tick for each day boundary crossed since it last ran
+        (D4: at 05:00, not on zone-cross). Stateful via ``ticked_through_day``, so it
+        catches up even if a turn advance bypassed this hook, and never fires twice for
+        the same day."""
+        fired = False
+        while self.state.day > self.state.ticked_through_day:
+            self.state.ticked_through_day += 1
+            self.run_world_tick(day=self.state.ticked_through_day)
+            # Pressure on the Empire is a once-per-day event (cursor-guarded here, not in
+            # run_world_tick, so an ad-hoc reckoning can't double-spend its defenses).
+            self._simulate_empire_pressure()
+            self._simulate_backlash()
+            self._simulate_bonds()
+            fired = True
+        return fired
+
+    def _simulate_bonds(self) -> None:
+        """Phase F — every NPC's personal bond to the player drifts with the player's
+        legend, bent by the NPC's own traits (a rebel comes to adore a liberator; a
+        loyalist a defiant soul to fear). Crossing the follow line is a *moment*; turning
+        butcher loses the very people who believed in you. First-hand memory makes
+        reputation land harder. Followers who believe also rally to the player's org."""
+        state = self.state
+        legend = state.legend_ledger.tags_for(state.player_soul_id)
+        if not legend:
+            return
+        player_orgs = state.faction_ledger.by_kind("player_org")
+        primary_org = player_orgs[0] if player_orgs else None
+        for npc_id, profile in state.npc_profiles.items():
+            # The "follower" trait is the persistent marker (set on join, cleared on
+            # depart), so a gradual drift down through the band still fires exactly one
+            # estrangement moment when loyalty finally falls past the drift line.
+            pledged = "follower" in profile.traits
+            personal = 1.5 if profile.memory else 1.0
+            drift_bond(profile.bond, legend, profile.traits, personal=personal)
+            if profile.bond.is_follower() and not pledged:
+                self._fire_bond_moment(profile, "join")
+            elif pledged and profile.bond.loyalty < DRIFT_THRESHOLD:
+                self._fire_bond_moment(profile, "depart")
+            # True believers rally to your cause's banner if you've raised one.
+            if (
+                profile.bond.is_follower()
+                and primary_org is not None
+                and profile.bond.ideology >= 50
+                and primary_org.id not in profile.bond.affiliations
+            ):
+                profile.bond.affiliations.append(primary_org.id)
+                profile.remember(f"I joined {primary_org.name}, your cause made real.")
+                self.state.add_message(f"{profile.name} pledges to {primary_org.name}.")
+
+    def _fire_bond_moment(self, profile: Any, kind: str) -> None:
+        """A bond crossing a threshold becomes a felt moment, written back to memory so it
+        colours all future behaviour (a parted follower remembers leaving — and why)."""
+        if kind == "join":
+            self.state.add_message(
+                f"{profile.name} has come to follow you, won by what you've done."
+            )
+            profile.remember("I chose to follow you.")
+            if "follower" not in profile.traits:
+                profile.traits.append("follower")
+        elif kind == "depart":
+            self.state.add_message(
+                f"{profile.name} can no longer walk the road you walk, and falls away."
+            )
+            profile.remember("I left your side; I could not follow what you became.")
+            if "follower" in profile.traits:
+                profile.traits.remove("follower")
+
+    def found_organization(self, name: str) -> Faction:
+        """Raise a player-founded organization — a guild, warband, cult, court (Phase F).
+        Plural and distinct: you may found several. It is a first-class faction
+        (kind ``player_org``) the social systems treat like any other; you start as its
+        founder."""
+        org_id = f"player_org_{normalize_id(name) or len(self.state.faction_ledger.factions)}"
+        existing = self.state.faction_ledger.get(org_id)
+        if existing is not None:
+            return existing
+        org = Faction(
+            id=org_id,
+            name=name.strip() or "your banner",
+            kind="player_org",
+            mood="fledgling",
+            player_rank="founder",
+            notes_anchor=f"faction:{org_id}",
+        )
+        self.state.faction_ledger.add(org)
+        self.state.add_message(f"You raise a banner: {org.name} is founded.")
+        return org
+
+    def followers(self) -> list[tuple[str, Any]]:
+        """(entity_id, NPCProfile) for every NPC whose bond has crossed into following —
+        a *bond* state, not a combat-faction change (a loyal reeve stays neutral)."""
+        return sorted(
+            (
+                (npc_id, profile)
+                for npc_id, profile in self.state.npc_profiles.items()
+                if profile.bond.is_follower()
+            ),
+            key=lambda item: item[0],
+        )
+
+    def _simulate_backlash(self) -> None:
+        """The factions read the world and *spend to act* (Phase D, strategy §5.2). A
+        crackdown is not "fear high", it is "the Empire spends a patrol"; resources are
+        finite with slow regen, so reactions ebb and flow and an overspent faction goes
+        quiet. Intents are queued and realized when the player next enters a zone."""
+        state = self.state
+        ledger = state.faction_ledger
+        empire = ledger.primary("empire")
+        rebellion = ledger.primary("resistance")
+        # Slow daily regen + mood drift (legibility), before anyone spends.
+        if empire is not None:
+            empire.resources["patrols"] = min(
+                EMPIRE_PATROLS_START, empire.resources.get("patrols", 0) + 1
+            )
+            threat = empire.standing_of("imperial_threat")
+            empire.mood = (
+                "furious" if threat >= 3 else "alarmed" if threat >= 1 else "orderly"
+            )
+        if rebellion is not None:
+            rebellion.resources["cells"] = min(
+                REBELLION_CELLS_START, rebellion.resources.get("cells", 0) + 1
+            )
+            gratitude = rebellion.standing_of("gratitude")
+            rebellion.mood = (
+                "rising"
+                if gratitude >= 3
+                else "stirring"
+                if gratitude >= 1
+                else "hopeful"
+            )
+        if (
+            len(state.pending_backlash) < MAX_PENDING_BACKLASH
+            and empire is not None
+            and empire.standing_of("imperial_threat") >= CRACKDOWN_THRESHOLD
+            and ledger.spend(empire.id, "patrols", 1)
+        ):
+            state.pending_backlash.append({"kind": "crackdown"})
+        if (
+            len(state.pending_backlash) < MAX_PENDING_BACKLASH
+            and rebellion is not None
+            and rebellion.standing_of("gratitude") >= UPRISING_THRESHOLD
+            and ledger.spend(rebellion.id, "cells", 1)
+        ):
+            state.pending_backlash.append({"kind": "resistance"})
+
+    def _simulate_empire_pressure(self) -> None:
+        """The Empire spends down its finite defenses fighting the threat you represent
+        (D9, §0.5). Depletion scales with your imperial_threat standing; when the pool hits
+        zero, the path to the emperor opens. Phase D will route this through richer faction
+        spending; this is the v1 single-pool gate."""
+        empire = self.state.faction_ledger.primary("empire")
+        if empire is None:
+            return
+        threat = empire.standing_of("imperial_threat")
+        current = int(empire.resources.get("defense", 0))
+        if threat <= 0 or current <= 0:
+            return
+        loss = max(1, round(threat * EMPIRE_PRESSURE_RATE))
+        empire.resources["defense"] = max(0, current - loss)
+        if empire.resources["defense"] == 0:
+            self.state.add_message(
+                "Word spreads that the Empire's defenses are breaking - the road to the "
+                "emperor lies open."
+            )
+
+    def emperor_reachable(self) -> bool:
+        """True once the Empire's defenses are spent — the emperor can be reached and
+        killed (D9). Until then he is the best-guarded target alive."""
+        empire = self.state.faction_ledger.primary("empire")
+        return empire is not None and int(empire.resources.get("defense", 0)) <= 0
+
+    def _on_enter_location(self) -> None:
+        """Called when the player arrives in a (new) zone or floor. Catches up the daily
+        tick (a turn advance during the transition may have crossed 05:00), then shows
+        what the world has registered: a rumor of a recent public deed, and the marks the
+        place itself bears from what you did here (Phase E)."""
+        self._maybe_run_daily_tick()
+        self._announce_deed_rumors()
+        self._render_deed_consequences()
+        self._realize_backlash()
+
+    def _realize_backlash(self) -> None:
+        """Spawn the events the factions set in motion (Phase D): an Imperial patrol sent
+        to hunt you down, sympathizers taking up arms for you. The threat (and the help)
+        are real bodies in the world, so pressure has teeth and a price."""
+        if self.state.game_over or not self.state.pending_backlash:
+            return
+        events, self.state.pending_backlash = self.state.pending_backlash, []
+        for event in events:
+            kind = event.get("kind")
+            if kind == "crackdown":
+                self._spawn_backlash_crackdown()
+            elif kind == "resistance":
+                self._spawn_backlash_resistance()
+
+    def _spawn_backlash_crackdown(self) -> None:
+        tile = self._find_open_prop_tile(min_radius=3, max_radius=8)
+        if tile is None:
+            return
+        x, y = tile
+        self.spawn_actor(
+            "Imperial enforcer",
+            "e",
+            x,
+            y,
+            12,
+            4,
+            1,
+            "enemy",
+            "melee",
+            tags={"empire", "human", "soldier", "backlash"},
+        )
+        self.state.add_message(
+            "An Imperial patrol has tracked you here - they mean to make an example of you."
+        )
+
+    def _spawn_backlash_resistance(self) -> None:
+        tile = self._find_open_prop_tile(min_radius=2, max_radius=6)
+        if tile is None:
+            return
+        x, y = tile
+        ally = self.spawn_actor(
+            "sworn sympathizer",
+            "s",
+            x,
+            y,
+            12,
+            3,
+            0,
+            "ally",
+            "melee",
+            tags={"human", "rebel", "backlash"},
+        )
+        ally.description = (
+            "A stranger who heard what you did and came to stand with you."
+        )
+        self.state.add_message(
+            "A sympathizer, hearing of your deeds, takes up arms at your side."
+        )
+
+    def _render_deed_consequences(self) -> None:
+        """Phase E — the world shows it remembers. For each kind of public deed you did in
+        *this* zone, leave one evocative, deterministic mark (a bloodstain, ruin, defiled
+        ground, a memorial), placed once. Plus the Empire's wanted poster, which follows
+        your legend everywhere. Returning to a place you changed looks changed."""
+        state = self.state
+        here = state.current_place_key()
+        by_type: dict[str, list[Deed]] = {}
+        for deed in state.deed_ledger.deeds:
+            # Match on place_key (zone + depth) so a dungeon-level deed doesn't mark the
+            # surface; fall back to zone for deeds recorded before place_key existed.
+            deed_place = deed.place_key or f"{deed.zone[0]},{deed.zone[1]}@1"
+            if deed.is_public and deed.applied and deed_place == here:
+                by_type.setdefault(deed.type, []).append(deed)
+        for deed_type in sorted(by_type):
+            spec = _DEED_CONSEQUENCE_PROPS.get(deed_type)
+            if spec is None:
+                continue
+            prop_id = f"consequence_{here}_{deed_type}"
+            if prop_id in state.entities:
+                continue  # placed once; the zone keeps it
+            tile = self._find_open_prop_tile()
+            if tile is None:
+                break
+            name, char, tags, description = spec
+            count = len(by_type[deed_type])
+            if count >= 3:
+                description += " It happened more than once here."
+            x, y = tile
+            state.entities[prop_id] = Entity(
+                id=prop_id,
+                name=name,
+                kind="prop",
+                x=x,
+                y=y,
+                char=char,
+                blocks=False,
+                tags=set(tags) | {deed_type},
+                description=description,
+                hp=4,
+                max_hp=4,
+                faction="neutral",
+            )
+        self._maybe_place_wanted_poster()
+
+    def camp_rest(self, hours: float = 8.0, until_hour: float | None = None) -> bool:
+        """Make camp and rest. By default a full night's 8 hours; ``until_hour`` rests
+        until the next occurrence of that wall-clock hour instead. Advances the clock,
+        restores mana fully and health in proportion to the time rested, and lets any
+        daily tick that the rest crosses (05:00) fire. A deliberate skip of time —
+        resting in the open is, in the fiction, a vulnerability, though
+        encounters-during-rest aren't simulated yet."""
+        state = self.state
+        if state.game_over:
+            return False
+        if until_hour is not None:
+            delta = (until_hour - state.hour_of_day) % 24
+            hours = delta if delta > 1e-9 else 24.0  # already there → rest a full day
+        hours = max(0.0, hours)
+        rounds = max(1, round(hours / 24 * TURNS_PER_DAY))
+        state.turn += rounds
+        player = state.player
+        player.mana = player.max_mana
+        # Health recovers with rest, saturating around a half-day's sleep.
+        player.hp = min(
+            player.max_hp,
+            player.hp + round(player.max_hp * min(hours, 12.0) / 24.0),
+        )
+        hour = int(state.hour_of_day)
+        minute = int((state.hour_of_day - hour) * 60)
+        state.add_message(
+            f"You make camp and rest. You wake at {hour:02d}:{minute:02d}."
+        )
+        self._maybe_run_daily_tick()
+        self.update_fov()
+        return True
+
+    def _announce_deed_rumors(self) -> None:
+        """Surface one rumor for the most notable public, already-simulated deed that
+        hasn't been rumored yet (so a deed becomes 'talk of the road' once, on arrival)."""
+        state = self.state
+        candidates = [
+            deed
+            for deed in state.deed_ledger.deeds
+            if deed.is_public and deed.applied and not deed.rumored
+        ]
+        if not candidates:
+            return
+        deed = max(candidates, key=lambda d: d.magnitude)
+        deed.rumored = True
+        state.add_message(
+            f"Word on the road: they say you {deed.summary}. The Empire has taken note."
+        )
+
+    def _maybe_place_wanted_poster(self) -> None:
+        """Hang an Imperial wanted poster in this location if the player has a public,
+        simulated deed and there isn't already one here — a prop bearing their legend."""
+        state = self.state
+        if not any(deed.is_public and deed.applied for deed in state.deed_ledger.deeds):
+            return
+        if any("wanted_poster" in entity.tags for entity in state.entities.values()):
+            return
+        tile = self._find_open_prop_tile()
+        if tile is None:
+            return
+        x, y = tile
+        threat = state.faction_ledger.get("empire")
+        threat_level = threat.standing_of("imperial_threat") if threat else 0.0
+        bounty = max(1, int(round(threat_level * 500)))
+        entity = Entity(
+            id=self.next_entity_id("prop"),
+            name="Imperial wanted poster",
+            kind="prop",
+            x=x,
+            y=y,
+            char="!",
+            blocks=False,
+            tags={"wanted_poster", "empire", "paper", "flammable"},
+            description=(
+                "A hastily nailed Imperial notice. A crude likeness glares above the "
+                f"word WANTED, and a bounty of {bounty} crowns that climbs with every "
+                "patrol you cut down."
+            ),
+            hp=4,
+            max_hp=4,
+            faction="neutral",
+        )
+        state.entities[entity.id] = entity
+
+    def _find_open_prop_tile(
+        self, min_radius: int = 1, max_radius: int = 4
+    ) -> tuple[int, int] | None:
+        """A free, walkable tile near the player (nearest first, from ``min_radius`` out).
+        Used to place consequence props and to spawn backlash combatants a little away."""
+        player = self.state.player
+        occupied = {
+            (entity.x, entity.y)
+            for entity in self.state.entities.values()
+            if entity.kind != "item"
+        }
+        for radius in range(min_radius, max_radius + 1):
+            for dy in range(-radius, radius + 1):
+                for dx in range(-radius, radius + 1):
+                    if max(abs(dx), abs(dy)) != radius:
+                        continue
+                    x, y = player.x + dx, player.y + dy
+                    if not self.in_bounds(x, y) or (x, y) in occupied:
+                        continue
+                    tile = self.tile_at(x, y)
+                    if tile in BLOCKING_TILES or tile == DOOR:
+                        continue
+                    return (x, y)
+        return None
+
     def room_profile_at(self, x: int, y: int) -> RoomProfile | None:
         return self.state.room_profile_at(x, y)
 
@@ -693,6 +1417,11 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             if entity.kind != "prop" or "set_dressing" not in entity.tags:
                 continue
             if "llm_generated" in entity.tags:
+                continue
+            # Deed-driven marks (consequence props, wanted posters) are meaningful and
+            # fixed — never let the flavor generator replace them (that would also re-fire
+            # background LLM work every move).
+            if "consequence" in entity.tags or "wanted_poster" in entity.tags:
                 continue
             room_id = self.state.tile_rooms.get(self.tile_key(entity.x, entity.y))
             if room_id:
@@ -1272,6 +2001,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         if promise is None:
             return None
         promise.status = "fulfilled"
+        self._grant_reward_reputation(promise.reward)
         return QuestLogEntry(
             entry.id,
             entry.name,
@@ -1280,6 +2010,18 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             entry.location,
             "completed",
         )
+
+    def _grant_reward_reputation(self, reward: Any) -> None:
+        """Apply a promise/quest reward's standing deltas to the faction ledger — the
+        previously-defined-but-unconsumed `Reward.reputation` (strategy §3), now wired.
+        Keys are ``faction`` (→ gratitude) or ``faction.axis`` for a specific axis."""
+        if reward is None:
+            return
+        for key, amount in getattr(reward, "reputation", {}).items():
+            faction_id, _, axis = str(key).partition(".")
+            self.state.faction_ledger.adjust_standing(
+                faction_id, axis or "gratitude", float(amount)
+            )
 
     def remove_quest_by_index(self, index: int) -> QuestLogEntry | None:
         entries = self.quest_log_entries()
@@ -1540,6 +2282,12 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             player_block["appearance"] = player_appearance
         if player.traits:
             player_block["traits"] = list(player.traits)
+        # The player's legend reaches dialogue so NPCs can greet (or fear) them by
+        # reputation — the connective tissue of §5.1. Mechanical tags become plain words;
+        # the prose mirror in scene_notes carries the colour.
+        legend = self.legend_words(self.state.player_soul_id)
+        if legend:
+            player_block["legend"] = legend
         return {
             "npc": profile.to_dialogue_context(),
             "player": player_block,
@@ -1819,13 +2567,13 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             self.state.add_message("There are no downward stairs here.")
             return False
         if self.state.depth >= self.state.max_depth:
-            self.state.victory = True
-            self.state.game_over = True
-            self.state.turn += 1
+            # Verticality is bounded and local (D2/§0.2): a site has a few levels, like
+            # the real world — reaching the bottom is never a win or progression. Victory
+            # is killing the emperor (Phase B), unlocked by pressure, not by descending.
             self.state.add_message(
-                "You descend past the last stair and escape with your impossible magic intact."
+                "The passage bottoms out in solid rock - there is no way further down."
             )
-            return True
+            return False
 
         # Save current floor before transitioning
         is_surface = self.state.depth == 1 and self.state.scenario != "dungeon"
@@ -1849,6 +2597,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         self.state.turn += 1
         self.update_fov()
         self.state.add_message(f"You descend to dungeon floor {self.state.depth}.")
+        self._on_enter_location()
         return True
 
     def ascend_stairs(self) -> bool:
@@ -1892,6 +2641,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             self.state.turn += 1
             self.update_fov()
             self.state.add_message("You climb back to the surface.")
+            self._on_enter_location()
             return True
         else:
             if self.state.depth in self.state.dungeon_floors:
@@ -1903,6 +2653,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             self.state.add_message(
                 f"You climb back to dungeon floor {self.state.depth}."
             )
+            self._on_enter_location()
             return True
 
     def swap_control_to(self, target_id: str) -> list[str]:
@@ -1981,7 +2732,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             self.state.add_message("No enemy is close enough for a spark bolt.")
             return False
         player.mana -= 2
-        self.damage_entity(target, 5, "spark")
+        self.damage_entity(target, 5, "spark", source=player)
         self.state.add_message(f"A tidy spark bolt hits {target.name}.")
         self.finish_player_turn()
         return True
@@ -1998,7 +2749,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             self.state.add_message("No enemy is close enough for a frost shard.")
             return False
         player.mana -= 2
-        self.damage_entity(target, 4, "frost")
+        self.damage_entity(target, 4, "frost", source=player)
         if target.hp > 0:
             target.statuses["slowed"] = max(
                 status_duration(target.statuses.get("slowed")), 2
@@ -2113,6 +2864,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         if self.state.game_over:
             return
         self.state.turn += 1
+        self._maybe_run_daily_tick()
         self._tick_environment()
         self._tick_tile_durations()
         self._tick_auras()

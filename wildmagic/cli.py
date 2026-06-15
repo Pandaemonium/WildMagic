@@ -256,13 +256,35 @@ def render_screen(session: GameSession) -> str:
         location = f"Depth {state.depth}/{state.max_depth}"
     footer = [
         "",
-        f"Turn {state.turn} | {location} | HP {player.hp}/{player.max_hp} | MP {player.mana}/{player.max_mana}",
+        f"Turn {state.turn} | {state.clock_label()} | {location} | HP {player.hp}/{player.max_hp} | MP {player.mana}/{player.max_mana}",
         f"Inventory: {inventory}",
         f"Curses: {curses}",
+        f"Standing: {standing_summary(state)}",
         "Recent log:",
         *[f"  {message}" for message in state.messages[-6:]],
     ]
     return "\n".join(lines + footer)
+
+
+def standing_summary(state) -> str:
+    """A compact one-line standing readout for the CLI footer: each power's non-zero
+    standing axes (the GUI shows the same in draw_standing; full detail via 'standing')."""
+    factions = [
+        faction
+        for faction in state.faction_ledger.factions.values()
+        if any(faction.standing.values())
+    ]
+    if not factions:
+        return "unknown to the powers"
+    parts = []
+    for faction in sorted(factions, key=lambda f: f.id):
+        axes = ", ".join(
+            f"{axis} {value:+.1f}"
+            for axis, value in sorted(faction.standing.items())
+            if value
+        )
+        parts.append(f"{faction.name} ({axes})")
+    return " | ".join(parts)
 
 
 def render_map(session: GameSession) -> list[str]:

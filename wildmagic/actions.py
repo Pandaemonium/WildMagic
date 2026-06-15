@@ -19,6 +19,12 @@ from .config import (
     flesh_enabled,
     lore_enabled,
 )
+from .deed_interpreter import (
+    DeedInterpreterProvider,
+    make_deed_interpreter_provider,
+    outcome_is_deed_candidate,
+    resolve_deed_interpretation,
+)
 from .determinism import stable_seed
 from .engine import GameEngine
 from .flesh import (
@@ -159,6 +165,8 @@ class GameSession:
         flesh_provider_name: str | None = None,
         canon_provider: CanonProvider | None = None,
         canon_provider_name: str | None = None,
+        deed_interpreter_provider: DeedInterpreterProvider | None = None,
+        deed_interpreter_provider_name: str | None = None,
         character: CharacterProfile | None = None,
         replay_mode: bool = False,
     ) -> None:
@@ -216,6 +224,30 @@ class GameSession:
         self.background_canon_provider = (
             canon_provider
             or make_background_canon_provider(resolved_canon_provider_name)
+        )
+        # The deed interpreter (A.2): classifies ambiguous spell outcomes into deeds. In
+        # replay it is never called (the recorded verdict on the wild-magic action is
+        # replayed); make() returns None when the purpose is "off", and the engine then
+        # uses only the deterministic fallback.
+        resolved_deeds_provider_name = deed_interpreter_provider_name
+        if resolved_deeds_provider_name is None:
+            # Inherit from the wild-magic provider — by name OR from an explicit provider
+            # *object's* .name (so passing MockWildMagicProvider() also keeps the deed
+            # interpreter off the network, not just passing provider_name="mock").
+            inferred = provider_name or getattr(provider, "name", None)
+            if inferred in {"mock", "ollama", "auto", "off", "none"}:
+                resolved_deeds_provider_name = inferred
+        self.deed_interpreter_provider = (
+            deed_interpreter_provider
+            if deed_interpreter_provider is not None
+            else (
+                None
+                if replay_mode
+                else make_deed_interpreter_provider(resolved_deeds_provider_name)
+            )
+        )
+        self.deed_interpreter_label = getattr(
+            self.deed_interpreter_provider, "name", "fallback"
         )
         # In replay mode, promises and flesh come from the recorded apply points;
         # background producers must stay silent.
@@ -305,6 +337,38 @@ class GameSession:
                 action = "journal"
                 success = True
                 explicit_messages = describe_journal(self.engine)
+            elif verb in {"standing", "reputation", "rep", "factions"}:
+                # Free action: how the world's powers regard you (the emergent-world
+                # standing readout). Mirrored in the GUI panel and CLI footer.
+                action = "standing"
+                success = True
+                explicit_messages = describe_standing(self.engine)
+            elif verb in {"followers", "retinue", "bonds"}:
+                # Free action: who follows you, and how the people you've met feel.
+                action = "followers"
+                success = True
+                explicit_messages = describe_followers(self.engine)
+            elif verb in {"found", "establish"}:
+                action = "found"
+                org_name = command_argument(original_command, tokens)
+                if not org_name:
+                    explicit_messages = [
+                        "Found what? Name it, e.g. 'found the Ashen Hand'."
+                    ]
+                else:
+                    self.engine.found_organization(org_name)
+                    success = True
+            elif verb in {"tick", "simulate", "daytick"}:
+                # Debug trigger for the daily world tick (Phase 0). A free action; the
+                # real 05:00 cadence lands in Phase 0.5. Applies unapplied deeds once.
+                action = "tick"
+                success = True
+                applied = self.engine.run_world_tick()
+                explicit_messages = [
+                    "The world turns. Recent deeds are reckoned with."
+                    if applied
+                    else "The world turns. Nothing new to reckon with."
+                ]
             elif verb in {"target", "mark", "aim"}:
                 # Free action (no turn): mark a square as the explicit spell target.
                 # The wild-magic resolver and the standard spells then aim there.
@@ -382,6 +446,17 @@ class GameSession:
             elif verb in {"wait", "."}:
                 action = "wait"
                 success = self.engine.wait_turn()
+            elif verb in {"rest", "camp", "sleep"}:
+                action = "rest"
+                hours, until_hour, rest_error = _parse_rest_arg(
+                    command_argument(original_command, tokens)
+                )
+                if rest_error is not None:
+                    explicit_messages = [rest_error]
+                elif until_hour is not None:
+                    success = self.engine.camp_rest(until_hour=until_hour)
+                else:
+                    success = self.engine.camp_rest(hours=hours)
             elif verb in {"open", "o"}:
                 action = "open"
                 success = self.engine.open_adjacent_door()
@@ -1857,11 +1932,69 @@ class GameSession:
         if outcome.technical_failure:
             wild_magic_record["technical_failure"] = True
             wild_magic_record["error"] = "; ".join(outcome.messages)
+        # A.2: was this outcome an ambiguous deed (raised dead, razed a place, desecration,
+        # atrocity)? The verdict rides on the wild-magic record so replay reproduces the
+        # deed without a model call. (Kills are already deeds via the combat path.)
+        deed_record = self._interpret_spell_deed(spell, outcome, replay_wild_magic)
+        if deed_record is not None:
+            wild_magic_record["deed"] = deed_record
         return (
             outcome.consumed_turn,
             outcome.technical_failure,
             wild_magic_record,
             context,
+        )
+
+    def _interpret_spell_deed(
+        self,
+        spell: str,
+        outcome: Any,
+        replay_wild_magic: dict[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        """Classify a wild-magic outcome as a non-combat deed (A.2). On replay, reuse the
+        recorded verdict; live, gate cheaply then ask the interpreter (LLM or the
+        deterministic fallback). Records the deed on the engine and returns the compact
+        verdict to store on the wild-magic action record (or None for "not a deed")."""
+        engine = self.engine
+        # Replay: reproduce the recorded verdict deterministically, no model call.
+        if replay_wild_magic is not None:
+            recorded = replay_wild_magic.get("deed")
+            if isinstance(recorded, dict) and recorded.get("deed_type"):
+                self._record_spell_deed(recorded)
+                return recorded
+            return None
+        if outcome.technical_failure:
+            return None
+        outcome_text = " ".join(outcome.messages)
+        if not outcome_is_deed_candidate(f"{spell} {outcome_text}"):
+            return None  # the zero-call common path
+        context = {
+            "spell": spell,
+            "outcome": outcome_text,
+            "location": engine.state.location_label(),
+            "region": engine.region.name,
+            "zone": {
+                "x": engine.state.zone_x,
+                "y": engine.state.zone_y,
+                "type": engine.state.zone_type,
+            },
+        }
+        verdict = resolve_deed_interpretation(self.deed_interpreter_provider, context)
+        self.deed_interpreter_label = verdict.provider_name
+        if not verdict.deed_type:
+            return None
+        record = verdict.to_record()
+        self._record_spell_deed(record)
+        return record
+
+    def _record_spell_deed(self, record: dict[str, Any]) -> None:
+        self.engine.record_deed(
+            str(record["deed_type"]),
+            magnitude=float(record.get("magnitude", 0.3)),
+            summary=str(record.get("summary") or ""),
+            source="spell",
+            target_tags=[str(t) for t in record.get("target_tags") or []],
+            interpretation_source=str(record.get("interpretation_source") or "llm"),
         )
 
     def _talk(
@@ -2368,14 +2501,67 @@ def command_argument(command: str, tokens: list[str]) -> str:
     return " ".join(tokens[1:])
 
 
+# Named times the player can rest "until" — mapped to a representative wall-clock hour.
+REST_TARGET_HOURS = {
+    "dawn": 5.0,
+    "sunrise": 6.0,
+    "morning": 7.0,
+    "noon": 12.0,
+    "midday": 12.0,
+    "afternoon": 15.0,
+    "dusk": 19.0,
+    "evening": 19.0,
+    "sunset": 19.0,
+    "night": 22.0,
+    "nightfall": 21.0,
+    "midnight": 0.0,
+}
+
+
+def _parse_rest_arg(arg: str) -> tuple[float | None, float | None, str | None]:
+    """Parse the argument to 'rest'. Returns (hours, until_hour, error) with exactly one
+    of hours/until_hour set (or an error string):
+      'rest'                 -> 8 hours (a full night)
+      'rest 3' / 'rest 3.5'  -> that many hours
+      'rest until dawn'      -> until the next 05:00 (named times in REST_TARGET_HOURS)
+      'rest until 14:00'     -> until that wall-clock time
+    """
+    arg = arg.strip().lower()
+    for prefix in ("until ", "til ", "till "):
+        if arg.startswith(prefix):
+            arg = arg[len(prefix) :].strip()
+            break
+    if not arg:
+        return (8.0, None, None)
+    if ":" in arg:
+        hh, _, mm = arg.partition(":")
+        try:
+            hour = (int(hh) + int(mm or 0) / 60) % 24
+        except ValueError:
+            return (None, None, "Rest until when? Try 'rest until 14:00'.")
+        return (None, hour, None)
+    if arg in REST_TARGET_HOURS:
+        return (None, REST_TARGET_HOURS[arg], None)
+    try:
+        return (max(0.0, float(arg)), None, None)
+    except ValueError:
+        return (
+            None,
+            None,
+            "Rest how long? Try 'rest', 'rest 4', or 'rest until dawn'.",
+        )
+
+
 def command_help() -> list[str]:
     return [
-        "Commands: move north/south/east/west, open, descend, ascend, wait (recover 1 MP), cast <spell>, target <x> <y>, talk <message>, possess [name], examine, read [book], use <item>, equip <item>, unequip <slot>, drop <item>, pickup, inspect (or inventory), journal (or rumors), wares (or browse), quit.",
+        "Commands: move north/south/east/west, open, descend, ascend, wait (recover 1 MP), rest [hours | until <time>] (camp 8h by default), cast <spell>, target <x> <y>, talk <message>, possess [name], examine, read [book], use <item>, equip <item>, unequip <slot>, drop <item>, pickup, inspect (or inventory), journal (or rumors), standing, wares (or browse), quit.",
         "Targeting: click a square (or 'target <x> <y>') to mark it - a free action, no turn. Then 'cast fireball at target', 'teleport to target', etc. aim there, and the standard spark/frost spells hit your marked foe. Click it again, 'untarget', or Esc to clear.",
         "Possessing: 'possess' (or 'swap'/'inhabit') leaps your soul into the nearest body - or 'possess <name>' for a specific one. You become that body entirely: its stats, its hit points, its inventory. The body you leave drops as an inert husk. Costs a turn.",
         "Reading: stand on or next to a book and 'read' (or 'read <name>' to pick one). The first reading takes a turn and fixes the book's title and pages forever; rereading is free. What books claim about the world is hearsay - but the world has a way of honoring what gets written down.",
         "Investigating: 'investigate' (or 'search') studies the room - it costs 1-3 turns while the world keeps moving, and what you learn is permanent. If something here is hidden, careful search turns up a clue; investigate the thing the clue points at ('investigate <name>') to see what it was protecting.",
         "Journal: 'journal' lists everything the world has told you - rumors heard, claims corroborated, places found true - with a rough direction when one was given. Free, costs no turn.",
+        "Standing: 'standing' (or 'reputation'/'factions') shows how the world's powers regard you - the mark your deeds have left on the Empire and those who oppose it. Free, costs no turn.",
+        "Followers: 'followers' (or 'retinue') lists those who have come to follow you and the organizations you've founded; 'found <name>' raises a banner of your own. Free, costs no turn.",
         "Talking: stand next to an NPC and 'talk <what you want to say>' (or 'speak'/'say') to start a conversation - it costs a turn, just like any other action.",
         "Trading: some NPCs deal in goods and gold - 'wares' (or 'browse') lists what they have for trade, a free look. Haggle naturally through 'talk' - if a real offer comes together, you'll get a confirmation prompt to 'accept' (or 'yes') or 'reject' (or 'no') before anything changes hands.",
         "Equipment: weapons, armor, clothing, and charms go in their own slots and add to your attack/defense while worn. Equip with 'equip <item>' (or 'wear'/'wield'); take gear off with 'unequip <slot_or_item>' (or 'remove <item>').",
@@ -2407,6 +2593,78 @@ def describe_journal(engine: GameEngine) -> list[str]:
         lines.append(line)
         if entry["hint"]:
             lines.append(f"       ~ {entry['hint']}")
+    return lines
+
+
+def describe_standing(engine: GameEngine) -> list[str]:
+    """The emergent-world standing readout: how each power regards the player, plus a
+    one-line tally of deeds recorded and reckoned. Shared by GUI and CLI (T6)."""
+    state = engine.state
+    ledger = state.faction_ledger
+    if not ledger.factions:
+        return ["No powers have taken notice of you yet."]
+    lines = ["Standing - how the powers regard you:"]
+    for fid in sorted(ledger.factions):
+        faction = ledger.factions[fid]
+        axes = (
+            ", ".join(
+                f"{axis} {value:+.1f}"
+                for axis, value in sorted(faction.standing.items())
+                if value
+            )
+            or "neutral"
+        )
+        lines.append(f"  {faction.name} ({faction.mood}): {axes}")
+    legend = state.legend_ledger.top_tags(state.player_soul_id, n=4)
+    if legend:
+        legend_text = ", ".join(f"{tag} {weight:+.1f}" for tag, weight in legend)
+        lines.append(f"Legend: {legend_text}")
+    # The road to the emperor (D9): the Empire's defenses as a progress read.
+    empire = ledger.primary("empire")
+    if empire is not None and "defense" in empire.resources:
+        if engine.emperor_reachable():
+            lines.append(
+                "The Empire's defenses are broken - the emperor is within your reach."
+            )
+        else:
+            lines.append(
+                f"The Empire's defenses hold (strength {empire.resources['defense']}). "
+                "Keep up the pressure to reach the emperor."
+            )
+    deeds = state.deed_ledger.deeds
+    if deeds:
+        reckoned = sum(1 for deed in deeds if deed.applied)
+        known = sum(1 for deed in deeds if deed.is_public)
+        lines.append(
+            f"Deeds recorded: {len(deeds)} ({reckoned} reckoned, {known} known abroad)."
+        )
+    return lines
+
+
+def describe_followers(engine: GameEngine) -> list[str]:
+    """Who follows you and what your organizations are (Phase F). Feelings are shown as
+    words, never numbers (the math stays invisible)."""
+    state = engine.state
+    lines: list[str] = []
+    orgs = state.faction_ledger.by_kind("player_org")
+    if orgs:
+        lines.append("Your organizations:")
+        for org in orgs:
+            rank = f" ({org.player_rank})" if org.player_rank else ""
+            members = sum(
+                1
+                for profile in state.npc_profiles.values()
+                if org.id in profile.bond.affiliations
+            )
+            lines.append(f"  {org.name}{rank} - {members} sworn")
+    followers = engine.followers()
+    if followers:
+        lines.append("Those who follow you:")
+        for _npc_id, profile in followers:
+            feeling = ", ".join(profile.bond_feeling()) or "at your side"
+            lines.append(f"  {profile.name} the {profile.role} - {feeling}")
+    if not lines:
+        return ["No one follows you yet. The world is still taking your measure."]
     return lines
 
 
@@ -2513,7 +2771,7 @@ def describe_state(engine: GameEngine) -> list[str]:
         or "none"
     )
     lines = [
-        f"Turn {state.turn} | HP {player.hp}/{player.max_hp} | MP {player.mana}/{player.max_mana}",
+        f"Turn {state.turn} | {state.clock_label()} | HP {player.hp}/{player.max_hp} | MP {player.mana}/{player.max_mana}",
         f"Depth {state.depth}/{state.max_depth} | Position {player.x},{player.y} | Scenario {state.scenario}",
         f"Visible tiles: {len(state.visible)} | Explored tiles: {len(state.explored)}",
         f"Statuses: {statuses}",
@@ -2677,6 +2935,35 @@ def summarize_state(engine: GameEngine) -> dict[str, Any]:
         ],
         "entity_count": len(state.entities),
         "recent_messages": state.messages[-8:],
+        # Emergent-world ledgers (Phase 0): deeds + faction standing + the simulator
+        # cursor. Surfaced here so the deterministic replay round-trip verifies them.
+        "deeds": [
+            deed.to_dict()
+            for deed in sorted(state.deed_ledger.deeds, key=lambda deed: deed.id)
+        ],
+        "story_beats": [
+            beat.to_dict()
+            for beat in sorted(state.deed_ledger.beats, key=lambda beat: beat.id)
+        ],
+        "factions": {
+            fid: state.faction_ledger.factions[fid].to_dict()
+            for fid in sorted(state.faction_ledger.factions)
+        },
+        "legend": state.legend_ledger.to_dict(),
+        "pending_backlash": [dict(event) for event in state.pending_backlash],
+        "followers": [
+            {
+                "name": profile.name,
+                "loyalty": round(profile.bond.loyalty, 2),
+                "affiliations": sorted(profile.bond.affiliations),
+            }
+            for _npc_id, profile in engine.followers()
+        ],
+        "simulated_through_turn": state.simulated_through_turn,
+        "day": state.day,
+        "turn_of_day": state.turn_of_day,
+        "day_phase": state.day_phase,
+        "ticked_through_day": state.ticked_through_day,
     }
 
 

@@ -250,6 +250,19 @@ def get_canon_provider() -> str:
     ).lower()
 
 
+def get_deeds_model() -> str:
+    return get_config_value("WILDMAGIC_DEEDS_MODEL") or get_lore_model()
+
+
+def get_deeds_provider() -> str:
+    # The deed interpreter (Phase A.2) classifies ambiguous spell outcomes into deeds. It
+    # follows the wild-magic provider by default; set WILDMAGIC_DEEDS_PROVIDER=off to use
+    # only the deterministic fallback (tests/replay always force this off).
+    return (
+        get_config_value("WILDMAGIC_DEEDS_PROVIDER") or get_wild_magic_provider()
+    ).lower()
+
+
 def ollama_host(purpose: str | None = None) -> str:
     """Return the Ollama endpoint for a provider purpose."""
     keys = _scoped_keys(purpose, "OLLAMA_HOST") + ["OLLAMA_HOST"]
@@ -317,6 +330,12 @@ def ollama_props_num_predict() -> int:
     """A trim budget: a per-room batch is a handful of one-line props, so keep the
     response small to keep the call fast. Truncation just yields fewer props."""
     return _int_value("WILDMAGIC_PROPS_NUM_PREDICT", 512, 64, 2048)
+
+
+def ollama_deeds_num_predict() -> int:
+    """The deed interpreter returns a tiny JSON classification, so keep the budget
+    small and the call fast (it sits adjacent to the wild-magic spell call)."""
+    return _int_value("WILDMAGIC_DEEDS_NUM_PREDICT", 256, 64, 1024)
 
 
 def ollama_props_temperature() -> float:

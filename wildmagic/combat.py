@@ -178,6 +178,19 @@ class _CombatMixin:
                         f"{entity.name} collapses... but begins to stir again!"
                     )
                     return 0
+                # The emperor cannot be reached while the Empire's defenses stand (D9):
+                # no blow lands until pressure has spent them down.
+                if (
+                    "emperor" in entity.tags
+                    and entity.id != self.state.player_id
+                    and not self.emperor_reachable()
+                ):
+                    entity.hp = 1
+                    self.state.add_message(
+                        "The emperor's guard close ranks - he is beyond your reach while "
+                        "the Empire's legions stand."
+                    )
+                    return 0
                 entity.hp = 0
                 entity.blocks = False
                 entity.char = "%"
@@ -222,10 +235,29 @@ class _CombatMixin:
                         )
                     else:
                         self.state.add_message(f"{entity.name} falls.")
+                    # Killing an unarmed townsperson is a deed the world remembers.
+                    self._record_kill_deed(entity, source)
                     self._fire_death_triggers(entity, source, hp_before, damage_type)
                 else:
                     self.state.add_message(f"{entity.name} dies.")
                     self.state.stats.enemies_killed += 1
+                    # Emergent world: a kill the player's soul is responsible for can
+                    # become a deed (Phase 0 records imperial kills). Recorded now;
+                    # consequences are applied later by the daily tick (§1.8).
+                    self._record_kill_deed(entity, source)
+                    # The win condition (D9): the emperor is reachable only once the
+                    # Empire's defenses are spent, so reaching this point *is* the victory.
+                    if (
+                        "emperor" in entity.tags
+                        and source is not None
+                        and source.id == self.state.player_id
+                    ):
+                        self.state.victory = True
+                        self.state.game_over = True
+                        self.state.add_message(
+                            "The emperor falls. The Grand Empire reels - you have toppled "
+                            "it."
+                        )
                     self._drop_loot(entity)
                     # Slime splits into two smaller ones.
                     if (
@@ -235,7 +267,8 @@ class _CombatMixin:
                     ):
                         self._split_slime(entity)
                     if not self.living_enemies():
-                        self.state.victory = True
+                        # Clearing the local enemies is a breather, NOT the run victory
+                        # (which is toppling the Empire, D9). Keep them distinct.
                         self.state.add_message("For a breath, the floor is yours.")
                     # Death-effect tags.
                     self._on_entity_death(entity)
