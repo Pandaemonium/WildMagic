@@ -128,6 +128,7 @@ LLM_AUDIT_FILES = (
     "canon_audit.jsonl",
     "lore_audit.jsonl",
     "flesh_audit.jsonl",
+    "deed_interp_audit.jsonl",
 )
 
 
@@ -1654,7 +1655,7 @@ class GameUI:
         label = self._command_label or "the wild magic"
         if len(label) > 48:
             label = label[:45] + "..."
-        text = f"Resolving: {label}  -  the wild listens"
+        text = f"Resolving: {label}"
         surface = self.small_font.render(text, True, TEXT)
         pad = 10
         width = surface.get_width() + pad * 2
@@ -2596,6 +2597,13 @@ class GameUI:
             self.small_font,
             MUTED,
         )
+        cursor_y = self.draw_text(
+            state.clock_label(),
+            x + 20,
+            cursor_y + 2,
+            self.small_font,
+            MUTED,
+        )
         cursor_y = self.draw_bars(x + 20, cursor_y + 16, player)
         cursor_y = self.draw_gold(x + 20, cursor_y + 4)
         cursor_y = self.draw_statuses(x + 20, cursor_y + 10, player)
@@ -2603,6 +2611,7 @@ class GameUI:
         cursor_y = self.draw_inventory(x + 20, cursor_y + 8)
         cursor_y = self.draw_floor_items(x + 20, cursor_y + 6)
         cursor_y = self.draw_curses(x + 20, cursor_y + 6)
+        cursor_y = self.draw_standing(x + 20, cursor_y + 6)
         spell_height = self.spell_box_height()
         spell_y = WINDOW_HEIGHT - spell_height - 46
         log_y = cursor_y + 16
@@ -2617,9 +2626,11 @@ class GameUI:
             self.screen.blit(overlay, (MAP_OFFSET_X, 0))
             big_font = pygame.font.SysFont("consolas", 48, bold=True)
             if state.victory:
-                message = "YOU ESCAPED"
+                message = "THE EMPIRE FALLS"
                 color = ACCENT
-                sub_text = "Press R to restart"
+                sub_text = (
+                    "The emperor is dead, the order broken — press R to begin anew"
+                )
             elif state.death_cause == "empire":
                 message = "CASE CLOSED"
                 color = DANGER
@@ -2807,6 +2818,57 @@ class GameUI:
         for curse in curses[-3:]:
             text = f"{curse.name} x{curse.stacks}"
             y = self.draw_text(text, x, y, self.small_font, TEXT)
+        return y
+
+    def draw_standing(self, x: int, y: int) -> int:
+        """The emergent-world standing readout (Phase 0): each power that has taken
+        notice of the player, with its non-zero standing axes. Mirrors the CLI's
+        'standing' command / footer (T6)."""
+        ledger = self.engine.state.faction_ledger
+        factions = [
+            faction
+            for faction in ledger.factions.values()
+            if any(faction.standing.values())
+        ]
+        y = self.draw_text(
+            "Standing", x, y, self.small_font, ACCENT if factions else MUTED
+        )
+        if not factions:
+            return self.draw_text("unknown to the powers", x, y, self.small_font, MUTED)
+        for faction in sorted(factions, key=lambda f: f.id):
+            axes = ", ".join(
+                f"{axis} {value:+.1f}"
+                for axis, value in sorted(faction.standing.items())
+                if value
+            )
+            for line in wrap_text(f"{faction.name} ({faction.mood}): {axes}", 42):
+                y = self.draw_text(line, x, y, self.small_font, TEXT)
+        legend = self.engine.legend_words(self.engine.state.player_soul_id, n=4)
+        if legend:
+            for line in wrap_text("Legend: " + ", ".join(legend), 42):
+                y = self.draw_text(line, x, y, self.small_font, MUTED)
+        empire = ledger.primary("empire")
+        if empire is not None and "defense" in empire.resources:
+            if self.engine.emperor_reachable():
+                text = "Empire defenses: BROKEN - the emperor is in reach"
+                color = ACCENT
+            else:
+                text = f"Empire defenses: {empire.resources['defense']}"
+                color = MUTED
+            for line in wrap_text(text, 42):
+                y = self.draw_text(line, x, y, self.small_font, color)
+        followers = self.engine.followers()
+        orgs = self.engine.state.faction_ledger.by_kind("player_org")
+        if followers or orgs:
+            parts = []
+            if followers:
+                parts.append(
+                    f"{len(followers)} follower{'s' if len(followers) != 1 else ''}"
+                )
+            if orgs:
+                parts.append(", ".join(org.name for org in orgs))
+            for line in wrap_text("Retinue: " + "; ".join(parts), 42):
+                y = self.draw_text(line, x, y, self.small_font, MUTED)
         return y
 
     def draw_log(self, x: int, y: int, height: int) -> None:

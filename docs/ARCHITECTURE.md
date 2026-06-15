@@ -305,6 +305,66 @@ env var.
 
 ---
 
+## Emergent world (deeds → legend → standing → simulation)
+
+The emergent-world systems (`docs/EMERGENT_WORLD_STRATEGY.md` / `EMERGENT_WORLD_IMPLEMENTATION.md`,
+Phases 0–F) turn what the player *does* into a world that reacts. The spine is deterministic;
+the LLM is used only where meaning is genuinely ambiguous, always with a deterministic
+fallback, and recorded at its apply point so replays are free.
+
+**The loop:** an action becomes a **Deed** → a declarative rules table (or, for ambiguous
+spell outcomes, the LLM interpreter) reads it into multi-axis **standing** shifts + **legend**
+tags → the daily **Simulator** tick applies them, spends Empire defenses toward the
+kill-emperor gate, mints **backlash** (crackdowns/resistance), and drifts every NPC's
+**bond** → the world *shows* it (rumors, wanted posters, consequence props, situation
+reports, followers). All new state is in `GameState`, surfaces in `summarize_state`, and
+reproduces under replay.
+
+### `wildmagic/deeds.py`
+`Deed` (the atom: type, magnitude, actor = player **soul** id, `place_key` = zone+depth,
+visibility/witnesses, proposed `standing_deltas`/`legend_tags`, `applied` flag for
+idempotency), `DeedLedger` (append-only + `compress()` into `StoryBeat`s), the bounded
+vocab (`DEED_TYPES`/`TARGET_TAGS`/`VISIBILITY`), and the **declarative `DEED_RULES`** table
++ `interpret_deed_rules` (one deed → different consequences on different axes; keyed by
+faction **role**, not literal id).
+
+### `wildmagic/factions.py`
+`Faction` (multidimensional `standing`, spendable `resources`, `mood`, `player_rank`,
+affiliations) and `FactionLedger` with **stable role queries** (`by_kind`/`ids_by_role`/
+`primary`) over `ROLE_TO_KINDS`, so the emergent systems target roles (empire bloc /
+resistance / player_org) and generalize to Phase C's full roster. `seed_phase0_factions`
+is the two-pole scaffold (kept minimal); never carried between runs.
+
+### `wildmagic/legend.py`
+`LegendLedger` — bounded-vocab (`LEGEND_VOCAB`) weighted legend tags per actor soul, the
+**mechanical** truth the simulator/dialogue/scores read; a prose mirror is written to the
+semantic ledger for prompts (the two-form split keeps the ledger's "engine never reads
+notes for outcomes" contract).
+
+### `wildmagic/bonds.py`
+`Bond` — every NPC's *personal* relationship to the player (loyalty/fear/admiration/
+resentment/ideology + `hidden_pressure` + `affiliations`), one of three orthogonal layers
+(combat faction / org membership / bond). `drift_bond` scores legend × traits × memory.
+
+### `wildmagic/deed_interpreter.py`
+The Phase-A.2 LLM provider that classifies *ambiguous* spell outcomes (raise-dead, raze,
+desecrate, atrocity) into the bounded deed vocabulary — consequences still come from the
+rules table. Provider stack (Ollama/Mock/Auto, `off`→None), a cheap candidate **gate** so
+ordinary spells make zero calls, a conservative deterministic **fallback**, and a verdict
+recorded on the wild-magic action record so replays reproduce the deed with no model call.
+
+### Engine integration (`engine.py`)
+`GameState` gains `deed_ledger`/`faction_ledger`/`legend_ledger`, `player_soul_id`, the
+day/night clock (derived from `turn`), `ticked_through_day`, `pending_backlash`. The daily
+**Simulator** is `_maybe_run_daily_tick` (fires once per in-game day at 05:00):
+`run_world_tick` (apply deeds → standing + legend + compress) · `_simulate_empire_pressure`
+(D9 kill-emperor gate) · `_simulate_backlash` (factions spend to act) · `_simulate_bonds`
+(bond drift + follower moments). `_on_enter_location` narrates on arrival (rumors,
+`_render_deed_consequences`, `_realize_backlash`). `camp_rest` and `found_organization` are
+the player levers.
+
+---
+
 ## Data layer
 
 ### `wildmagic/models.py`
@@ -440,15 +500,24 @@ main.py / cli.py
             ├── dialogue.py (NPC dialogue provider + resolution)
             ├── trade.py    (trade provider + resolution)
             ├── town_gen.py (town generation provider)
-            └── lore.py (dialogue promise extraction)
-                    ├── llm_client.py
-                    ├── llm_resolver.py
-                    └── prompts.py
+            ├── lore.py (dialogue promise extraction)
+            │       ├── llm_client.py
+            │       ├── llm_resolver.py
+            │       └── prompts.py
+            └── deed_interpreter.py (ambiguous-spell-outcome → deed; LLM + fallback)
+                    ├── deeds.py (DEED_RULES, vocab)
+                    ├── llm_client.py / llm_resolver.py / prompts.py
+
+Emergent-world leaves (imported by engine; import only stdlib + each other):
+    bonds.py
+    deeds.py    ←  deed_interpreter.py
+    factions.py
+    legend.py
 
 Shared leaves (imported by many, import nothing above them):
     models.py  ←  game_data.py  ←  templates.py
-                                ←  props.py
-                                ←  npc_quests.py
+       ↑ (bond)                 ←  props.py
+    bonds.py                    ←  npc_quests.py
     geometry.py
     determinism.py
     normalize.py

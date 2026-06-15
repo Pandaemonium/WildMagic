@@ -2578,6 +2578,7 @@ class _GenerationMixin:
             state.add_message(
                 f"You cross into new territory - the {state.zone_type} of zone ({new_zx}, {new_zy})."
             )
+        self._on_enter_location()
         return True
 
     def _save_current_zone(self) -> None:

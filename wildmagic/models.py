@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+from .bonds import Bond
+
 
 FLOOR = "."
 WALL = "#"
@@ -393,6 +395,29 @@ class NPCProfile:
     reward_item: str | None = None
     reward_qty: int = 0
     quest_completed: bool = False
+    # This NPC's personal relationship to the player (Phase F). Orthogonal to combat
+    # faction and to org membership; evolves from the player's legend, this NPC's traits,
+    # and their memories. See wildmagic/bonds.py.
+    bond: Bond = field(default_factory=Bond)
+
+    def bond_feeling(self) -> list[str]:
+        """The bond rendered as plain words for prompts/readouts — the math stays
+        invisible (strategy §5.3: surfaces as character, never approval bars)."""
+        bond = self.bond
+        words: list[str] = []
+        if bond.loyalty >= 50:
+            words.append("devoted to you")
+        elif bond.loyalty >= 20:
+            words.append("loyal to you")
+        if bond.admiration >= 40:
+            words.append("admires you")
+        if bond.ideology >= 40:
+            words.append("believes in your cause")
+        if bond.fear >= 40:
+            words.append("afraid of you")
+        if bond.resentment >= 40:
+            words.append("resents you")
+        return words
 
     def remember(self, text: str, limit: int = 12) -> None:
         self.memory.append(text)
@@ -412,6 +437,13 @@ class NPCProfile:
             "things_i_have_noticed": list(self.memory),
             "recent_conversation": list(self.conversation),
         }
+        # How I feel about you (Phase F) — so dialogue sounds like someone who admires,
+        # fears, or resents you, not a blank slate. Surfaced as words, never numbers.
+        feeling = self.bond_feeling()
+        if feeling:
+            context["how_i_feel_about_you"] = feeling
+        if self.bond.affiliations:
+            context["my_affiliations"] = list(self.bond.affiliations)
         if self.wares:
             context["wares_for_sale"] = dict(sorted(self.wares.items()))
         if self.wanted_item and not self.quest_completed:

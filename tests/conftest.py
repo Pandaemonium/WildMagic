@@ -25,6 +25,10 @@ def pytest_configure(config: pytest.Config) -> None:
         # reachable; force it off so the trim suite never fires real prop calls
         # in background threads. Tests that exercise it inject MockPropProvider.
         os.environ.setdefault("WILDMAGIC_PROPS_PROVIDER", "off")
+        # The deed interpreter (A.2) follows the wild-magic provider by default; force it
+        # off so the trim suite uses only the deterministic fallback (tests that exercise
+        # the LLM path inject MockDeedInterpreterProvider).
+        os.environ.setdefault("WILDMAGIC_DEEDS_PROVIDER", "off")
 
 
 def pytest_collection_modifyitems(
