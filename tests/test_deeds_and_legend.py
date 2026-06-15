@@ -44,6 +44,25 @@ def test_imperial_kill_splits_across_axes_and_earns_legend() -> None:
     assert "defiant" in engine.legend_words(engine.state.player_soul_id)
 
 
+def test_spark_kill_is_attributed_and_records_a_deed() -> None:
+    """A ranged standard spell (spark) must attribute the kill to the player's soul, so
+    it produces a deed exactly like a melee kill. Regression: spark/frost/item damage
+    once omitted ``source=player``, so the most common attack silently bypassed the whole
+    emergent loop (no deed, no standing, no legend)."""
+    engine = GameEngine(seed=7, scenario="test_chamber")
+    player = engine.state.player
+    player.mana = 10
+    foe = _spawn_imperial(engine, player.x + 1, player.y)
+    foe.hp = 1
+    assert engine.cast_standard_bolt()  # spark the nearest foe
+    assert not foe.alive
+    engine.run_world_tick()
+
+    empire = engine.state.faction_ledger.get("empire")
+    assert empire.standing_of("imperial_threat") > 0
+    assert "defiant" in engine.legend_words(engine.state.player_soul_id)
+
+
 def test_killing_civilians_costs_legitimacy_and_brands_a_butcher() -> None:
     engine = GameEngine(seed=7, scenario="test_chamber")
     player = engine.state.player

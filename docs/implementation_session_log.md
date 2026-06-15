@@ -240,3 +240,45 @@ _(none open)_
 |---|---|---|
 | `Deed` mutable instead of `frozen=True`. | Idempotency `applied` flag + `rumored` flag need mutation. | Low — both flags are write-once-ish and only touched by the simulator/legibility layer. |
 | No `StoryBeat`/`compress()` in Phase 0. | They belong to Phase A (causal compression); Phase 0 stays minimal. | None — additive later. |
+
+## CLI Playtest 2026-06-14 (Track A)
+
+Ran the whole Phase 0–F spine end-to-end via CLI + small real-engine drivers (real code
+paths only — teleport-to-foe + real `spark`/`rest`/zone-entry, no logic reimplemented).
+
+**Result: spine is sound.** Confirmed working: deeds→standing→legend, the kill-emperor
+pressure gate (defenses deplete one/day at threat 0.2), backlash (5 kills → threat 1.0 →
+patrol spent, mood `alarmed`, crackdown realizes on floor entry: "An Imperial patrol has
+tracked you here" + enforcer + rumor), the consequence renderer (witnessed kill → bloodstain
++ wanted poster on return, **persist across moves** — the set_dressing-overwrite fix holds),
+the **live LLM deed interpreter** (`--provider auto`: wild "raise the dead" → Ollama verdict
+`raised_dead` mag 0.6 → `uncanny` legend; audited, no technical failure), and bonds/orgs
+(found org → liberator legend → NPCs cross the follow line, believers pledge; `personal`
+memory multiplier shows as a day-9-vs-13 split). Replay round-trip: **Final summary matched:
+True**. Suite **324 passing** (added a spark-kill regression test).
+
+### Bug FIXED — ranged/standard offensive spells didn't attribute kills (high impact)
+`cast_standard_bolt` (spark), `cast_standard_frost` (frost), and the `damage_nearest` item
+effect called `damage_entity(...)` **without `source=player`**. `_record_kill_deed` gates on
+`_deed_attributed_to_player(source)`, so **kills via the most common ranged attack produced
+no deed at all** — no standing, no legend, no pressure, no backlash. The entire emergent loop
+was unreachable unless you killed everything in melee. Fixed by threading `source=player`
+(engine.py spark/frost; items.py `damage_nearest`). Deterministic + replay-safe (replay still
+matches). Left untouched (genuinely ambiguous, = the tracked indirect-attribution follow-up):
+environmental fire/poison tiles, DoT status ticks, and traps — those carry no owner yet.
+
+### FINDING (design, needs Mark) — bond differentiation is unwired
+The bond drift seam reads `NPCProfile.traits` against `_TRAIT_AFFINITY` (downtrodden/
+oppressed/rebel/poor/faithful_friend) and `_TRAIT_AVERSION` (loyalist/imperial/pious/devout/
+fearful) — but **no seeded NPC anywhere carries one of those traits** (their traits are
+open-ended flavor: "shrewd", "warm", "talkative", "hopeful", "quietly subversive"). So
+affinity=aversion=1.0 for everyone and **every NPC drifts identically** — a positive legend
+turns the whole town into maxed-out (100/100/100) devoted followers in lockstep. The
+documented emergence ("the same legend makes a rebel adore you and a loyalist fear you")
+cannot occur. The *mechanism* is correct; it just has no differentiated **input**.
+Recommended fix (deferred — it's a world-design call about who leans which way, and ties
+into the Phase C faction roster): seed each NPC with one disposition trait from the
+affinity/aversion vocab, distributed (some loyalists/pious, some downtrodden/rebel), derived
+from role + region (occupied frontier folk lean oppressed; garrison/clergy lean loyalist/
+pious). Until then, bonds work but are uniform. *No code changed for this — surfaced for a
+distribution decision.*

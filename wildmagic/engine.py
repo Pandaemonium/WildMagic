@@ -2732,7 +2732,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             self.state.add_message("No enemy is close enough for a spark bolt.")
             return False
         player.mana -= 2
-        self.damage_entity(target, 5, "spark")
+        self.damage_entity(target, 5, "spark", source=player)
         self.state.add_message(f"A tidy spark bolt hits {target.name}.")
         self.finish_player_turn()
         return True
@@ -2749,7 +2749,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             self.state.add_message("No enemy is close enough for a frost shard.")
             return False
         player.mana -= 2
-        self.damage_entity(target, 4, "frost")
+        self.damage_entity(target, 4, "frost", source=player)
         if target.hp > 0:
             target.statuses["slowed"] = max(
                 status_duration(target.statuses.get("slowed")), 2
