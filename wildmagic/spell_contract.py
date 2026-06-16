@@ -37,6 +37,7 @@ SUPPORTED_EFFECTS = {
     "set_flag",
     "schedule_event",
     "create_trigger",
+    "create_persistent_effect",
     "create_promise",
     "add_curse",
     "message",
@@ -295,6 +296,15 @@ def validate_resolution(data: dict[str, Any]) -> str | None:
             trigger_effects = effect.get("effects")
             if not isinstance(trigger_effects, list) or not trigger_effects:
                 return "create_trigger effects must be a non-empty list"
+        if effect_type == "create_persistent_effect":
+            # A sympathetic link builds its own echo effects from source/sink, so it is
+            # exempt; every other persistent effect needs a non-empty effects list (like
+            # create_trigger) or it would attach nothing.
+            kind = str(effect.get("kind") or "").strip().lower().replace(" ", "_")
+            if kind not in {"sympathetic_link", "sympathetic", "link", "bond"}:
+                pe_effects = effect.get("effects") or effect.get("effect")
+                if not isinstance(pe_effects, list) or not pe_effects:
+                    return "create_persistent_effect effects must be a non-empty list"
     for index, cost in enumerate(costs):
         if not isinstance(cost, dict):
             return f"cost {index} must be an object"

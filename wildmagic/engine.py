@@ -50,7 +50,12 @@ from .semantics import (
     place_anchor,
     WORLD_ANCHOR,
 )
-from .bonds import DRIFT_THRESHOLD, drift_bond
+from .bonds import (
+    DRIFT_THRESHOLD,
+    derive_disposition,
+    disposition_inclination,
+    drift_bond,
+)
 from .deeds import Deed, DeedLedger, interpret_deed_rules
 from .factions import (
     EMPIRE_PATROLS_START,
@@ -77,12 +82,14 @@ from .regions import Region, get_region
 from .config import get_props_provider, ollama_host
 from .llm_client import ollama_reachable
 from .promises import (
+    DIRECTION_NAMES,
     PROMISE_LEDGER_LIMIT,
     PROMISE_RESERVATION_LIMIT,
     PromiseReservation,
     Objective,
     QuestLogEntry,
     Reward,
+    SpatialHint,
     WorldPromise,
     bind_promise,
     journal_entry,
@@ -648,13 +655,21 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             reward_item_key = reward_item.strip().lower()
             npc_wares[reward_item_key] = npc_wares.get(reward_item_key, 0) + reward_qty
 
+        # Derive a disposition (rebel/loyalist/pious/downtrodden) from role/traits/tags so the
+        # bond system differentiates: the same legend makes a rebel adore you and a loyalist
+        # fear you (content workstream B). Appended to the flavor traits; None for the truly
+        # uncommitted (they drift at base rate).
+        profile_traits = list(traits or [])
+        disposition = derive_disposition(role, profile_traits, npc_tags)
+        if disposition is not None and disposition not in profile_traits:
+            profile_traits.append(disposition)
         self.state.npc_profiles[entity.id] = NPCProfile(
             entity_id=entity.id,
             name=name,
             role=role,
             backstory=backstory,
             appearance=appearance,
-            traits=list(traits or []),
+            traits=profile_traits,
             wares=npc_wares,
             wanted_item=wanted_item,
             wanted_qty=wanted_qty,
@@ -699,6 +714,30 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
     #: How close a creature must be (Chebyshev tiles) to witness a deed. A Phase-0
     #: stand-in for FOV + NPC perception, which Phase A.1 substitutes.
     WITNESS_RADIUS = 8
+    #: How close a civilian must be to a slain imperial to read the kill as *defending*
+    #: them (the imperial was looming over them, not a distant onlooker). Deliberately tight.
+    DEFEND_RADIUS = 2
+
+    def _endangered_civilian_near(self, x: int, y: int) -> Entity | None:
+        """The nearest living non-combatant townsperson close to (x, y) — used to read a kill
+        of an imperial standing over the common folk as *defending* them. A civilian is a
+        talkable NPC who isn't part of the Empire and isn't already your sworn follower
+        (rescuing your own retinue isn't a fresh act of protection). Tight radius: the
+        imperial had to be right on top of them, not merely somewhere in sight."""
+        best: Entity | None = None
+        best_dist = self.DEFEND_RADIUS + 1
+        for entity in self.state.entities.values():
+            if entity.kind != "npc" or not entity.alive:
+                continue
+            if "empire" in entity.tags:
+                continue
+            profile = self.state.npc_profiles.get(entity.id)
+            if profile is not None and "follower" in profile.traits:
+                continue
+            dist = max(abs(entity.x - x), abs(entity.y - y))
+            if dist <= self.DEFEND_RADIUS and dist < best_dist:
+                best, best_dist = entity, dist
+        return best
 
     def _deed_witnesses(self, x: int, y: int, exclude: set[str]) -> list[Entity]:
         """Living NPCs/actors near enough to have seen something happen at (x, y)."""
@@ -819,6 +858,19 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                 target_tags=["empire"],
                 evidence_tags=["bloodstain"],
             )
+            # Cutting down an imperial who stood over the common folk *also* reads as
+            # defending them (one act, two deeds — the rules table sorts the consequences).
+            # This is how the "people's champion" / protector legend arises in play.
+            bystander = self._endangered_civilian_near(victim.x, victim.y)
+            if bystander is not None:
+                self.record_deed(
+                    "defended_townsfolk",
+                    magnitude=0.2,
+                    summary=f"stood between the Empire and {bystander.name}",
+                    at=(victim.x, victim.y),
+                    target_tags=["civilian"],
+                    evidence_tags=["survivor_testimony"],
+                )
         elif victim.kind == "npc" or "civilian" in victim.tags:
             self.record_deed(
                 "killed_civilians",
@@ -931,6 +983,104 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             profile.remember("I left your side; I could not follow what you became.")
             if "follower" in profile.traits:
                 profile.traits.remove("follower")
+
+    def _adjacent_bound_captive(self) -> Entity | None:
+        """A bound captive on a tile adjacent (8-dir) to the player — someone to free.
+        Deterministic pick (lowest id) when more than one is in reach."""
+        player = self.state.player
+        best: Entity | None = None
+        for entity in self.state.entities.values():
+            if entity.kind != "npc" or not entity.alive or "bound" not in entity.tags:
+                continue
+            if max(abs(entity.x - player.x), abs(entity.y - player.y)) <= 1:
+                if best is None or entity.id < best.id:
+                    best = entity
+        return best
+
+    def free_captive(self) -> bool:
+        """Free a bound captive on an adjacent tile (content workstream A). A *general* act,
+        not a scripted event: it records a `freed_captive` deed (→ liberator legend +
+        resistance gratitude), turns the freed prisoner to your side, and seeds a grateful
+        bond. Whether that gratitude deepens into *following* you is left to the captive's
+        nature (disposition) and the legend you go on to earn — the daily bond tick decides,
+        so some join and some simply thank you and go. A captive who happens to know where
+        something lies may, in thanks, tell you (a real cache, seeded sparingly)."""
+        if self.state.game_over:
+            return False
+        captive = self._adjacent_bound_captive()
+        if captive is None:
+            self.state.add_message("There is no one bound here to free.")
+            return False
+        captive.tags.discard("bound")
+        captive.tags.add("freed")
+        captive.faction = "ally"  # freed, and grateful enough to take your side
+        self.record_deed(
+            "freed_captive",
+            magnitude=0.4,
+            summary=f"struck the chains from {captive.name}",
+            at=(captive.x, captive.y),
+            target_tags=["civilian", "captive"],
+            evidence_tags=["survivor_testimony"],
+        )
+        self.state.add_message(
+            f"You break {captive.name} free. They stagger up, blinking at the light."
+        )
+        profile = self.state.npc_profiles.get(captive.id)
+        if profile is not None:
+            # Gratitude seeds the bond, scaled by the captive's *nature*: one whose
+            # disposition inclines to your cause tips from thanks into following; a wary or
+            # loyal-hearted one merely thanks you and keeps their distance. So *who* joins
+            # emerges from disposition, not a hard-coded flag (§5.3).
+            bond = profile.bond
+            lean = disposition_inclination(profile.traits)
+            loyalty_seed = {"affinity": 55.0, "neutral": 28.0, "aversion": 6.0}[lean]
+            ideology_seed = {"affinity": 50.0, "neutral": 12.0, "aversion": 4.0}[lean]
+            bond.loyalty = min(100.0, bond.loyalty + loyalty_seed)
+            bond.admiration = min(100.0, bond.admiration + loyalty_seed * 0.6)
+            bond.ideology = min(100.0, bond.ideology + ideology_seed)
+            profile.remember("You freed me from the Empire's cage. I won't forget it.")
+            self._reveal_captive_lead(captive, profile)
+        self.finish_player_turn()
+        return True
+
+    def _reveal_captive_lead(self, captive: Entity, profile: Any) -> None:
+        """A freed captive who knows where a cache lies shares it in gratitude — a real item
+        already placed in the world, pointed to by a rough direction in the journal. Organic
+        and optional: most captives carry no such secret (leads are seeded sparingly at
+        generation, so it lands sometimes and whiffs others)."""
+        lead = profile.lead
+        if not lead:
+            return
+        item = str(lead.get("item") or "something of worth")
+        x, y = int(lead.get("x", captive.x)), int(lead.get("y", captive.y))
+        player = self.state.player
+        direction = ((x > player.x) - (x < player.x), (y > player.y) - (y < player.y))
+        compass = DIRECTION_NAMES.get(direction, "near")
+        where = "close by" if direction == (0, 0) else f"to the {compass}"
+        self.state.add_message(
+            f'{captive.name} leans close: "I owe you my life. Hear this - there is '
+            f'{item} hidden {where}. Go - it is yours."'
+        )
+        self.state.promises.append(
+            WorldPromise(
+                id=f"lead_{captive.id}_{normalize_id(item)}",
+                kind="rumor",
+                subject=item,
+                text=(
+                    f"{captive.name}, freed from the cells, swears {item} lies hidden "
+                    f"{where} of where they were held."
+                ),
+                tags=["lead", "cache", "item"],
+                source=f"dialogue:{captive.name}",
+                source_turn=self.state.turn,
+                origin_zone=(self.state.zone_x, self.state.zone_y),
+                salience=4,
+                confidence=0.8,
+                claimed_space=SpatialHint(mode="direction", direction=direction),
+                status="unverified",
+            )
+        )
+        profile.lead = None  # told once
 
     def found_organization(self, name: str) -> Faction:
         """Raise a player-founded organization — a guild, warband, cult, court (Phase F).
@@ -3298,9 +3448,26 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         elif event_type == "curse":
             self._apply_cost({"type": "curse", **event})
 
+    def _persistent_anchor_alive(self, trigger: dict[str, Any]) -> bool:
+        """An anchored persistent effect (or sympathetic link) ends when the thing it is
+        bound to -- or the other end of a link -- is dead or gone. Free-floating triggers
+        (no anchor) are unaffected, so ordinary create_trigger wards are untouched."""
+        for key in ("anchor", "link_partner"):
+            ref = trigger.get(key)
+            if not ref:
+                continue
+            entity = self.state.entities.get(str(ref))
+            if entity is None or not entity.alive:
+                return False
+        return True
+
     def _tick_triggers(self) -> None:
         remaining: list[dict[str, Any]] = []
         for trigger in self.state.triggers:
+            if not self._persistent_anchor_alive(trigger):
+                name = str(trigger.get("name") or "A waiting spell").strip()
+                self.state.add_message(f"{name} unravels, its anchor gone.")
+                continue
             expires_turn = trigger.get("expires_turn")
             if expires_turn is not None:
                 if self.state.turn <= clamp_int(expires_turn, 0, 999999):
@@ -3336,11 +3503,23 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             "amount": amount,
             "damage_type": damage_type,
         }
+        # Defender side: hooks keyed on who WAS damaged (matched against event["target"]).
         names = ["on_damaged", "on_actor_damaged"]
         if target.id == self.state.player_id:
             names.extend(["on_player_damaged", "on_player_hit"])
         elif target.faction == "enemy":
             names.extend(["on_enemy_damaged", "on_enemy_hit"])
+        # Attacker side: hooks keyed on who DEALT the damage (matched against event["source"]
+        # by a trigger whose `match` is "source"). Only fire when there is an attacker, so a
+        # trap or hazard tile never trips a "when I strike" effect. This is the substrate a
+        # later item enchantment reuses: when melee carries the weapon used, add an item-keyed
+        # name here and let the trigger match:"weapon".
+        if isinstance(source, Entity):
+            names.append("on_deal_damage")
+            if source.id == self.state.player_id:
+                names.append("on_player_deal_damage")
+            elif source.faction == "enemy":
+                names.append("on_enemy_deal_damage")
         self._fire_triggers(names, event)
 
     def _fire_death_triggers(
@@ -3379,9 +3558,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             trigger_name = normalize_trigger_name(
                 str(trigger.get("trigger") or trigger.get("on") or "")
             )
-            if trigger_name not in wanted or not self._trigger_matches_target(
-                trigger, event
-            ):
+            if trigger_name not in wanted or not self._trigger_matches(trigger, event):
                 remaining.append(trigger)
                 continue
             name = str(trigger.get("name") or "A waiting spell").strip()
@@ -3404,27 +3581,44 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         self.state.triggers = remaining + self.state.triggers
         return messages
 
-    def _trigger_matches_target(
-        self, trigger: dict[str, Any], event: dict[str, Any]
-    ) -> bool:
+    def _trigger_matches(self, trigger: dict[str, Any], event: dict[str, Any]) -> bool:
+        """Does this trigger's criterion match the firing event?
+
+        A trigger's `target` is the criterion (player / an id / a faction / a tag / "any").
+        Its `match` field names WHICH role of the event the criterion is compared against:
+        "target" (the entity that was damaged -- the default, defender side) or "source" (the
+        entity that dealt the damage -- attacker side, e.g. "a blade that bleeds whatever it
+        strikes"). The role is a plain `event.get(role)` lookup, so a future damage event that
+        also carries a "weapon"/"item" role (once items have instances) can be matched the same
+        way -- match:"weapon" with no other change here. See _fire_damage_triggers."""
+        role = normalize_id(str(trigger.get("match") or "target"))
+        if role not in {"target", "source"}:
+            role = "target"
+        subject = event.get(role)
         raw_target = trigger.get("target")
         if raw_target in {None, "", "any"}:
+            # A source-side ward needs an attacker to ride; environmental damage (a trap, a
+            # poison tile) has source=None and must not fire it. Target-side keeps the old
+            # permissive default so non-damage events still fire by name alone.
+            if role == "source":
+                return isinstance(subject, Entity)
             return True
-        target = event.get("target")
-        source = event.get("source")
-        if not isinstance(target, Entity):
-            return True
+        if not isinstance(subject, Entity):
+            # Target role keeps the old permissive default (a non-damage event with no real
+            # target still fires by name alone); a source-side criterion cannot match without
+            # an attacker in the event.
+            return role == "target"
         trigger_target = normalize_id(str(raw_target))
         if trigger_target in {"player", "self", "you"}:
-            return target.id == self.state.player_id
+            return subject.id == self.state.player_id
         if trigger_target in {"enemy", "nearest_enemy", "all_enemies", "enemies"}:
-            return target.faction == "enemy"
+            return subject.faction == "enemy"
         if trigger_target in {"source", "attacker", "caster"}:
-            return isinstance(source, Entity)
+            return isinstance(event.get("source"), Entity)
         return (
-            target.id == trigger_target
-            or trigger_target in target.tags
-            or trigger_target in normalize_id(target.name).split("_")
+            subject.id == trigger_target
+            or trigger_target in subject.tags
+            or trigger_target in normalize_id(subject.name).split("_")
         )
 
     def _fill_trigger_effect_defaults(
@@ -3444,6 +3638,27 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             effect["origin"] = target.id
         elif effect.get("origin") == "trigger_source" and isinstance(source, Entity):
             effect["origin"] = source.id
+
+        # Sympathetic/persistent effects echo the firing event's magnitude: amount of
+        # "trigger_amount" copies the damage just dealt (scaled by an optional amount_ratio),
+        # and "trigger_damage_type" copies its damage type. This is what makes "whatever
+        # wounds me wounds him" land the same-sized wound. amount_ratio never reaches a real
+        # handler -- it is consumed here.
+        if effect.get("amount") == "trigger_amount":
+            base = event.get("amount")
+            ratio = effect.pop("amount_ratio", 1)
+            if isinstance(base, (int, float)):
+                try:
+                    scaled = int(round(float(base) * float(ratio)))
+                except (TypeError, ValueError):
+                    scaled = int(base)
+                effect["amount"] = max(1, scaled)
+            else:
+                effect.pop("amount", None)
+        else:
+            effect.pop("amount_ratio", None)
+        if effect.get("damage_type") == "trigger_damage_type":
+            effect["damage_type"] = str(event.get("damage_type") or "arcane")
 
         # Disciplined troops hold their post rather than break formation to wander.
 

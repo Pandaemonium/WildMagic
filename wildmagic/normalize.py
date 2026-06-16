@@ -75,17 +75,51 @@ def normalize_trigger_name(value: str) -> str:
         "next_spell": "on_next_spell",
         "on_spell": "on_next_spell",
         "when_i_cast": "on_next_spell",
+        # Explicitly-player phrasings stay scoped to the player.
         "player_hit": "on_player_hit",
-        "when_hit": "on_player_hit",
-        "on_hit": "on_player_hit",
-        "on_take_damage": "on_player_hit",
-        "on_takes_damage": "on_player_hit",
-        "on_receive_damage": "on_player_hit",
-        "on_receives_damage": "on_player_hit",
+        "on_player_hit": "on_player_hit",
         "on_player_takes_damage": "on_player_hit",
+        "when_i_am_hit": "on_player_hit",
         "player_damaged": "on_player_damaged",
+        # Generic "was struck / took damage" with NO subject is universal: it fires for any
+        # entity (the engine always fires `on_damaged`, even for allies and NPCs, which have
+        # no faction-specific hook) and is scoped by the trigger's `target` -- the player, an
+        # ally/enemy id, a tag, or "any". This is what lets an on-hit ward watch an ally, a
+        # summon, or one enemy fighting another, not only the player. NB: this is the
+        # DEFENDER side ("when X is struck"); an attacker-side "when X strikes" hook does not
+        # exist yet (it needs source-matching; tracked with the deferred item work).
+        "on_hit": "on_damaged",
+        "when_hit": "on_damaged",
+        "on_struck": "on_damaged",
+        "when_struck": "on_damaged",
+        "on_take_damage": "on_damaged",
+        "on_takes_damage": "on_damaged",
+        "on_receive_damage": "on_damaged",
+        "on_receives_damage": "on_damaged",
+        "on_hurt": "on_damaged",
+        "on_wounded": "on_damaged",
         "on_damage": "on_damaged",
         "on_damaged": "on_damaged",
+        # Attacker side ("when X deals a hit / strikes / lands a blow") -> on_deal_damage,
+        # matched against the event's SOURCE (the attacker), so an effect can ride the blow an
+        # entity lands: a blade that bleeds whatever its wielder strikes. The mirror of the
+        # defender-side "on_hit" above.
+        "on_deal_damage": "on_deal_damage",
+        "on_deals_damage": "on_deal_damage",
+        "on_dealing_damage": "on_deal_damage",
+        "on_dealt_damage": "on_deal_damage",
+        "on_strike": "on_deal_damage",
+        "on_strikes": "on_deal_damage",
+        "when_strike": "on_deal_damage",
+        "when_i_strike": "on_deal_damage",
+        "when_it_strikes": "on_deal_damage",
+        "on_attack": "on_deal_damage",
+        "on_attacks": "on_deal_damage",
+        "on_attacking": "on_deal_damage",
+        "on_hit_target": "on_deal_damage",
+        "on_lands_a_hit": "on_deal_damage",
+        "on_landing_a_hit": "on_deal_damage",
+        "on_melee": "on_deal_damage",
         "enemy_hit": "on_enemy_hit",
         "enemy_damaged": "on_enemy_damaged",
         "enemy_death": "on_enemy_death",

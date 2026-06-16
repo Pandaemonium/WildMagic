@@ -811,6 +811,132 @@ _MEMORY_EDIT = CapabilityCard(
     required_context=("target_memories",),
 )
 
+_SYMPATHETIC_LINK = CapabilityCard(
+    name="sympathetic_link",
+    triggers=(
+        "sympath",
+        "bind the",
+        "bind their",
+        "bound to",
+        "link the",
+        "link their",
+        "tie their",
+        "tether",
+        "share the pain",
+        "share its pain",
+        "share every wound",
+        "whatever wounds",
+        "whatever hurts",
+        "what wounds",
+        "wounds me wounds",
+        "hurts me hurts",
+        "feel the",
+        "feel its",
+        "suffer what",
+        "the same wounds",
+        "heartbeat",
+        "voodoo",
+        "the doll",
+    ),
+    embed_description=(
+        "Binding two creatures so harm to one echoes onto the other -- whatever wounds me "
+        "wounds him, the goblin's pain bound to the ogre, a voodoo doll that suffers what "
+        "its twin suffers. An ongoing relationship with a direction, a ratio, and a life of "
+        "its own, not a one-shot hit."
+    ),
+    index_line="sympathetic_link -- bind two creatures so damage to one echoes onto the other (one-way or mutual)",
+    effect_types=("create_persistent_effect",),
+    prompt_block=(
+        "- create_persistent_effect with kind:'sympathetic_link' binds two creatures so the "
+        "actual damage one takes is echoed onto the other while the link lasts. Fields: "
+        "source (the creature whose wounds are felt -- an id, 'player', or 'nearest_enemy'), "
+        "sink (the creature that suffers the echo), ratio (0.1-2.0, default 1.0 -- use 0.5 for "
+        "'half his pain'), mutual (true to bind BOTH directions), duration (turns; or "
+        "'permanent' at heavy cost). source and sink must be two DIFFERENT living creatures. "
+        "The link ends if either dies. Use this for 'whatever wounds me wounds him', 'bind the "
+        "goblin's pain to the ogre', 'tie their heartbeats together'. Binding a tough enemy's "
+        "pain onto a weak one (or onto yourself) is strong -- pair it with a real cost."
+    ),
+    examples=(
+        '{"accepted": true, "severity": "moderate", "outcome_text": "A red thread spins between you and the brute; your hurts will be his now.", "effects": [{"type": "create_persistent_effect", "kind": "sympathetic_link", "source": "player", "sink": "nearest_enemy", "ratio": 1.0, "duration": 8}], "costs": [{"type": "mana", "amount": 4}], "rejected_reason": null}',
+        '{"accepted": true, "severity": "major", "outcome_text": "You knot the goblin\'s nerves into the ogre\'s; one flinch will travel both ways.", "effects": [{"type": "create_persistent_effect", "kind": "sympathetic_link", "source": "goblin_3", "sink": "ogre_1", "mutual": true, "duration": 10}], "costs": [{"type": "mana", "amount": 5}, {"type": "curse", "id": "wild_debt", "name": "Wild Debt", "description": "The wild expects repayment."}], "rejected_reason": null}',
+    ),
+    cost_hint="moderate-major; mana, plus a curse for mutual or long-lived links",
+)
+
+_PERSISTENT_EFFECT = CapabilityCard(
+    name="persistent_effect",
+    triggers=(
+        "lingering",
+        "ongoing",
+        "festering",
+        "haunt",
+        "haunted",
+        "wreathe",
+        "bound curse",
+        "lasting hex",
+        "hex the",
+        "hex on",
+        "ward on",
+        "blessing on",
+        "anyone who strikes",
+        "anyone who touches",
+        "anyone who hits",
+        "whoever strikes",
+        "whoever touches",
+        "keeps bleeding",
+        "stays burning",
+        "persists",
+        "persistent",
+        "anomaly",
+        # attacker side -- the wielder's blows carry the effect
+        "bleed whatever",
+        "bleed everything",
+        "my blows",
+        "my strikes",
+        "every blow i",
+        "whatever i strike",
+        "whatever i hit",
+        "enemies it strikes",
+        "envenom my",
+        "make my blade",
+        "make my sword",
+        "make my dagger",
+        "make my fists",
+    ),
+    embed_description=(
+        "Attaching an ongoing magical effect to a specific creature or ward that fires on a "
+        "hook and lives on that creature until it dies or the effect runs out. Two sides: a "
+        "DEFENDER ward (a festering hex that poisons whoever strikes the ogre, a thornmail that "
+        "burns anyone who hits a charmed ally), and an ATTACKER rider (the wielder's own blows "
+        "carry an effect -- 'a blade that bleeds whatever I strike', envenomed fists)."
+    ),
+    index_line="persistent_effect -- bind an ongoing effect to a creature: a ward when it is struck, or a rider on the blows it lands",
+    effect_types=("create_persistent_effect",),
+    prompt_block=(
+        "- create_persistent_effect anchors an ongoing effect to a CONCRETE creature so it "
+        "fires for as long as that creature lives. Fields: anchor (an id, 'player', "
+        "'nearest_enemy', or an ally/summon id), hook, effects (a non-empty list of normal "
+        "effects to fire), charges, duration. Two hooks:\n"
+        "  * DEFENDER -- hook 'on_hit': fires when the anchor is STRUCK (by anyone). Effects "
+        "target 'trigger_source' to hit the attacker. Use for 'curse the ogre so anyone who "
+        "strikes it rots', 'ward my ally so attackers are burned'.\n"
+        "  * ATTACKER -- hook 'on_strike': fires when the anchor LANDS a blow. Effects target "
+        "'trigger_target' to hit the victim. Use for 'make my blade bleed whatever I strike', "
+        "'envenom my fists' -- anchor 'player' (or an ally id) and ride their attacks.\n"
+        "The anchor can be ANY creature, not only the player. Distinct from create_trigger: "
+        "this is BOUND to a creature and ends when it dies. Item-bound enchantments are NOT "
+        "supported yet -- for 'my dagger bleeds what it strikes', anchor the WIELDER with an "
+        "'on_strike' rider rather than the weapon."
+    ),
+    examples=(
+        '{"accepted": true, "severity": "moderate", "outcome_text": "A greasy hex clings to the ogre; the next hands to strike it will blister.", "effects": [{"type": "create_persistent_effect", "kind": "persistent_effect", "anchor": "nearest_enemy", "hook": "on_hit", "name": "blistering hex", "duration": 6, "effects": [{"type": "add_status", "target": "trigger_source", "status": "poisoned", "duration": 3}]}], "costs": [{"type": "mana", "amount": 4}], "rejected_reason": null}',
+        '{"accepted": true, "severity": "moderate", "outcome_text": "Your knuckles glisten with a black sheen; the next thing you hit will bleed for it.", "effects": [{"type": "create_persistent_effect", "kind": "persistent_effect", "anchor": "player", "hook": "on_strike", "name": "envenomed blows", "duration": 6, "effects": [{"type": "add_status", "target": "trigger_target", "status": "bleeding", "duration": 3}]}], "costs": [{"type": "mana", "amount": 4}], "rejected_reason": null}',
+    ),
+    cost_hint="moderate; mana, sometimes a curse for a lasting bound effect",
+    common_combos=("sympathetic_link",),
+)
+
 
 CAPABILITY_CARDS: tuple[CapabilityCard, ...] = (
     _CONJURE_CREATURE,
@@ -826,6 +952,8 @@ CAPABILITY_CARDS: tuple[CapabilityCard, ...] = (
     _POSSESSION,
     _STRUCTURE_ANIMATION,
     _MEMORY_EDIT,
+    _SYMPATHETIC_LINK,
+    _PERSISTENT_EFFECT,
 )
 
 
