@@ -419,3 +419,9 @@ value (wild-magic/deed-interpreter/canon LLM paths) is mostly graceful/tuning, n
   dawn` itself — a deliberate coverage action so backlash/bonds/pressure/deed-application
   actually run (and can be bug-checked). Ran pre-commit (ruff + ruff-format): fixed 3 lint
   issues in the new test (unused var, ambiguous `l`); all hooks pass. 334 pass.
+- **Loop ended early by Mark after cycle 4** (cycle 5 launched then killed). **Net result of
+  the soak: zero engine bugs across ~1,800 agent steps / 4 cycles** (0 tier-1, 0 parse/cast/
+  canon failures, no game glitches). All findings were autoplay-agent *navigation/coverage*
+  limitations, each fixed: pathfinding hint, unreachable-fallback fix, physical stall-redirect,
+  and harness auto-rest (to exercise the daily Simulator). Suite **334 passing**, pre-commit
+  clean. The captive feature works in live autoplay (freed captives → allies → fought).
