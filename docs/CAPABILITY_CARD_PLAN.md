@@ -44,8 +44,9 @@ been **removed**. A coverage test guards that core + cards still cover every eff
 
 ## 2. Live cards (built, engine-backed)
 
-Thirteen cards in `CAPABILITY_CARDS`, content lifted from the old monolith (plus the three
-promoted 2026-06-13 and `disfigure` added 2026-06-14).
+Fifteen cards in `CAPABILITY_CARDS`, content lifted from the old monolith (plus the three
+promoted 2026-06-13, `disfigure` added 2026-06-14, and `sympathetic_link` + `persistent_effect`
+promoted 2026-06-16).
 
 | Card | Unlocks (effect types) | Carved from (compendium / monolith) | Common combos |
 |---|---|---|---|
@@ -62,11 +63,56 @@ promoted 2026-06-13 and `disfigure` added 2026-06-14).
 | `possession` | `possess` | "take over the guard", "see through the eyes of", "ride the beast" | — |
 | `memory_edit` | `edit_memory` (NEW handler) | "make the nearest enemy forget me", "plant a false memory", "convince the guard…" | `faction_charm` |
 | `structure_animation` | `animate_object` (NEW handler) | "make the brass door angry", "the statue steps down", "persuade the door to bite" | `conjure_creature` |
+| `sympathetic_link` | `create_persistent_effect` (`kind: "sympathetic_link"`) | "whatever wounds me wounds him", "bind the goblin's pain to the ogre", "tie their heartbeats together" | `persistent_effect` |
+| `persistent_effect` | `create_persistent_effect` | "hex the ogre so anyone who strikes it rots", "ward my ally so attackers are burned", "make my blade bleed whatever I strike" | `sympathetic_link` |
 
 The last three were promoted from planned (2026-06-13): `possess` already had an engine
 handler; `edit_memory` (edits the NPC's `NPCProfile.memory`; forgetting the caster also
 calms a hostile NPC) and `animate_object` (consumes a prop, spawns an actor in its place)
 got new handlers in `effects.py`.
+
+**`sympathetic_link` + `persistent_effect` (added 2026-06-16)** share one new effect,
+`create_persistent_effect` — an *anchored trigger*. Rather than build a third persistence
+system, it reuses the existing trigger store (`GameState.triggers`, `_fire_triggers`,
+`_tick_triggers`, save/context): a persistent effect is an ordinary trigger dict plus
+`kind`, `anchor` (the entity it is bound to), and — for links — `link_partner`. Two small
+engine additions make it work: `_fill_trigger_effect_defaults` now echoes the firing event's
+magnitude (`amount: "trigger_amount"` × optional `amount_ratio`, `damage_type:
+"trigger_damage_type"`), which is what lets a link land the *same-sized* wound; and
+`_tick_triggers` prunes an anchored effect when its anchor (or either end of a link) dies.
+`sympathetic_link` echoes a creature's actual damage onto a linked one (one-way or
+`mutual`, scaled by `ratio`); `persistent_effect` binds a ward/rider to a creature with two
+sides — **defender** (`on_hit`: when the anchor is struck, afflict `trigger_source`, the
+attacker) and **attacker** (`on_strike`: when the anchor lands a blow, afflict
+`trigger_target`, the victim).
+
+**Hook taxonomy: who vs. what (2026-06-16).** Damage hooks fire by the side they watch, and
+"who" is a `target`/`match` filter, never baked into the hook name:
+- *Defender side.* `normalize_trigger_name` had mapped `on_hit`/`when_hit`/`on_take_damage`
+  to the player-only `on_player_hit`, so a ward on an ally — or one enemy striking another —
+  silently never fired (only player and enemy factions get a faction-specific damage hook;
+  allies/NPCs get only `on_damaged`). Those generic phrasings now map to the *universal*
+  `on_damaged`, scoped by the trigger's `target`, so an on-hit ward works on any anchor. Only
+  *explicitly-player* phrasings (`on_player_hit`, `when_i_am_hit`) stay player-scoped, and a
+  free-floating reaction ward with no named subject defaults its target to the caster (so
+  "lash back when I'm hit" never fires for an ally's blow).
+- *Attacker side (source-matching).* `_fire_damage_triggers` now also fires `on_deal_damage`
+  (+ faction variants) keyed on the **source** of the blow, but only when there is an
+  attacker (a trap or hazard tile never trips a "when I strike" effect). A trigger's new
+  `match` field selects which event role its criterion is checked against — `"target"`
+  (defender, default) or `"source"` (attacker) — resolved generically as `event.get(role)`
+  in `_trigger_matches` (the renamed `_trigger_matches_target`). `on_strike`/`on_attack`/… →
+  `on_deal_damage`; the handler infers `match: "source"` from the hook. This is the
+  **substrate the deferred item enchantment reuses**: it is anchored on the wielding
+  *character* for now, but when melee carries the weapon used, `_fire_damage_triggers` adds
+  an item-keyed name and a trigger matches `match: "weapon"` against `event["weapon"]` — no
+  change to the matcher.
+
+Re-entrancy is already safe:
+`_fire_triggers` empties the store while firing, so an echo's own damage cannot re-fire the
+link — mutual links resolve in a single hop with no double-count. **Item-bound enchantment
+is deliberately NOT built** (see §3): inventory is `dict[name→count]` and equipment slots
+hold name strings, so there is no item instance to anchor to.
 
 **`disfigure` (added 2026-06-14)** is a targeted-maiming card: it leaves a creature alive
 but broken in a specific way, mapping body-part flavor onto the matching status (legs→`rooted`,
@@ -103,9 +149,7 @@ mechanic to land the intent on. Each needs a new effect handler (and usually a n
 | `gravity_control`     | `set_gravity` | "levitate the brute off the floor", "pin him under his own weight", "reverse gravity in the hall", "make it feather-light" | — | **Sketched in `PLANNED_CARDS` (2026-06-14).** Genuinely new: a *standing* field, unlike one-shot `push`/`pull`. Reuses the aura tick. Modes: levitate / pin-crush / lighten / reverse. Strong control — price sustained and region fields heavily. |
 | `portal_gates`        | `create_portal` | "rip open a portal back to the entrance", "an escape hole through the wall", "a linked doorway to the room I saw" | `known_locations` | **Sketched in `PLANNED_CARDS` (2026-06-14).** A *persistent, repeatable* linked doorway, unlike one-shot `teleport`. Implementation: a tile-pair that teleports on entry. Stronger than teleport — never open onto an unreached quest gate; cost long/far gates. |
 | `plant_growth`        | *(none — composes core `create_tiles` + `area_status` + `damage`/`conjure_item`)* | "ensnaring vines erupt around the goblin", "a wall of thorns", "roots crack the floor", "sprout healing fruit" | — | **Sketched in `PLANNED_CARDS` (2026-06-14).** A `barrier_shaping`-style *composition-guidance* card needing no new effect — entangle via `rooted`/`webbed`, block via thicket tiles, cut via `bleeding`. Cheapest of the three; could promote to live as soon as a thicket tile and the prompt block are settled. |
-| `persistent_effect` | `create_persistent_effect` | "make my dagger bleed enemies it strikes", "whatever wounds me wounds him", "bind the goblin's pain to the ogre", "bless this shield to flash when I am hit" | `visible_targets`, `inventory`, held/equipped item state if available | Shared engine primitive for ongoing magical attachments with an anchor, hook, duration, charges, and nested effects. Supports future cards like `sympathetic_link`, `item_enchantment`, wards, cursed objects, blessings, and persistent anomalies. Distinct from `create_trigger`: attached to a concrete entity/item/tile and participates in lifecycle/UI/state rather than acting as a free-floating conditional packet. |
-| `sympathetic_link`    | `create_persistent_effect` (`kind: "sympathetic_link"`) | "bind the goblin's pain to the ogre", "whatever wounds me wounds him", "tie their heartbeats together", "make the doll suffer what he suffers" | `visible_targets`, active statuses/wounds on linked entities | New persistent relationship primitive: echoes or transfers damage/healing/status/curse/sensing between linked entities while duration/charges last. Distinct from `create_trigger` because the link is an ongoing relation with direction, ratio, lifecycle, and UI/state presence. |
-| `item_enchantment`    | `create_persistent_effect` (`kind: "item_enchantment"`) | "make my dagger bleed enemies it strikes", "curse the coin so it burns liars", "let this key remember every lock", "bless this shield to flash when I am hit" | `inventory`, held/equipped item state if available, nearby props/items | New only for persistent item-attached behavior. Simple item creation/transmutation remains `conjure_item`/`spawn_item`/`transform_item`; this covers hooks like `on_hit`, `on_use`, `on_pickup`, `on_wear`, `on_unlock`, or `passive_carried`. |
+| `item_enchantment`    | `create_persistent_effect` (`kind: "item_enchantment"`) | "make my dagger bleed enemies it strikes", "curse the coin so it burns liars", "let this key remember every lock", "bless this shield to flash when I am hit" | `inventory`, held/equipped item state if available, nearby props/items | **Deferred (2026-06-16) pending an item-instance model.** Inventory is `dict[name→count]` and equipment slots hold name strings, so there is no per-item instance to anchor `on_hit`/`on_use`/`on_pickup`/`on_wear` behavior to, and melee does not route through a weapon object. Most of the *intent* ("dagger bleeds on strike", "shield flashes when hit") is really a caster-anchored on-hit/on-defend rider expressible via `persistent_effect`/`create_trigger` today; true item-bound persistence (survives drop/trade; "burns any dishonest *holder*") waits on a real item-instance refactor (inventory, equipment, ground items, trade, save, UI). See §3 note. |
 
 (Promoted to live 2026-06-13 and removed from this table: `possession`, `memory_edit`,
 `structure_animation` — see §2. Disfigure added live 2026-06-14 — see §2.)
@@ -153,6 +197,13 @@ one prompt, but it can resolve any one of them well when shown only that one.
   `edit_memory` handler), `structure_animation` (new `animate_object` handler). Added
   `size_modification` to the planned backlog.
 - Tests: `tests/test_capability_routing.py` + `tests/test_new_effects.py`; full suite green.
+
+**Done (2026-06-16):**
+- Promoted `sympathetic_link` + `persistent_effect` end to end on the new
+  `create_persistent_effect` effect (an anchored trigger; see §2). Engine: magnitude echo in
+  `_fill_trigger_effect_defaults`, anchor-death pruning in `_tick_triggers`. Tests in
+  `tests/test_persistent_effects.py`; full suite green.
+- `item_enchantment` consciously deferred pending an item-instance model (see §2/§3).
 
 **Remaining, in order** (see `CAPABILITY_ROUTING.md` §11):
 

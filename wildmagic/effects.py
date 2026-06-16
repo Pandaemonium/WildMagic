@@ -825,11 +825,20 @@ class _EffectsMixin:
             }
             raw_name = str(effect.get("name") or "").strip()
             default_name = _TRIGGER_DEFAULT_NAMES.get(trigger_name, "A waiting spell")
+            # A free-floating reaction ward that names no subject is about its caster. The
+            # universal "on_damaged" hook (what "on hit / struck / took damage" now maps to)
+            # fires for EVERY combatant, so default its subject to the player -- otherwise a
+            # "when I'm hit, lash the attacker" ward would also lash whenever an ally strikes
+            # a foe. An explicit target (an ally/enemy id, a tag, "any") opts out; that is how
+            # a ward watches an ally or an enemy. Subject-specific hooks already encode a side.
+            raw_target = effect.get("target")
+            if raw_target is None:
+                raw_target = "player" if trigger_name == "on_damaged" else "any"
             trigger = {
                 "id": self.next_entity_id("trigger"),
                 "name": sanitize_name(raw_name or default_name, default_name),
                 "trigger": trigger_name,
-                "target": effect.get("target", "any"),
+                "target": raw_target,
                 "charges": clamp_int(effect.get("charges"), 1, 9),
                 "duration": effect.get("duration", effect.get("turns", 6)),
                 "effects": [dict(raw) for raw in effects[:8] if isinstance(raw, dict)],
@@ -840,6 +849,8 @@ class _EffectsMixin:
                 )
             self.state.triggers.append(trigger)
             return [f"{trigger['name']} waits for {trigger_name.replace('_', ' ')}."]
+        if effect_type == "create_persistent_effect":
+            return self._create_persistent_effect(effect)
         if effect_type == "create_promise":
             return self._create_spoken_promise(effect)
         if effect_type == "add_curse":
@@ -862,6 +873,202 @@ class _EffectsMixin:
             text = str(effect.get("text") or "").strip()
             return [text] if text else []
         return []
+
+    # ------------------------------------------------------ persistent effects
+    _SYMPATHETIC_KINDS = {
+        "sympathetic_link",
+        "sympathetic",
+        "link",
+        "bond",
+        "pain_link",
+    }
+    # Hooks that fire on the attacker (matched against the event's SOURCE), so a persistent
+    # effect anchored on a striker rides the blows it lands. See engine._fire_damage_triggers.
+    _SOURCE_HOOKS = {
+        "on_deal_damage",
+        "on_player_deal_damage",
+        "on_enemy_deal_damage",
+    }
+
+    def _create_persistent_effect(self, effect: dict[str, Any]) -> list[str]:
+        """An ongoing magical attachment anchored to a concrete entity: it lives ON that
+        anchor, fires its nested effects on a hook while charges and duration last, and ENDS
+        when the anchor dies. The shared substrate behind sympathetic links and creature-bound
+        wards/curses. Two sides, by hook:
+          - DEFENDER ('on_hit'): fires when the anchor is struck; effects hit trigger_source
+            (the attacker). A retaliation ward / thornmail.
+          - ATTACKER ('on_strike'/'on_deal_damage'): fires when the anchor lands a blow;
+            effects hit trigger_target (the victim). 'a blade that bleeds whatever I strike',
+            anchored on the wielding CHARACTER for now -- the same machinery will anchor on a
+            specific weapon ITEM once items carry instance state (match:'weapon').
+        Unlike create_trigger (a free-floating conditional packet), this is bound to a life."""
+        kind = normalize_id(str(effect.get("kind") or "persistent_effect"))
+        if kind in self._SYMPATHETIC_KINDS:
+            return self._create_sympathetic_link(effect)
+        nested = [
+            dict(raw)
+            for raw in coerce_list(effect.get("effects") or effect.get("effect"))[:8]
+            if isinstance(raw, dict)
+        ]
+        if not nested:
+            return ["The persistent effect has nothing to anchor, and unravels."]
+        # Default hook fires when the anchor is struck. "on_hit" normalizes to the universal
+        # on_damaged (fires for any entity, then target-filtered to this anchor). An attacker-
+        # side hook (on_strike -> on_deal_damage) is matched against the event's SOURCE, so the
+        # criterion is still the anchor but now means "when the anchor deals a hit".
+        hook = str(
+            effect.get("hook") or effect.get("trigger") or effect.get("on") or "on_hit"
+        )
+        hook_norm = normalize_trigger_name(hook)
+        explicit_match = normalize_id(str(effect.get("match") or ""))
+        if explicit_match in {"source", "target"}:
+            match_role = explicit_match
+        else:
+            match_role = "source" if hook_norm in self._SOURCE_HOOKS else "target"
+        anchor = self.resolve_target(
+            str(effect.get("anchor") or effect.get("attached_to") or "player")
+        )
+        anchor_id = anchor.id if anchor is not None and anchor.kind != "item" else None
+        match_target = effect.get("target", anchor_id or "any")
+        trigger = self._register_persistent_trigger(
+            name=str(effect.get("name") or ""),
+            default_name="A bound enchantment",
+            kind=kind,
+            anchor_id=anchor_id,
+            link_partner=None,
+            hook=hook,
+            target=match_target,
+            match=match_role,
+            charges=clamp_int(effect.get("charges", 99), 1, 999),
+            duration=effect.get("duration", effect.get("turns", 8)),
+            effects=nested,
+        )
+        where = (
+            "you"
+            if anchor_id == self.state.player_id
+            else (anchor.name if anchor is not None else "the waiting air")
+        )
+        return [f"{trigger['name']} settles over {where} and takes hold."]
+
+    def _create_sympathetic_link(self, effect: dict[str, Any]) -> list[str]:
+        """Bind two entities so harm to one echoes onto the other: 'whatever wounds me
+        wounds him', 'bind the goblin's pain to the ogre'. Implemented as an anchored
+        persistent effect whose hook (on_damaged on the SOURCE) echoes the actual damage,
+        scaled by ratio, onto the SINK. mutual=true binds both directions. The link ends
+        when either end dies (anchor lifecycle in _tick_triggers)."""
+        source = self.resolve_target(
+            str(
+                effect.get("source")
+                or effect.get("from")
+                or effect.get("anchor")
+                or "player"
+            )
+        )
+        sink = self.resolve_target(
+            str(
+                effect.get("sink")
+                or effect.get("to")
+                or effect.get("victim")
+                or effect.get("target")
+                or "nearest_enemy"
+            )
+        )
+        if source is None or sink is None:
+            return ["The link reaches for two souls and finds only one."]
+        if source.kind in {"item", "prop"} or sink.kind in {"item", "prop"}:
+            return ["Only living things can be bound heart to heart."]
+        if source.id == sink.id:
+            return ["A thing cannot be bound to itself; the link will not hold."]
+        try:
+            ratio = max(
+                0.1, min(2.0, float(effect.get("ratio", effect.get("share", 1.0))))
+            )
+        except (TypeError, ValueError):
+            ratio = 1.0
+        duration = effect.get("duration", effect.get("turns", 8))
+        mutual = bool(
+            effect.get("mutual") or effect.get("two_way") or effect.get("reciprocal")
+        )
+        name = sanitize_name(str(effect.get("name") or ""), "Sympathetic link")
+        self._register_sympathetic_arc(source, sink, ratio, duration, name)
+        if mutual:
+            self._register_sympathetic_arc(sink, source, ratio, duration, name)
+        src_who = "you" if source.id == self.state.player_id else source.name
+        sink_who = "you" if sink.id == self.state.player_id else sink.name
+        if mutual:
+            return [
+                f"{name}: {src_who} and {sink_who} now share every wound between them."
+            ]
+        return [f"{name}: whatever wounds {src_who} now wounds {sink_who}."]
+
+    def _register_sympathetic_arc(
+        self,
+        source: "Entity",
+        sink: "Entity",
+        ratio: float,
+        duration: Any,
+        name: str,
+    ) -> None:
+        echo = {
+            "type": "damage",
+            "target": sink.id,
+            "amount": "trigger_amount",
+            "amount_ratio": ratio,
+            "damage_type": "trigger_damage_type",
+        }
+        self._register_persistent_trigger(
+            name=name,
+            default_name="Sympathetic link",
+            kind="sympathetic_link",
+            anchor_id=source.id,
+            link_partner=sink.id,
+            hook="on_damaged",
+            target=source.id,
+            charges=999,
+            duration=duration,
+            effects=[echo],
+        )
+
+    def _register_persistent_trigger(
+        self,
+        *,
+        name: str,
+        default_name: str,
+        kind: str,
+        anchor_id: str | None,
+        link_partner: str | None,
+        hook: str,
+        target: Any,
+        charges: int,
+        duration: Any,
+        effects: list[dict[str, Any]],
+        match: str = "target",
+    ) -> dict[str, Any]:
+        """Register a persistent effect in the shared trigger store. It is an ordinary
+        trigger dict plus `kind`, `anchor`, (for links) `link_partner`, and `match` (which
+        event role the criterion is checked against -- "target" for defender-side, "source"
+        for attacker-side), so it rides the existing _fire_triggers / _tick_triggers / save
+        paths for free; the extra keys only drive matching, lifecycle, and UI/context."""
+        trigger: dict[str, Any] = {
+            "id": self.next_entity_id("persist"),
+            "name": sanitize_name(name, default_name),
+            "kind": kind,
+            "trigger": normalize_trigger_name(hook),
+            "target": target if target is not None else "any",
+            "charges": clamp_int(charges, 1, 999),
+            "duration": duration,
+            "effects": effects,
+        }
+        if match == "source":
+            trigger["match"] = "source"
+        if anchor_id:
+            trigger["anchor"] = anchor_id
+        if link_partner:
+            trigger["link_partner"] = link_partner
+        if duration != "permanent":
+            trigger["expires_turn"] = self.state.turn + clamp_int(duration, 1, 999)
+        self.state.triggers.append(trigger)
+        return trigger
 
     def _nearest_npc(self) -> "Entity | None":
         player = self.state.player

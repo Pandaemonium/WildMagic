@@ -3448,9 +3448,26 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         elif event_type == "curse":
             self._apply_cost({"type": "curse", **event})
 
+    def _persistent_anchor_alive(self, trigger: dict[str, Any]) -> bool:
+        """An anchored persistent effect (or sympathetic link) ends when the thing it is
+        bound to -- or the other end of a link -- is dead or gone. Free-floating triggers
+        (no anchor) are unaffected, so ordinary create_trigger wards are untouched."""
+        for key in ("anchor", "link_partner"):
+            ref = trigger.get(key)
+            if not ref:
+                continue
+            entity = self.state.entities.get(str(ref))
+            if entity is None or not entity.alive:
+                return False
+        return True
+
     def _tick_triggers(self) -> None:
         remaining: list[dict[str, Any]] = []
         for trigger in self.state.triggers:
+            if not self._persistent_anchor_alive(trigger):
+                name = str(trigger.get("name") or "A waiting spell").strip()
+                self.state.add_message(f"{name} unravels, its anchor gone.")
+                continue
             expires_turn = trigger.get("expires_turn")
             if expires_turn is not None:
                 if self.state.turn <= clamp_int(expires_turn, 0, 999999):
@@ -3486,11 +3503,23 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             "amount": amount,
             "damage_type": damage_type,
         }
+        # Defender side: hooks keyed on who WAS damaged (matched against event["target"]).
         names = ["on_damaged", "on_actor_damaged"]
         if target.id == self.state.player_id:
             names.extend(["on_player_damaged", "on_player_hit"])
         elif target.faction == "enemy":
             names.extend(["on_enemy_damaged", "on_enemy_hit"])
+        # Attacker side: hooks keyed on who DEALT the damage (matched against event["source"]
+        # by a trigger whose `match` is "source"). Only fire when there is an attacker, so a
+        # trap or hazard tile never trips a "when I strike" effect. This is the substrate a
+        # later item enchantment reuses: when melee carries the weapon used, add an item-keyed
+        # name here and let the trigger match:"weapon".
+        if isinstance(source, Entity):
+            names.append("on_deal_damage")
+            if source.id == self.state.player_id:
+                names.append("on_player_deal_damage")
+            elif source.faction == "enemy":
+                names.append("on_enemy_deal_damage")
         self._fire_triggers(names, event)
 
     def _fire_death_triggers(
@@ -3529,9 +3558,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             trigger_name = normalize_trigger_name(
                 str(trigger.get("trigger") or trigger.get("on") or "")
             )
-            if trigger_name not in wanted or not self._trigger_matches_target(
-                trigger, event
-            ):
+            if trigger_name not in wanted or not self._trigger_matches(trigger, event):
                 remaining.append(trigger)
                 continue
             name = str(trigger.get("name") or "A waiting spell").strip()
@@ -3554,27 +3581,44 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         self.state.triggers = remaining + self.state.triggers
         return messages
 
-    def _trigger_matches_target(
-        self, trigger: dict[str, Any], event: dict[str, Any]
-    ) -> bool:
+    def _trigger_matches(self, trigger: dict[str, Any], event: dict[str, Any]) -> bool:
+        """Does this trigger's criterion match the firing event?
+
+        A trigger's `target` is the criterion (player / an id / a faction / a tag / "any").
+        Its `match` field names WHICH role of the event the criterion is compared against:
+        "target" (the entity that was damaged -- the default, defender side) or "source" (the
+        entity that dealt the damage -- attacker side, e.g. "a blade that bleeds whatever it
+        strikes"). The role is a plain `event.get(role)` lookup, so a future damage event that
+        also carries a "weapon"/"item" role (once items have instances) can be matched the same
+        way -- match:"weapon" with no other change here. See _fire_damage_triggers."""
+        role = normalize_id(str(trigger.get("match") or "target"))
+        if role not in {"target", "source"}:
+            role = "target"
+        subject = event.get(role)
         raw_target = trigger.get("target")
         if raw_target in {None, "", "any"}:
+            # A source-side ward needs an attacker to ride; environmental damage (a trap, a
+            # poison tile) has source=None and must not fire it. Target-side keeps the old
+            # permissive default so non-damage events still fire by name alone.
+            if role == "source":
+                return isinstance(subject, Entity)
             return True
-        target = event.get("target")
-        source = event.get("source")
-        if not isinstance(target, Entity):
-            return True
+        if not isinstance(subject, Entity):
+            # Target role keeps the old permissive default (a non-damage event with no real
+            # target still fires by name alone); a source-side criterion cannot match without
+            # an attacker in the event.
+            return role == "target"
         trigger_target = normalize_id(str(raw_target))
         if trigger_target in {"player", "self", "you"}:
-            return target.id == self.state.player_id
+            return subject.id == self.state.player_id
         if trigger_target in {"enemy", "nearest_enemy", "all_enemies", "enemies"}:
-            return target.faction == "enemy"
+            return subject.faction == "enemy"
         if trigger_target in {"source", "attacker", "caster"}:
-            return isinstance(source, Entity)
+            return isinstance(event.get("source"), Entity)
         return (
-            target.id == trigger_target
-            or trigger_target in target.tags
-            or trigger_target in normalize_id(target.name).split("_")
+            subject.id == trigger_target
+            or trigger_target in subject.tags
+            or trigger_target in normalize_id(subject.name).split("_")
         )
 
     def _fill_trigger_effect_defaults(
@@ -3594,6 +3638,27 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             effect["origin"] = target.id
         elif effect.get("origin") == "trigger_source" and isinstance(source, Entity):
             effect["origin"] = source.id
+
+        # Sympathetic/persistent effects echo the firing event's magnitude: amount of
+        # "trigger_amount" copies the damage just dealt (scaled by an optional amount_ratio),
+        # and "trigger_damage_type" copies its damage type. This is what makes "whatever
+        # wounds me wounds him" land the same-sized wound. amount_ratio never reaches a real
+        # handler -- it is consumed here.
+        if effect.get("amount") == "trigger_amount":
+            base = event.get("amount")
+            ratio = effect.pop("amount_ratio", 1)
+            if isinstance(base, (int, float)):
+                try:
+                    scaled = int(round(float(base) * float(ratio)))
+                except (TypeError, ValueError):
+                    scaled = int(base)
+                effect["amount"] = max(1, scaled)
+            else:
+                effect.pop("amount", None)
+        else:
+            effect.pop("amount_ratio", None)
+        if effect.get("damage_type") == "trigger_damage_type":
+            effect["damage_type"] = str(event.get("damage_type") or "arcane")
 
         # Disciplined troops hold their post rather than break formation to wander.
 
