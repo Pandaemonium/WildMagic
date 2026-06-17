@@ -386,6 +386,11 @@ class NPCProfile:
     backstory: str
     appearance: str = ""
     traits: list[str] = field(default_factory=list)
+    # Tiered world-knowledge per lore tag (region/tradition) — the access gate for lore
+    # cards (docs/LORE_CARDS.md). Absent tag => level 0. Seeded deterministically at
+    # generation from role+region (replay-safe). NOT surfaced in to_dialogue_context: it
+    # gates which card TEXT is injected, it is never itself spoken.
+    lore: dict[str, int] = field(default_factory=dict)
     memory: list[str] = field(default_factory=list)
     conversation: list[dict[str, str]] = field(default_factory=list)
     wares: dict[str, int] = field(default_factory=dict)

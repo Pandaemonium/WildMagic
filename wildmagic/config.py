@@ -401,6 +401,12 @@ def flesh_enabled() -> bool:
     return _bool_value("WILDMAGIC_FLESH_ENABLED", True)
 
 
+def lore_cards_enabled() -> bool:
+    """Tiered authored world-knowledge (docs/LORE_CARDS.md) injected into dialogue and book
+    generation. On by default; the test suite forces it off so engine tests stay model-free."""
+    return _bool_value("WILDMAGIC_LORE_CARDS_ENABLED", True)
+
+
 def canon_prewarm_enabled() -> bool:
     return _bool_value("WILDMAGIC_CANON_PREWARM_ENABLED", False)
 

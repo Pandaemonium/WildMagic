@@ -79,6 +79,7 @@ from .templates import (
 from .props import get_prop_template, get_all_prop_ids
 from .prop_gen import make_prop_provider, PropProvider, PropSpec, MECHANICAL_TAGS
 from .regions import Region, get_region
+from .lore_cards import seed_npc_lore
 from .config import get_props_provider, ollama_host
 from .llm_client import ollama_reachable
 from .promises import (
@@ -670,6 +671,12 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             backstory=backstory,
             appearance=appearance,
             traits=profile_traits,
+            lore=seed_npc_lore(
+                role,
+                profile_traits,
+                npc_tags,
+                getattr(getattr(self, "region", None), "name", "") or "",
+            ),
             wares=npc_wares,
             wanted_item=wanted_item,
             wanted_qty=wanted_qty,
@@ -2556,12 +2563,21 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                     return f"{key} quantity is unavailable ({quantity} requested, {available} available)"
         return None
 
+    def announce_dialogue_reply(self, npc: Entity, message: str, reply: str) -> None:
+        """Put the spoken exchange on the message log immediately, so the player can read
+        it before any follow-up work (the trade-structuring call, lore extraction) resolves.
+        Talk runs on a worker thread while the UI keeps redrawing, so this paints right away;
+        the durable record and the turn settlement happen in apply_dialogue_exchange."""
+        self.state.add_message(f'You say to {npc.name}: "{message}"')
+        self.state.add_message(f'{npc.name} says: "{reply}"')
+
     def apply_dialogue_exchange(
         self,
         npc: Entity,
         message: str,
         reply: str,
         trade_data: dict[str, Any] | None = None,
+        announced: bool = False,
     ) -> None:
         """Record + display the exchange, then either settle the turn immediately
         (the normal case) or -- when the structuring call came back with a real
@@ -2569,12 +2585,17 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         turn. The confirmation modal takes over from there; accepting or rejecting
         (resolve_pending_trade) is what reaches finish_player_turn for this beat,
         exactly as the two branches of apply_wild_magic_resolution each
-        independently reach it exactly once."""
+        independently reach it exactly once.
+
+        `announced=True` means the spoken lines were already shown via
+        announce_dialogue_reply (the live talk path, so the reply paints before the
+        trade-judge wait); we then skip re-adding them and just record + settle."""
         profile = self.state.npc_profiles[npc.id]
         profile.record_exchange("player", message)
         profile.record_exchange("npc", reply)
-        self.state.add_message(f'You say to {npc.name}: "{message}"')
-        self.state.add_message(f'{npc.name} says: "{reply}"')
+        if not announced:
+            self.state.add_message(f'You say to {npc.name}: "{message}"')
+            self.state.add_message(f'{npc.name} says: "{reply}"')
 
         # Track last talked NPC and auto-register active quest item
         self.state.last_talked_npc_name = npc.name

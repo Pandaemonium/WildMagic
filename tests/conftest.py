@@ -24,6 +24,10 @@ def pytest_configure(config: pytest.Config) -> None:
         # Book titles prewarm on-by-default in real play; force off so the trim
         # suite never fires background title calls. Title tests opt back in.
         os.environ.setdefault("WILDMAGIC_BOOK_TITLES", "0")
+        # Lore cards inject authored world-knowledge and, in dialogue/book paths, fire a
+        # generative router call. Force off so the trim suite never routes; tests that
+        # exercise the lore-card path call the pure functions directly or opt back in.
+        os.environ.setdefault("WILDMAGIC_LORE_CARDS_ENABLED", "0")
         # Experimental LLM prop set-dressing is on-by-default when Ollama is
         # reachable; force it off so the trim suite never fires real prop calls
         # in background threads. Tests that exercise it inject MockPropProvider.

@@ -53,6 +53,7 @@ from .secrets import (
 )
 from .promises import WorldPromise
 from .promises import Objective, Reward
+from .lore_router import book_lore_cards, dialogue_lore_cards
 from .wild_magic import (
     DialogueProvider,
     DialogueResolution,
@@ -1099,6 +1100,18 @@ class GameSession:
         title_id = f"canon_book_title_{normalize_id(book.id)}"
         title_record = self.engine.state.canon_records.get(title_id)
         materialized_title = title_record.title if title_record else None
+        # Static authored world-canon for the THREADS slot, gated by the book's subjects
+        # (docs/LORE_CARDS.md §10.2). The book may echo it in passing; it is background.
+        lore_threads = [
+            card.text
+            for card in book_lore_cards(subjects, materialized_title or book.name)
+        ]
+        thread_block: dict[str, Any] = {
+            "canon": threads,
+            "promises": active_promises,
+        }
+        if lore_threads:
+            thread_block["lore"] = lore_threads
         return {
             "record_id": record_id,
             "kind": "book",
@@ -1126,10 +1139,7 @@ class GameSession:
                 },
                 "attachment": {"kind": "prop", "entity_id": book.id},
             },
-            "threads": {
-                "canon": threads,
-                "promises": active_promises,
-            },
+            "threads": thread_block,
             "contract": {
                 "allowed_outputs": ["title", "summary", "text", "tags", "llm_choices"],
                 "claim_quota": BOOK_CLAIM_QUOTA,
@@ -2080,6 +2090,17 @@ class GameSession:
             dialogue_record = dict(replay_dialogue)
         else:
             context = self.engine.dialogue_context_for_llm(npc, message)
+            lore_cards = dialogue_lore_cards(
+                self.engine.state.npc_profiles.get(npc.id),
+                message,
+                provider_name=getattr(self.dialogue_provider, "name", "mock"),
+                region_name=getattr(getattr(self.engine, "region", None), "name", "")
+                or "",
+            )
+            if lore_cards:
+                # Static authored canon, kept in its own slot and NEVER fed to lore
+                # extraction (docs/LORE_CARDS.md §4.1).
+                context["world_knowledge"] = [c.text for c in lore_cards]
             resolution = resolve_dialogue(
                 self.dialogue_provider, npc.name, message, context
             )
@@ -2093,6 +2114,7 @@ class GameSession:
                 "reply": resolution.reply,
                 "raw_response": resolution.raw_response,
                 "audit_path": resolution.audit_path,
+                "lore_cards": [c.name for c in lore_cards],
             }
         if resolution.technical_failure or resolution.reply is None:
             self.engine.state.add_message(
@@ -2101,6 +2123,11 @@ class GameSession:
             return False, True, dialogue_record
 
         reply = resolution.reply
+        # Surface the NPC's reply to the player IMMEDIATELY, before the (blocking)
+        # trade-structuring call below. Talk runs on a worker thread while the UI redraws
+        # every frame, so the reply paints now and the player reads it instead of staring
+        # at a wait; the trade prompt, if any, simply follows a moment later.
+        self.engine.announce_dialogue_reply(npc, message, reply)
         trade_data: dict[str, Any] | None = None
         if replay_dialogue is not None:
             trade = replay_dialogue.get("trade")
@@ -2123,7 +2150,9 @@ class GameSession:
             if not trade_resolution.technical_failure:
                 trade_data = trade_resolution.data
 
-        self.engine.apply_dialogue_exchange(npc, message, reply, trade_data)
+        self.engine.apply_dialogue_exchange(
+            npc, message, reply, trade_data, announced=True
+        )
         if replay_dialogue is None:
             lore_context = self.engine.lore_extraction_context(npc, message, reply)
             self._enqueue_lore_extraction(lore_context, dialogue_record)

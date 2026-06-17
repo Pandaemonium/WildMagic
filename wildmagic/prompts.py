@@ -153,6 +153,10 @@ Guidelines:
   place, the factions here, and the world. React to them the way a person would notice
   something striking - a stranger wearing an obviously goblin-cursed hat, a room everyone
   says is haunted - without reciting them or treating them as game rules.
+- "world_knowledge" holds background lore your character genuinely knows about the wider
+  world - realms, peoples, the old magic traditions, the Empire. Draw on it to answer in
+  your own voice and from your own vantage, as something you simply know; never recite it
+  verbatim or like an encyclopedia entry. If it isn't relevant to what was asked, ignore it.
 
 {semantic_preamble}
 """.replace("{semantic_preamble}", SEMANTIC_PREAMBLE)
