@@ -4,6 +4,7 @@ from typing import Any
 
 from .game_data import DEFAULT_ITEM_USE_SPEC, EQUIPMENT_SPECS, ITEM_USE_SPECS
 from .models import MIST, Entity
+from .operations import StateDelta
 from .normalize import (
     clamp_int,
     coerce_list,
@@ -153,6 +154,21 @@ class _ItemsMixin:
             tags=set(tags or ()),
         )
         self.state.entities[entity.id] = entity
+        if self._delta_capture:
+            self.record_delta(
+                StateDelta(
+                    op="create_entity",
+                    target=entity.id,
+                    summary=f"{name} appeared at {x},{y}",
+                    details={
+                        "kind": "item",
+                        "name": name,
+                        "item_type": item_type,
+                        "x": x,
+                        "y": y,
+                    },
+                )
+            )
         return entity
 
     def use_item(self, item_name: str) -> bool:

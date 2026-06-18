@@ -135,6 +135,66 @@ def test_animate_object_without_a_prop_still_spawns_something() -> None:
     assert after == before + 1
 
 
+def test_destroyed_prop_becomes_wreckage_without_kill_credit() -> None:
+    engine = GameEngine(seed=7, scenario="test_chamber")
+    player = engine.state.player
+    prop = engine.spawn_prop("red_thread_ledger", player.x + 2, player.y)
+    assert prop is not None
+    kills_before = engine.state.stats.enemies_killed
+
+    outcome = engine.apply_wild_magic_resolution(
+        {
+            "accepted": True,
+            "severity": "minor",
+            "outcome_text": "",
+            "effects": [
+                {
+                    "type": "damage",
+                    "target": prop.id,
+                    "amount": 99,
+                    "damage_type": "physical",
+                }
+            ],
+            "costs": [],
+            "rejected_reason": None,
+        }
+    )
+
+    assert outcome.consumed_turn
+    assert not outcome.technical_failure
+    assert prop.hp == 0
+    assert not prop.blocks
+    assert {"broken", "destroyed"} <= prop.tags
+    assert prop.name.startswith("broken ")
+    assert engine.state.stats.enemies_killed == kills_before
+    assert any(delta["op"] == "destroy_prop" for delta in outcome.deltas)
+
+
+def test_transform_item_can_alter_prop_by_anchor_id() -> None:
+    engine = GameEngine(seed=7, scenario="test_chamber")
+    player = engine.state.player
+    prop = engine.spawn_prop("red_thread_ledger", player.x + 2, player.y)
+    assert prop is not None
+
+    messages = engine._apply_effect(
+        {
+            "type": "transform_item",
+            "target": prop.id,
+            "new_name": "living petition",
+            "description": "The paper folds and unfolds, trying to become a witness.",
+            "tags": ["law", "animated"],
+        }
+    )
+
+    assert messages == ["The red-thread ledger transforms into living petition."]
+    assert prop.name == "living petition"
+    assert (
+        prop.description == "The paper folds and unfolds, trying to become a witness."
+    )
+    assert prop.details["transformed_by_magic"] is True
+    assert {"law", "animated"} <= prop.tags
+
+
 # --- disfigure: the 'weakened' status (a maimed limb deals less damage) -----------------
 
 

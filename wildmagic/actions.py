@@ -43,6 +43,7 @@ from .lore import (
 )
 from .normalize import normalize_id
 from .models import CanonRecord, CharacterProfile
+from .state_view import replay_summary_view
 from .secrets import (
     choose_anchor,
     choose_reward,
@@ -2004,6 +2005,7 @@ class GameSession:
             return False, True, wild_magic_record, context
 
         outcome = self.engine.apply_wild_magic_resolution(resolution.data)
+        wild_magic_record["deltas"] = list(outcome.deltas)
         if outcome.technical_failure:
             wild_magic_record["technical_failure"] = True
             wild_magic_record["error"] = "; ".join(outcome.messages)
@@ -3048,167 +3050,6 @@ def describe_state(engine: GameEngine) -> list[str]:
 
 
 def summarize_state(engine: GameEngine) -> dict[str, Any]:
-    state = engine.state
-    player = state.player
-    current_room = engine.room_profile_at(player.x, player.y)
-    living_enemies = sorted(engine.living_enemies(), key=lambda entity: entity.id)
-    items = sorted(
-        [entity for entity in state.entities.values() if entity.kind == "item"],
-        key=lambda entity: entity.id,
-    )
-    return {
-        "turn": state.turn,
-        "depth": state.depth,
-        "max_depth": state.max_depth,
-        "game_over": state.game_over,
-        "victory": state.victory,
-        "player": {
-            "x": player.x,
-            "y": player.y,
-            "hp": player.hp,
-            "mana": player.mana,
-            "statuses": dict(sorted(player.statuses.items())),
-        },
-        "visible_count": len(state.visible),
-        "explored_count": len(state.explored),
-        "inventory": dict(sorted(state.inventory.items())),
-        "flags": dict(sorted(state.flags.items())),
-        "tile_counts": tile_counts(state.tiles),
-        "current_room": current_room.to_public_dict(include_secrets=True)
-        if current_room
-        else None,
-        "visible_rooms": engine.visible_room_profiles(limit=8),
-        "canon_records": [
-            record.to_dict()
-            for record in sorted(
-                state.canon_records.values(), key=lambda record: record.id
-            )
-        ],
-        "event_timers": sorted(
-            [
-                {
-                    "turns": event.get("turns"),
-                    "event_type": event.get("event_type") or event.get("type"),
-                    "name": event.get("name"),
-                    "text": event.get("text"),
-                }
-                for event in state.event_timers
-            ],
-            key=lambda event: (
-                str(event.get("turns")),
-                str(event.get("event_type")),
-                str(event.get("name")),
-            ),
-        ),
-        "triggers": sorted(
-            [
-                {
-                    "trigger": trigger.get("trigger") or trigger.get("on"),
-                    "target": trigger.get("target"),
-                    "charges": trigger.get("charges"),
-                    "duration": trigger.get("duration"),
-                    "name": trigger.get("name"),
-                }
-                for trigger in state.triggers
-            ],
-            key=lambda trigger: (
-                str(trigger.get("trigger")),
-                str(trigger.get("target")),
-                str(trigger.get("name")),
-            ),
-        ),
-        "curses": {
-            curse_id: {
-                "name": curse.name,
-                "description": curse.description,
-                "stacks": curse.stacks,
-            }
-            for curse_id, curse in sorted(state.curses.items())
-        },
-        "quests": [
-            {
-                "id": quest.id,
-                "name": quest.name,
-                "description": quest.description,
-                "contact": quest.contact,
-                "location": quest.location,
-                "status": quest.status,
-            }
-            for quest in engine.quest_log_entries()
-        ],
-        "promises": [
-            promise.to_dict()
-            for promise in sorted(state.promises, key=lambda promise: promise.id)
-        ],
-        "promise_reservations": [
-            reservation.to_dict()
-            for zone in sorted(state.promise_reservations)
-            for reservation in state.promise_reservations[zone]
-        ],
-        "living_enemies": [
-            {
-                "id": enemy.id,
-                "name": enemy.name,
-                "x": enemy.x,
-                "y": enemy.y,
-                "hp": enemy.hp,
-                "statuses": dict(sorted(enemy.statuses.items())),
-                "tags": sorted(enemy.tags),
-                "resistances": dict(sorted(enemy.resistances.items())),
-                "weaknesses": dict(sorted(enemy.weaknesses.items())),
-            }
-            for enemy in living_enemies
-        ],
-        "items": [
-            {
-                "id": item.id,
-                "name": item.name,
-                "x": item.x,
-                "y": item.y,
-                "item_type": item.item_type,
-                "material": item.material,
-                "quantity": item.quantity,
-                "tags": sorted(item.tags),
-            }
-            for item in items
-        ],
-        "entity_count": len(state.entities),
-        "recent_messages": state.messages[-8:],
-        # Emergent-world ledgers (Phase 0): deeds + faction standing + the simulator
-        # cursor. Surfaced here so the deterministic replay round-trip verifies them.
-        "deeds": [
-            deed.to_dict()
-            for deed in sorted(state.deed_ledger.deeds, key=lambda deed: deed.id)
-        ],
-        "story_beats": [
-            beat.to_dict()
-            for beat in sorted(state.deed_ledger.beats, key=lambda beat: beat.id)
-        ],
-        "factions": {
-            fid: state.faction_ledger.factions[fid].to_dict()
-            for fid in sorted(state.faction_ledger.factions)
-        },
-        "legend": state.legend_ledger.to_dict(),
-        "pending_backlash": [dict(event) for event in state.pending_backlash],
-        "followers": [
-            {
-                "name": profile.name,
-                "loyalty": round(profile.bond.loyalty, 2),
-                "affiliations": sorted(profile.bond.affiliations),
-            }
-            for _npc_id, profile in engine.followers()
-        ],
-        "simulated_through_turn": state.simulated_through_turn,
-        "day": state.day,
-        "turn_of_day": state.turn_of_day,
-        "day_phase": state.day_phase,
-        "ticked_through_day": state.ticked_through_day,
-    }
-
-
-def tile_counts(tiles: list[list[str]]) -> dict[str, int]:
-    counts: dict[str, int] = {}
-    for row in tiles:
-        for tile in row:
-            counts[tile] = counts.get(tile, 0) + 1
-    return dict(sorted(counts.items()))
+    """Structured run snapshot for replay records and final summaries. Assembly lives in
+    `state_view` so it shares one read-only state surface with the resolver context."""
+    return replay_summary_view(engine)

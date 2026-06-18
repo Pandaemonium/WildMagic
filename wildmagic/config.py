@@ -318,6 +318,13 @@ def ollama_json_format_enabled(purpose: str | None = None) -> bool:
     return _scoped_bool(purpose, "OLLAMA_FORMAT", True)
 
 
+def ollama_json_schema_enabled(purpose: str | None = None) -> bool:
+    """Constrain wild-magic decoding to the *per-cast* response schema (effect enum narrowed
+    to the routed core+card effects) instead of the generic JSON mode. Off by default: the
+    narrowed schema is computed and audited in shadow mode until this is opted into."""
+    return _scoped_bool(purpose, "OLLAMA_SCHEMA", False)
+
+
 def ollama_town_num_predict() -> int:
     return _int_value("WILDMAGIC_TOWN_NUM_PREDICT", 2000, 256, 8192)
 

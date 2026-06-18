@@ -141,10 +141,15 @@ class CharacterCreationScene:
             self._adjust(focus, 1 if key == pygame.K_RIGHT else -1)
         elif key in (pygame.K_RETURN, pygame.K_KP_ENTER):
             self._activate(focus)
-        elif key == pygame.K_BACKSPACE:
+        elif key in (pygame.K_BACKSPACE, pygame.K_DELETE):
             self._backspace(focus)
         elif event.unicode and event.unicode.isprintable():
             self._type(focus, event.unicode)
+
+    def backspace_focused(self) -> None:
+        """Erase one char from the focused field. Called by the host's held-key repeat
+        (GameUI._pump_text_delete_repeat) so holding Backspace/Delete works here too."""
+        self._backspace(self._focused())
 
     def handle_mouse(self, pos: tuple[int, int]) -> None:
         for cid, rect in list(self.hitboxes.items()):

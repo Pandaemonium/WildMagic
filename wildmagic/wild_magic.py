@@ -13,6 +13,7 @@ from .config import (
     get_wild_magic_provider,
     ollama_host,
     ollama_json_format_enabled,
+    ollama_json_schema_enabled,
     ollama_keep_alive,
     ollama_num_ctx,
     ollama_num_gpu,
@@ -30,7 +31,13 @@ from .llm_client import (
     _post_ollama_chat_with_json_retry,
     normalize_ollama_url,
 )
-from .capabilities import assemble_resolver_system_prompt
+from .capabilities import (
+    assemble_resolver_system_prompt,
+    select_cards,
+    selected_context_slices,
+    selected_effect_types,
+)
+from .spell_contract import per_cast_response_schema
 from .llm_resolver import _write_jsonl_audit, should_retry_resolution, retry_context
 from .resolution_parsing import parse_resolution_json, _nearest_enemy_id
 from .prompts import (
@@ -117,7 +124,13 @@ class OllamaWildMagicProvider:
             },
             "keep_alive": ollama_keep_alive(self.purpose),
         }
-        if ollama_json_format_enabled(self.purpose):
+        if ollama_json_schema_enabled(self.purpose):
+            # Constrained decoding: the per-cast schema narrows the effect enum to the routed
+            # core+card effects advertised in context["supported_effects"].
+            payload["format"] = per_cast_response_schema(
+                context.get("supported_effects")
+            )
+        elif ollama_json_format_enabled(self.purpose):
             payload["format"] = "json"
         data = _post_ollama_chat_with_json_retry(
             self.base_url, payload, self.timeout_seconds
@@ -839,6 +852,9 @@ def write_audit_log(
         "provider_requested": getattr(provider, "name", "unknown"),
         "model": getattr(provider, "model", None),
         "ollama_base_url": getattr(provider, "base_url", None),
+        # What capability routing decided for this cast: which specialist cards loaded, which
+        # effect types the per-cast schema allows, and which context slices were injected.
+        "routing": _resolver_routing(spell),
         "prompt": {
             "messages": prompt_messages,
             "context": context,
@@ -849,3 +865,14 @@ def write_audit_log(
         "error": error,
     }
     return _write_jsonl_audit(audit_path, record)
+
+
+def _resolver_routing(spell: str) -> dict[str, Any]:
+    """Routing metadata for the audit: the specialist cards a spell loads, the effect types
+    its per-cast schema allows, and the card-driven context slices injected for it."""
+    selected = select_cards(spell)
+    return {
+        "selected_cards": [card.name for card in selected],
+        "selected_effect_types": sorted(selected_effect_types(selected)),
+        "context_slices": list(selected_context_slices(selected)),
+    }

@@ -436,10 +436,20 @@ _SALTMARKET = Region(
     ),
     imperial_presence=0.25,
     floor_themes=(
-        (2, {"furniture": 4, "infrastructure": 3, "imperial": 2, "alchemical": 1}),
+        (
+            2,
+            {
+                "saltmarket": 5,
+                "furniture": 3,
+                "infrastructure": 2,
+                "imperial": 2,
+                "alchemical": 1,
+            },
+        ),
         (
             4,
             {
+                "saltmarket": 3,
                 "alchemical": 3,
                 "arcane": 3,
                 "furniture": 2,
@@ -451,6 +461,7 @@ _SALTMARKET = Region(
             999,
             {
                 "arcane": 4,
+                "saltmarket": 2,
                 "traditions": 3,
                 "alchemical": 2,
                 "religious": 2,

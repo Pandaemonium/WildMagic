@@ -13,6 +13,7 @@ import json
 import re
 from typing import Any
 
+from .effect_registry import EFFECT_TYPE_ALIASES as _EFFECT_TYPE_ALIASES
 from .llm_client import strip_thinking
 from .models import MECHANICAL_STATUSES, TILE_ALIASES
 from .spell_contract import (
@@ -69,44 +70,8 @@ _ELEMENT_DAMAGE_ALIASES: dict[str, str] = {
 }
 
 # Map LLM-used effect type strings to canonical SUPPORTED_EFFECTS keys.
-_EFFECT_TYPE_ALIASES: dict[str, str] = {
-    "healing": "heal",
-    "restore_health": "heal",
-    "restore_hp": "heal",
-    "regenerate": "add_status",
-    "regeneration": "add_status",
-    "regen": "add_status",
-    "restore_mana_points": "restore_mana",
-    "restore_mp": "restore_mana",
-    "replenish_mana": "restore_mana",
-    "status": "add_status",
-    "apply_status": "add_status",
-    "give_status": "add_status",
-    "set_status": "add_status",
-    "status_effect": "add_status",
-    "curse": "add_curse",
-    "spawn": "summon",
-    "create_creature": "conjure_creature",
-    "spawn_creature": "conjure_creature",
-    "create_item": "conjure_item",
-    "spawn_item": "conjure_item",
-    "place_tile": "create_tiles",
-    "set_tiles": "create_tiles",
-    "tile_effect": "create_tiles",
-    "area_effect": "area_damage",
-    "explosion": "area_damage",
-    "blast": "area_damage",
-    "trigger": "create_trigger",
-    "ward": "create_trigger",
-    "reaction": "create_trigger",
-    "contingency": "create_trigger",
-    "delayed_reaction": "create_trigger",
-    "prophecy": "create_promise",
-    "prophesy": "create_promise",
-    "foretell": "create_promise",
-    "promise": "create_promise",
-    "create_prophecy": "create_promise",
-}
+# Alias type-strings (alias -> canonical effect) live in the effect registry now (see the
+# top-of-file import), so the registry is the single home for effect-name knowledge.
 
 # Status names that the LLM might use as effect type directly.
 _STATUS_AS_TYPE: dict[str, tuple[str, str]] = {

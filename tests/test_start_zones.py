@@ -83,6 +83,41 @@ def test_bazaar_is_a_calm_trading_hub() -> None:
     assert any(p.name == "Saffira Doss" and p.wares for p in profiles)
 
 
+def test_bazaar_seeds_visible_spell_inspiration_props() -> None:
+    engine = GameEngine(seed=7, scenario="bazaar")
+    market_props = [
+        entity
+        for entity in engine.state.entities.values()
+        if entity.kind == "prop" and {"trade", "vint"} & entity.tags
+    ]
+    assert len(market_props) >= 12
+    prop_names = {
+        entity.name
+        for entity in engine.state.entities.values()
+        if entity.kind == "prop"
+    }
+    assert {
+        "red-thread ledger",
+        "brass coin scales",
+        "spice brazier",
+        "ink-seller tray",
+        "tariff charm-post",
+    } <= prop_names
+
+    anchors = engine.nearby_spell_anchors(
+        "bind the debtor with red thread, coin scales, and spice smoke",
+        limit=12,
+    )
+    by_name = {anchor["name"]: anchor for anchor in anchors}
+    assert "red-thread ledger" in by_name
+    assert "brass coin scales" in by_name
+    assert "spice brazier" in by_name
+    assert "bind by oath" in by_name["red-thread ledger"]["affordances"]
+    assert "measure a curse" in by_name["brass coin scales"]["affordances"]
+    assert "make choking smoke" in by_name["spice brazier"]["affordances"]
+    assert by_name["spice brazier"]["recommended_effect_patterns"]
+
+
 def test_warren_is_a_dense_dungeon_with_a_safe_entry() -> None:
     engine = GameEngine(seed=7, scenario="warren")
     counts = _counts(engine)

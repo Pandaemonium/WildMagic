@@ -102,6 +102,7 @@ ignoring the spell contract in creative ways.
 | `WILDMAGIC_*_OLLAMA_KEEP_ALIVE` | yes | `10m` | how long the server keeps the model resident after a request |
 | `WILDMAGIC_*_OLLAMA_THINK` | yes | off | request model thinking (slower; usually unnecessary) |
 | `WILDMAGIC_*_OLLAMA_FORMAT` | yes | on | ask Ollama for strict JSON output (auto-retries without it on grammar errors) |
+| `WILDMAGIC_*_OLLAMA_SCHEMA` | yes | off | opt in to per-cast JSON schema decoding for wild magic; narrows the effect enum to routed core/card effects instead of generic JSON mode |
 | `WILDMAGIC_OLLAMA_TEMPERATURE` | no | 0.25 | wild/town/lore/canon temperature |
 | `WILDMAGIC_DIALOGUE_TEMPERATURE` | no | 0.7 | dialogue temperature |
 | `WILDMAGIC_TRADE_TEMPERATURE` | no | 0.5 | falls back to the dialogue variable if unset |
@@ -327,6 +328,10 @@ visible there in one minute.
 - **Spells return prose or broken JSON.** Confirm `WILDMAGIC_OLLAMA_FORMAT` is on, try a
   larger/instruct-tuned model, and check the audit log for what the model actually said.
   The resolver already retries (`WILDMAGIC_OLLAMA_RESOLUTION_ATTEMPTS`).
+- **Want stricter wild-magic decoding.** Set `WILDMAGIC_WILD_OLLAMA_SCHEMA=1` (or
+  `WILDMAGIC_OLLAMA_SCHEMA=1`) to send Ollama the routed per-cast response schema instead
+  of `format:"json"`. This is stricter but intentionally opt-in; leave it off if your
+  Ollama/model build has schema-grammar issues.
 - **Mock responses during an Ollama run** (log lines marked `*>` instead of `>`): a
   provider failure triggered the fallback. Set `WILDMAGIC_ENABLE_FALLBACKS=0` to surface
   the real error instead.

@@ -1218,7 +1218,7 @@ class _GenerationMixin:
                 {"saltmarket", "market_stall", "town_building"},
             )
 
-        self._place_hub_player_and_stair(stalls[-1])
+        player_spot = self._place_hub_player_and_stair(stalls[-1])
 
         # Hand-authored anchors first; procedural peddlers fill the rest.
         named = [
@@ -1302,7 +1302,7 @@ class _GenerationMixin:
                 memory="A wild mage's bounty was posted at dawn; she took the notice down herself.",
             ),
         ]
-        occupied: set[tuple[int, int]] = {(state.player.x, state.player.y)}
+        occupied: set[tuple[int, int]] = {player_spot, stalls[-1].center}
         for spec, room in zip(named, stalls):
             spot = self._random_unoccupied_open_tile_in_room(room, occupied)
             if spot is None:
@@ -1330,6 +1330,7 @@ class _GenerationMixin:
 
         self._populate_hub_vendors(zone_rng, stalls[len(named) :], occupied)
         self._place_books_in_labeled_rooms()
+        self._place_saltmarket_props(zone_rng, stalls, occupied)
         state.add_message(
             "The Saltmarket opens around you -- a riot of awnings, spice-smoke, and "
             "haggling that never quite stops."
@@ -1338,6 +1339,61 @@ class _GenerationMixin:
             "Buy, sell, and ask after rumors. The old market cellar stair is the only way down."
         )
         self.update_fov()
+
+    def _place_saltmarket_props(
+        self,
+        zone_rng: random.Random,
+        stalls: list[Room],
+        occupied: set[tuple[int, int]],
+    ) -> None:
+        """Hand-authored Vint/Saltmarket props: spell anchors first, scenery second."""
+        occupied.update((entity.x, entity.y) for entity in self.state.entities.values())
+
+        player = self.state.player
+        plaza_props = (
+            "red_thread_ledger",
+            "brass_coin_scales",
+            "spice_brazier",
+            "ink_seller_tray",
+            "tariff_charm_post",
+        )
+        plaza_offsets = [
+            (-3, -1),
+            (-2, 2),
+            (2, -2),
+            (3, 1),
+            (-1, -3),
+            (1, 3),
+            (0, 2),
+            (2, 0),
+        ]
+        zone_rng.shuffle(plaza_offsets)
+        for prop_id in plaza_props:
+            for dx, dy in plaza_offsets:
+                spot = (player.x + dx, player.y + dy)
+                if spot in occupied:
+                    continue
+                if self.can_occupy(spot[0], spot[1]):
+                    prop = self.spawn_prop(prop_id, spot[0], spot[1])
+                    if prop is not None:
+                        occupied.add(spot)
+                    break
+
+        stall_sets = (
+            ("spice_brazier", "silk_sample_rack"),
+            ("whisper_awning", "debtor_bell_frame"),
+            ("mirror_bolt_stand", "water_clock_stall"),
+            ("red_thread_ledger", "brass_coin_scales"),
+            ("ink_seller_tray", "tariff_charm_post"),
+        )
+        for index, room in enumerate(stalls):
+            for prop_id in stall_sets[index % len(stall_sets)]:
+                spot = self._random_unoccupied_open_tile_in_room(room, occupied)
+                if spot is None:
+                    continue
+                prop = self.spawn_prop(prop_id, spot[0], spot[1])
+                if prop is not None:
+                    occupied.add(spot)
 
     def _populate_hub_vendors(
         self,
