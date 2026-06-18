@@ -30,6 +30,7 @@ from .autoplay import (
     validate_agent_command,
 )
 from .config import DEFAULT_MODEL, audit_dir, get_config_value, set_config_value
+from .curses import curse_card
 from .game_data import _TOWN_GEN_TIMEOUT, EQUIPMENT_SPECS
 from .items import infer_equipment_slot
 from .normalize import normalize_id
@@ -576,6 +577,8 @@ class GameUI:
 
         self.inspect_tile: tuple[int, int] | None = None
         self.inspect_button_rects: list[tuple[pygame.Rect, str]] = []
+        self.curse_rects: list[tuple[pygame.Rect, str]] = []
+        self.curse_tooltip_id: str | None = None
         self.book_popup: dict[str, Any] | None = None
 
         # F7 debug overlay: the background generation (canon prewarm) queue.
@@ -1057,6 +1060,12 @@ class GameUI:
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
             mx, my = event.pos
+            for rect, curse_id in self.curse_rects:
+                if rect.collidepoint(event.pos):
+                    self.curse_tooltip_id = (
+                        None if self.curse_tooltip_id == curse_id else curse_id
+                    )
+                    return
             if (
                 MAP_OFFSET_X <= mx < MAP_OFFSET_X + MAP_PIXEL_WIDTH
                 and 0 <= my < MAP_PIXEL_HEIGHT
@@ -1066,6 +1075,7 @@ class GameUI:
                 self.inspect_tile = None if self.inspect_tile == (tx, ty) else (tx, ty)
             else:
                 self.inspect_tile = None
+                self.curse_tooltip_id = None
             return
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
@@ -1772,6 +1782,7 @@ class GameUI:
             self.draw_resolving_indicator()
         if self.inspect_tile is not None:
             self.draw_inspect_tooltip()
+        self.draw_curse_tooltip()
         if self.menu_active:
             self.draw_menu()
         if self.book_popup is not None:
@@ -2883,6 +2894,7 @@ class GameUI:
         )
         cursor_y = self.draw_bars(x + 20, cursor_y + 16, player)
         cursor_y = self.draw_gold(x + 20, cursor_y + 4)
+        cursor_y = self.draw_experience(x + 20, cursor_y + 2)
         cursor_y = self.draw_statuses(x + 20, cursor_y + 10, player)
         cursor_y = self.draw_visible_enemies(x + 20, cursor_y + 8)
         cursor_y = self.draw_inventory(x + 20, cursor_y + 8)
@@ -2939,6 +2951,10 @@ class GameUI:
         in the same accent color the inventory header already uses for it."""
         amount = self.engine.state.inventory.get("gold", 0)
         return self.draw_text(f"Gold: {amount}", x, y, self.small_font, GOLD)
+
+    def draw_experience(self, x: int, y: int) -> int:
+        amount = self.engine.state.experience
+        return self.draw_text(f"Experience: {amount}", x, y, self.small_font, ACCENT)
 
     def draw_stat_bar(
         self,
@@ -3089,13 +3105,69 @@ class GameUI:
 
     def draw_curses(self, x: int, y: int) -> int:
         curses = list(self.engine.state.curses.values())
+        self.curse_rects = []
         y = self.draw_text("Curses", x, y, self.small_font, DANGER if curses else MUTED)
         if not curses:
             return self.draw_text("none", x, y, self.small_font, MUTED)
         for curse in curses[-3:]:
             text = f"{curse.name} x{curse.stacks}"
-            y = self.draw_text(text, x, y, self.small_font, TEXT)
+            surf = self.small_font.render(text, True, TEXT)
+            rect = pygame.Rect(x, y, surf.get_width(), surf.get_height())
+            self.screen.blit(surf, (x, y))
+            self.curse_rects.append((rect, curse.id))
+            y += self.small_font.get_linesize()
         return y
+
+    def draw_curse_tooltip(self) -> None:
+        hover_id = None
+        mouse = pygame.mouse.get_pos()
+        for rect, curse_id in self.curse_rects:
+            if rect.collidepoint(mouse):
+                hover_id = curse_id
+                break
+        curse_id = self.curse_tooltip_id or hover_id
+        if not curse_id:
+            return
+        curse = self.engine.state.curses.get(curse_id)
+        if curse is None:
+            self.curse_tooltip_id = None
+            return
+        card = curse_card(curse)
+        lines: list[tuple[str, tuple[int, int, int]]] = [
+            (f"{card['name']} x{card['stacks']}", DANGER),
+            (card["description"], TEXT),
+        ]
+        for limit in card["mechanical_limits"]:
+            lines.append((limit, GOLD))
+        if card["semantic_prompt"]:
+            lines.append((card["semantic_prompt"], MUTED))
+        lines.append(
+            (
+                f"Lifts at {card['xp_to_clear']} XP earned "
+                f"(this stack: {card['clear_progress']}/{card['xp_to_clear']})",
+                ACCENT,
+            )
+        )
+        wrapped: list[tuple[str, tuple[int, int, int]]] = []
+        for text, color in lines:
+            for part in wrap_text(str(text), 38):
+                wrapped.append((part, color))
+        pad = 10
+        line_h = self.small_font.get_linesize() + 2
+        width = 320
+        height = pad * 2 + line_h * len(wrapped)
+        x = min(mouse[0] + 14, WINDOW_WIDTH - width - 6)
+        y = min(mouse[1] + 14, WINDOW_HEIGHT - height - 6)
+        pygame.draw.rect(
+            self.screen, (20, 22, 30), (x, y, width, height), border_radius=6
+        )
+        pygame.draw.rect(
+            self.screen, PANEL_EDGE, (x, y, width, height), 1, border_radius=6
+        )
+        cy = y + pad
+        for text, color in wrapped:
+            self.draw_text(text, x + pad, cy, self.small_font, color)
+            cy += line_h
 
     def draw_standing(self, x: int, y: int) -> int:
         """The emergent-world standing readout (Phase 0): each power that has taken

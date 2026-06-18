@@ -346,6 +346,7 @@ class GameState:
     depth: int = 1
     max_depth: int = 3
     stats: GameStats = field(default_factory=GameStats)
+    experience: int = 0
     zone_x: int = 0
     zone_y: int = 0
     zone_type: str = "frontier"
@@ -489,6 +490,10 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         # snapshot/rollback and is simply cleared when a cast rolls back. See operations.py.
         self._delta_capture = False
         self._delta_log: list[StateDelta] = []
+        # Per-cast sticky bindings for volatile single-target selectors. If one effect
+        # changes the nearest enemy's faction, later effects in the same resolution should
+        # still refer to the creature the resolver meant.
+        self._cast_ref_cache: dict[str, str] = {}
         # Town generation: background executor + pending futures (not in GameState — not serializable)
         self._pending_towns: dict[tuple[int, int], concurrent.futures.Future[Any]] = {}
         self._pending_town_contexts: dict[tuple[int, int], dict] = {}
@@ -1845,6 +1850,8 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         for curse_id, curse in state.curses.items():
             if curse.id != curse_id or curse.stacks < 1:
                 errors.append(f"curse {curse_id!r} is invalid")
+            if curse.xp_to_clear < 1 or curse.clear_progress < 0:
+                errors.append(f"curse {curse_id!r} has invalid clearing progress")
         for table_name, table in (
             ("tile_tags", state.tile_tags),
             ("tile_durations", state.tile_durations),
