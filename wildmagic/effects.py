@@ -5,6 +5,8 @@ import hashlib
 import math
 from typing import Any
 
+from . import refs
+from . import operations
 from .geometry import bresenham_line, sign, unique_points
 from .models import (
     BLOCKING_TILES,
@@ -32,7 +34,6 @@ from .normalize import (
     tile_from_name,
 )
 from .promises import Objective, WorldPromise, parse_spatial_hint
-from .semantics import entity_anchor
 from .spell_contract import STATUS_FLAVOR_ALIASES, validate_resolution
 from .templates import creature_template, item_template
 
@@ -49,6 +50,24 @@ def _positive_cost_amount(value: Any, maximum: int, default: int = 1) -> int:
     return max(1, min(maximum, amount))
 
 
+_REF_FIELDS = {
+    "target",
+    "center",
+    "origin",
+    "source",
+    "sink",
+    "anchor",
+    "attached_to",
+    "object",
+    "prop",
+    "destination",
+    "to",
+    "from",
+    "position",
+    "dest",
+}
+
+
 class _EffectsMixin:
     """Effect/cost application and placement helpers extracted from GameEngine."""
 
@@ -62,6 +81,12 @@ class _EffectsMixin:
         validation_error = validate_resolution(resolution)
         if validation_error:
             message = f"Wild magic failed validation: {validation_error}"
+            self.state.add_message(message)
+            return WildMagicOutcome(False, True, [message])
+
+        ref_error = self._resolution_ref_error(resolution)
+        if ref_error:
+            message = f"Wild magic failed validation: {ref_error}"
             self.state.add_message(message)
             return WildMagicOutcome(False, True, [message])
 
@@ -83,6 +108,9 @@ class _EffectsMixin:
             return WildMagicOutcome(True, False, [reason])
 
         snapshot = copy.deepcopy(self.state)
+        # Capture operation deltas while the spell's effects + costs apply (Stage 6). Turned
+        # off before finish_player_turn so the turn's environment/AI ticks aren't counted.
+        self.begin_delta_capture()
         try:
             if outcome_text:
                 self.state.add_message(outcome_text)
@@ -110,17 +138,21 @@ class _EffectsMixin:
                 self.state.add_message(message)
                 messages.append(message)
 
+            deltas = self.collected_deltas()
+            self.end_delta_capture()
             self.state.stats.spells_cast += 1
             self.finish_player_turn()
             state_errors = self.validate_state()
             if state_errors:
                 self.state = snapshot
+                self.discard_deltas()
                 message = f"Wild magic failed state validation: {state_errors[0]}"
                 self.state.add_message(message)
                 return WildMagicOutcome(False, True, [message])
-            return WildMagicOutcome(True, False, messages)
+            return WildMagicOutcome(True, False, messages, deltas=deltas)
         except Exception as exc:
             self.state = snapshot
+            self.discard_deltas()
             message = f"Wild magic failed during application: {exc}"
             self.state.add_message(message)
             return WildMagicOutcome(False, True, [message])
@@ -239,9 +271,12 @@ class _EffectsMixin:
         if not isinstance(effect, dict):
             return []
         effect = _flatten_effect(effect)
+        ref_error = self._effect_ref_error(effect)
+        if ref_error:
+            raise ValueError(ref_error)
         effect_type = str(effect.get("type", "")).lower()
         if effect_type == "damage":
-            target = self.resolve_target(str(effect.get("target") or "nearest_enemy"))
+            target = self.resolve_target(effect.get("target") or "nearest_enemy")
             if not target:
                 return ["The spell claws at empty air."]
             amount = (
@@ -344,7 +379,7 @@ class _EffectsMixin:
                 return ["The status finds no one to cling to."]
             return [f"{display_name.title()} spreads to: {', '.join(affected)}."]
         if effect_type == "heal":
-            target = self.resolve_target(str(effect.get("target") or "player"))
+            target = self.resolve_target(effect.get("target") or "player")
             if not target:
                 return []
             amount = (
@@ -361,7 +396,7 @@ class _EffectsMixin:
                 ]
             return [f"{target.name} {self._verb(target, 'heal', 'heals')} {actual} HP."]
         if effect_type == "restore_mana":
-            target = self.resolve_target(str(effect.get("target") or "player"))
+            target = self.resolve_target(effect.get("target") or "player")
             if not target:
                 return []
             amount = (
@@ -376,7 +411,7 @@ class _EffectsMixin:
                 f"{target.name} {self._verb(target, 'recover', 'recovers')} {gained} mana."
             ]
         if effect_type == "teleport":
-            target = self.resolve_target(str(effect.get("target") or "player"))
+            target = self.resolve_target(effect.get("target") or "player")
             if not target:
                 return []
             x, y = self._teleport_destination(effect)
@@ -395,7 +430,7 @@ class _EffectsMixin:
             if not targets:
                 return []
             origin = (
-                self.resolve_target(str(effect.get("origin") or "player"))
+                self.resolve_target(effect.get("origin") or "player")
                 or self.state.player
             )
             moved_total = 0
@@ -511,7 +546,7 @@ class _EffectsMixin:
             group_targets = self.resolve_target_group(target_str)
             if group_targets:
                 for ent in group_targets:
-                    ent.statuses[status] = dur_val
+                    operations.apply_status(self, ent, status, dur_val)
                     if display_name != status.replace("_", " "):
                         ent.status_display[status] = display_name
                     if expiry_text:
@@ -522,7 +557,7 @@ class _EffectsMixin:
             target = self.resolve_target(target_str)
             if not target or target.kind == "item":
                 return []
-            target.statuses[status] = dur_val
+            operations.apply_status(self, target, status, dur_val)
             if display_name != status.replace("_", " "):
                 target.status_display[status] = display_name
             if expiry_text:
@@ -531,7 +566,7 @@ class _EffectsMixin:
                 f"{target.name} {self._verb(target, 'are', 'is')} now {display_name}."
             ]
         if effect_type == "remove_status":
-            target = self.resolve_target(str(effect.get("target") or "player"))
+            target = self.resolve_target(effect.get("target") or "player")
             if not target:
                 return []
             status = normalize_id(str(effect.get("status") or ""))
@@ -628,11 +663,16 @@ class _EffectsMixin:
         if effect_type == "conjure_creature":
             return self._conjure_creature(effect)
         if effect_type == "transform_item":
-            target_type = normalize_id(str(effect.get("target") or "nearest_item"))
+            raw_target = effect.get("target")
+            target_type = normalize_id(str(raw_target or "nearest_item"))
             item = str(effect.get("item") or effect.get("item_type") or "").strip()
             new_name = str(
-                effect.get("new_name") or effect.get("new_item_type") or "oddment"
+                effect.get("new_name")
+                or effect.get("name")
+                or effect.get("new_item_type")
+                or "oddment"
             ).strip()
+            new_description = str(effect.get("description") or "").strip()
             new_material = str(effect.get("material") or "").strip() or None
             new_tags = [
                 normalize_id(str(tag))
@@ -640,10 +680,9 @@ class _EffectsMixin:
                 if str(tag).strip()
             ]
 
-            if not item:
-                return []
-
             if target_type == "inventory":
+                if not item:
+                    return []
                 current = self.state.inventory.get(item, 0)
                 if current > 0:
                     self.state.inventory[item] = current - 1
@@ -655,29 +694,56 @@ class _EffectsMixin:
                     return [f"The {item} in your inventory becomes {new_name}."]
                 return [f"You have no {item} to transform."]
 
-            # Find nearest item entity matching the name
-            player = self.state.player
-            candidates = [
-                e
-                for e in self.state.entities.values()
-                if e.kind == "item"
-                and e.alive
-                and (
-                    item.lower() in e.name.lower()
-                    or item.lower() in (e.item_type or "").lower()
-                )
-            ]
-            if not candidates:
-                return [f"No {item} found to transform."]
-            target = min(candidates, key=lambda e: self.distance(player, e))
+            target = None
+            if raw_target is not None and target_type not in {
+                "item",
+                "nearest_item",
+                "prop",
+                "nearest_prop",
+                "object",
+                "nearest_object",
+            }:
+                bound = self.resolve_target(raw_target)
+                if bound is not None and bound.kind in {"item", "prop"}:
+                    target = bound
 
-            target.name = new_name
-            target.item_type = new_name
+            player = self.state.player
+            if target is None:
+                wanted_kinds = {"item"}
+                if target_type in {"prop", "nearest_prop"}:
+                    wanted_kinds = {"prop"}
+                elif target_type in {"object", "nearest_object"}:
+                    wanted_kinds = {"item", "prop"}
+                candidates = []
+                for entity in self.state.entities.values():
+                    if entity.kind not in wanted_kinds or not entity.alive:
+                        continue
+                    if item and not (
+                        item.lower() in entity.name.lower()
+                        or item.lower() in (entity.item_type or "").lower()
+                    ):
+                        continue
+                    candidates.append(entity)
+                if not candidates:
+                    label = item or target_type.replace("_", " ")
+                    return [f"No {label} found to transform."]
+                target = min(candidates, key=lambda e: self.distance(player, e))
+
+            old_name = target.name
+            target.name = new_name[:40] or target.name
+            if target.kind == "item":
+                target.item_type = target.name
+            else:
+                target.details["transformed_by_magic"] = True
+                if new_description:
+                    target.description = new_description[:240]
+                elif not target.description:
+                    target.description = f"It has been transformed into {target.name}."
             if new_material:
                 target.material = new_material
             if new_tags:
                 target.tags.update(new_tags)
-            return [f"The {item} on the ground transforms into {new_name}."]
+            return [f"The {old_name} transforms into {target.name}."]
 
         if effect_type == "modify_inventory":
             item = str(effect.get("item") or effect.get("item_type") or "").strip()
@@ -698,7 +764,7 @@ class _EffectsMixin:
                 self.state.inventory.pop(item, None)
             return [f"Inventory shifts: {item} x{new_amount}."]
         if effect_type == "transform_entity":
-            target = self.resolve_target(str(effect.get("target") or "nearest_enemy"))
+            target = self.resolve_target(effect.get("target") or "nearest_enemy")
             if not target:
                 return []
             if "name" in effect:
@@ -724,7 +790,7 @@ class _EffectsMixin:
                 return ["You are transformed."]
             return [f"{target.name} {self._verb(target, 'are', 'is')} transformed."]
         if effect_type == "change_faction":
-            target = self.resolve_target(str(effect.get("target") or "nearest_enemy"))
+            target = self.resolve_target(effect.get("target") or "nearest_enemy")
             if not target or target.kind == "item":
                 return []
             new_faction = normalize_faction(effect.get("faction"), default="neutral")
@@ -732,7 +798,7 @@ class _EffectsMixin:
             target.ai = None if target.faction in {"ally", "player"} else target.ai
             return [f"{target.name} now belongs to {target.faction}."]
         if effect_type in {"add_tag", "remove_tag"}:
-            target = self.resolve_target(str(effect.get("target") or "player"))
+            target = self.resolve_target(effect.get("target") or "player")
             tag = normalize_id(str(effect.get("tag") or "strange"))
             if not target:
                 return []
@@ -746,7 +812,7 @@ class _EffectsMixin:
                 f"{target.name} {self._verb(target, 'lose', 'loses')} the {tag} tag."
             ]
         if effect_type in {"add_resistance", "add_weakness"}:
-            target = self.resolve_target(str(effect.get("target") or "player"))
+            target = self.resolve_target(effect.get("target") or "player")
             if not target:
                 return []
             damage_type = normalize_id(
@@ -857,7 +923,7 @@ class _EffectsMixin:
             message = self._apply_cost({"type": "curse", **effect})
             return [message] if message else []
         if effect_type == "possess":
-            target = self.resolve_target(str(effect.get("target") or "nearest_enemy"))
+            target = self.resolve_target(effect.get("target") or "nearest_enemy")
             if not target or target.kind in {"item", "prop"}:
                 return ["The possession finds no one to inhabit."]
             return self.swap_control_to(target.id)
@@ -873,6 +939,37 @@ class _EffectsMixin:
             text = str(effect.get("text") or "").strip()
             return [text] if text else []
         return []
+
+    def _resolution_ref_error(self, resolution: dict[str, Any]) -> str | None:
+        for effect in coerce_list(resolution.get("effects")):
+            if isinstance(effect, dict):
+                error = self._effect_ref_error(_flatten_effect(effect))
+                if error:
+                    return error
+        return None
+
+    def _effect_ref_error(self, effect: dict[str, Any]) -> str | None:
+        """Validate explicit typed refs before mutation.
+
+        Legacy string targets keep their historical forgiving behavior. Dict-shaped refs are
+        deliberate contracts, so unknown ids/selectors or out-of-bounds tiles make the cast a
+        technical failure before any partial state change occurs.
+        """
+        for key in _REF_FIELDS:
+            if key in effect:
+                error = refs.typed_ref_error(self, effect.get(key))
+                if error:
+                    return f"{key}: {error}"
+        for tile in coerce_list(effect.get("tiles")):
+            error = refs.typed_ref_error(self, tile)
+            if error:
+                return f"tiles: {error}"
+        for nested in coerce_list(effect.get("effects") or effect.get("effect")):
+            if isinstance(nested, dict):
+                error = self._effect_ref_error(_flatten_effect(nested))
+                if error:
+                    return error
+        return None
 
     # ------------------------------------------------------ persistent effects
     _SYMPATHETIC_KINDS = {
@@ -1082,7 +1179,7 @@ class _EffectsMixin:
         NPCProfile.memory (the 'things_i_have_noticed' the dialogue model sees). Forgetting
         the caster from a hostile NPC also calms it -- 'make the guard forget me' should
         actually end the pursuit, not just change small talk."""
-        target = self.resolve_target(str(effect.get("target") or "nearest_enemy"))
+        target = self.resolve_target(effect.get("target") or "nearest_enemy")
         if target is None or target.kind != "npc":
             target = self._nearest_npc()
         if target is None:
@@ -1314,7 +1411,7 @@ class _EffectsMixin:
             key = f"{x},{y}"
             self.state.tile_auras.setdefault(key, []).extend(auras)
             return ["The ground takes on a charged, waiting hush."]
-        target = self.resolve_target(str(effect.get("target") or "player"))
+        target = self.resolve_target(effect.get("target") or "player")
         if (
             target is None
             or target.kind in {"item"}
@@ -1448,7 +1545,7 @@ class _EffectsMixin:
         who notices it, the AI when it acts). The semantic-effects write path -- see
         wildmagic/semantics.py and docs/SEMANTIC_EFFECTS.md. Stored on the entity (so it rides
         into prompts for free) AND in the ledger (so place/faction queries can find it)."""
-        target = self.resolve_target(str(effect.get("target") or "nearest_enemy"))
+        target = self.resolve_target(effect.get("target") or "nearest_enemy")
         if (
             target is None
             or target.kind in {"item"}
@@ -1462,16 +1559,13 @@ class _EffectsMixin:
         ]
         if not text:
             return ["The trait has no shape to take, and fades."]
-        # De-dupe on the entity, cap the narrative channel so it never silts up.
-        if text.lower() not in {t.lower() for t in target.traits}:
-            target.traits.append(text)
-            target.traits[:] = target.traits[-8:]
         salience = effect.get("salience")
-        self.record_note(
-            entity_anchor(target.id),
+        # The durable entity-trait lane (Stage 7): writes the entity + the semantic ledger
+        # and records a `trait` delta. See wildmagic/operations.py.
+        operations.write_trait(
+            self,
+            target,
             text,
-            kind="trait",
-            source="spell:add_trait",
             salience=int(salience) if isinstance(salience, (int, float)) else 4,
         )
         who = "you" if target.id == self.state.player_id else target.name
@@ -1712,15 +1806,19 @@ class _EffectsMixin:
                 clamp_int(effect.get("x"), 0, self.state.width - 1),
                 clamp_int(effect.get("y"), 0, self.state.height - 1),
             )
-        target_ref = str(effect.get("target") or effect.get("center") or "")
-        target = self.resolve_target(target_ref)
-        if target:
-            return target.x, target.y
-        # A bare-tile player mark has no occupant, so resolve_target returns None;
-        # honor the clicked square rather than defaulting to the player's feet.
+        # The target/center value may be a legacy string or a typed ref ({"kind":"tile"...},
+        # {"kind":"entity"...}, {"selector":...}). bind_position resolves all of them.
+        raw = effect.get("target")
+        if not raw:
+            raw = effect.get("center")
+        pos = refs.bind_position(self, refs.normalize_ref(raw))
+        if pos is not None:
+            return pos
+        # A bare-tile player mark named only by the placement key has no occupant, so the
+        # ref above resolved to nothing; honor the clicked square rather than the player's feet.
         marked = self.selected_target_tile()
         if marked is not None and (
-            self.references_selected_target(target_ref)
+            self.references_selected_target(raw)
             or self.references_selected_target(effect.get("placement"))
         ):
             return marked
@@ -1853,6 +1951,19 @@ class _EffectsMixin:
                 return x, y
             return self.find_open_tile_near(x, y)
 
+        # A typed tile/room ref as the target anchors placement on that square directly
+        # (e.g. "conjure a wall at {kind: tile, x, y}"). Entity/selector/legacy-string
+        # targets fall through to the position logic below so a live occupant's current
+        # tile (not a stale coordinate) is used.
+        target_ref = refs.normalize_ref(effect.get("target"))
+        if target_ref.kind in {"tile", "room"}:
+            anchored = refs.bind_position(self, target_ref)
+            if anchored is not None:
+                ax, ay = anchored
+                if not prefer_unblocked or self.can_occupy(ax, ay):
+                    return ax, ay
+                return self.find_open_tile_near(ax, ay)
+
         # An explicit player mark on an empty square: resolve_target finds no occupant,
         # so anchor placement on the clicked tile directly (e.g. "conjure a wall there").
         # A live occupant falls through to the normal target path so its current
@@ -1871,7 +1982,7 @@ class _EffectsMixin:
                 return mx, my
             return self.find_open_tile_near(mx, my)
 
-        target = self.resolve_target(str(effect.get("target") or "nearest_enemy"))
+        target = self.resolve_target(effect.get("target") or "nearest_enemy")
         player = self.state.player
         anchor = target if target is not None else player
         if placement == "target_tile":

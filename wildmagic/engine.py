@@ -12,11 +12,9 @@ from .models import (
     BLOCKING_TILES,
     ZoneSnapshot,
     DOOR,
-    DAMAGE_TYPES,
     FIRE,
     FLOOR,
     ICE_WALL,
-    MECHANICAL_STATUSES,
     MIST,
     OPEN_DOOR,
     POISON_CLOUD,
@@ -63,10 +61,9 @@ from .ai import _AIMixin
 from .generation import _GenerationMixin
 from .effects import _EffectsMixin
 from .items import _ItemsMixin
-from .templates import (
-    creature_template_ids,
-    item_template_ids,
-)
+from . import state_view
+from . import refs
+from .operations import StateDelta
 from .props import get_prop_template
 from .prop_gen import make_prop_provider, PropProvider, PropSpec, MECHANICAL_TAGS
 from .regions import Region, get_region
@@ -105,7 +102,6 @@ from .normalize import (
     normalize_faction,
     normalize_trigger_name,
     infer_behavior_tags,
-    singular_target_tag,
     coerce_list,
 )
 
@@ -124,10 +120,14 @@ _PROP_TAG_AFFORDANCES: dict[str, list[str]] = {
     "ash": ["raise smoke or mist", "summon embers", "mark with old fire"],
     "blood": ["curse", "bleed", "call a debt"],
     "bone": ["summon spirits", "root or bind", "make brittle shards"],
+    "balance": ["weigh a debt", "tip a bargain", "measure a curse"],
     "broken": ["shatter outward", "scatter rubble", "turn failure into force"],
     "cold": ["freeze", "slow", "make slick ice"],
+    "cloth": ["snare or muffle", "carry a charm", "catch fire"],
+    "contract": ["bind by oath", "call in a debt", "mark a bargain"],
     "crystal": ["refract light", "shatter", "amplify magic"],
     "cursed": ["curse", "frighten", "mark a target"],
+    "debt": ["call in a debt", "summon collection", "curse unpaid promises"],
     "death": ["summon spirits", "drain life", "delay a consequence"],
     "debris": ["make rubble", "scatter shrapnel", "block movement"],
     "dry": ["ignite", "make ash", "spread dust"],
@@ -141,6 +141,8 @@ _PROP_TAG_AFFORDANCES: dict[str, list[str]] = {
     "holy": ["ward", "reveal", "burn undead or cursed things"],
     "hot": ["ignite", "burn", "melt ice"],
     "insect": ["summon swarm", "crawl over enemies", "spread panic"],
+    "ink": ["stain or reveal", "write a mark", "spread a slick"],
+    "law": ["bind with statute", "summon hostile attention", "seal a path"],
     "light": ["reveal", "blind or mark", "project a beam"],
     "lightning": ["shock", "stun", "conduct through metal or water"],
     "liquid": ["flood", "splash", "turn to mist or ice"],
@@ -148,20 +150,31 @@ _PROP_TAG_AFFORDANCES: dict[str, list[str]] = {
     "magic": ["amplify the spell", "summon", "create a ward"],
     "mechanical": ["trigger a mechanism", "spin time or force", "launch or pull"],
     "metal": ["conduct lightning", "magnetize", "make shrapnel"],
+    "mirror": ["reveal", "reflect a spell", "confuse with doubles"],
     "music": ["charm or confuse", "push as sound", "summon echoes"],
     "paper": ["burn into sigils", "reveal writing", "scatter pages"],
     "plant": ["grow vines", "snare", "release spores or pollen"],
     "powder": ["make a circle", "blind with dust", "ignite a flash"],
     "prison": ["bind", "root", "lock a target in place"],
+    "readable": ["reveal writing", "name a curse", "seed a rumor"],
     "ritual": ["summon", "curse", "ward"],
     "rope": ["bind", "pull", "snare"],
+    "rumor": ["reveal secrets", "confuse or frighten", "carry a message"],
     "sharp": ["bleed", "make caltrops", "shred armor"],
     "silk": ["web", "snare", "muffle sound"],
     "smelly": ["poison", "frighten", "make a choking cloud"],
+    "smoke": ["make mist", "blind or choke", "hide movement"],
     "snaring": ["root", "web", "slow movement"],
+    "spice": ["make choking smoke", "enrage or charm", "mark by scent"],
     "stone": ["make rubble", "petrify", "raise a barrier"],
+    "thread": ["bind", "stitch a ward", "pull fate taut"],
+    "time": ["delay a consequence", "slow or hasten", "schedule an omen"],
     "toxic": ["poison", "make poison cloud", "sicken"],
+    "trade": ["swap or summon goods", "bind a bargain", "price a cost"],
     "trap": ["trigger", "create ward", "delay an effect"],
+    "vint": ["twist gossip", "weave a charm", "bind with civic rumor"],
+    "volatile": ["backfire", "explode", "spill wild consequences"],
+    "ward": ["protect", "repel", "store a trigger"],
     "water": ["flood", "mist", "freeze or conduct lightning"],
     "weapons": ["launch blades", "arm a summon", "make shrapnel"],
     "wet": ["mist", "freeze", "conduct lightning"],
@@ -471,6 +484,11 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         self._next_entity_number = 1
         self._conducting_lightning = False
         self._npc_perception_message_count = 0
+        # Operation deltas (Stage 6): a transient per-cast log of the mutations a wild-magic
+        # resolution applied. Lives on the engine (not GameState), so it is untouched by the
+        # snapshot/rollback and is simply cleared when a cast rolls back. See operations.py.
+        self._delta_capture = False
+        self._delta_log: list[StateDelta] = []
         # Town generation: background executor + pending futures (not in GameState — not serializable)
         self._pending_towns: dict[tuple[int, int], concurrent.futures.Future[Any]] = {}
         self._pending_town_contexts: dict[tuple[int, int], dict] = {}
@@ -554,6 +572,21 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         if auras:
             entity.auras = [dict(aura) for aura in auras]
         self.state.entities[entity.id] = entity
+        if self._delta_capture:
+            self.record_delta(
+                StateDelta(
+                    op="create_entity",
+                    target=entity.id,
+                    summary=f"{entity.name} ({faction}) appeared at {x},{y}",
+                    details={
+                        "kind": "actor",
+                        "name": name,
+                        "faction": faction,
+                        "x": x,
+                        "y": y,
+                    },
+                )
+            )
         return entity
 
     def spawn_npc(
@@ -1732,6 +1765,15 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             for entity in self.entities_at(x, y):
                 if entity.blocks:
                     self._move_to_nearest_open_tile(entity)
+        if self._delta_capture:
+            self.record_delta(
+                StateDelta(
+                    op="create_tile",
+                    target=key,
+                    summary=f"tile at {x},{y} became {TILE_NAMES.get(tile, tile)}",
+                    details={"x": x, "y": y, "tile": tile, "duration": duration},
+                )
+            )
         return True
 
     def tile_tags_at(self, x: int, y: int) -> set[str]:
@@ -2980,12 +3022,22 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
 
     def teleport_entity(self, entity: Entity, x: int, y: int) -> bool:
         if self.can_occupy(x, y):
+            from_x, from_y = entity.x, entity.y
             entity.x = x
             entity.y = y
             if entity.id == self.state.player_id:
                 self.pick_up_items_at_player()
                 self.update_fov()
             self._apply_tile_entry(entity)
+            if self._delta_capture:
+                self.record_delta(
+                    StateDelta(
+                        op="move",
+                        target=entity.id,
+                        summary=f"{entity.name} moved to {x},{y}",
+                        details={"from": [from_x, from_y], "to": [entity.x, entity.y]},
+                    )
+                )
             return True
         return False
 
@@ -3448,6 +3500,8 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             entity = self.state.entities.get(str(ref))
             if entity is None or not entity.alive:
                 return False
+            if entity.kind == "prop" and entity.hp <= 0:
+                return False
         return True
 
     def _tick_triggers(self) -> None:
@@ -3681,6 +3735,30 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
     def has_target(self) -> bool:
         return self.state.target_x is not None and self.state.target_y is not None
 
+    # --- operation deltas (Stage 6) ------------------------------------------------------
+    def begin_delta_capture(self) -> None:
+        """Start recording operation deltas for a wild-magic cast."""
+        self._delta_capture = True
+        self._delta_log = []
+
+    def end_delta_capture(self) -> None:
+        """Stop recording (e.g. before the turn's environment/AI ticks)."""
+        self._delta_capture = False
+
+    def discard_deltas(self) -> None:
+        """Drop the recorded deltas (used when a cast rolls back)."""
+        self._delta_capture = False
+        self._delta_log = []
+
+    def record_delta(self, delta: StateDelta) -> None:
+        """Append a delta when capture is active. Shared mutators call this; outside a
+        wild-magic cast capture is off, so this is a no-op and core combat is unaffected."""
+        if getattr(self, "_delta_capture", False):
+            self._delta_log.append(delta)
+
+    def collected_deltas(self) -> list[dict[str, Any]]:
+        return [delta.to_dict() for delta in self._delta_log]
+
     def references_selected_target(self, value: Any) -> bool:
         """True when an effect's target/center/placement string names the marked square."""
         return normalize_id(str(value or "")) in self._SELECTED_TARGET_KEYWORDS
@@ -3733,68 +3811,16 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         self.state.target_y = None
         self.state.target_entity_id = None
 
-    def resolve_target(self, target_id: str | None) -> Entity | None:
-        if not target_id or target_id in {"player", "self", "@", "you", "me"}:
-            return self.state.player
-        # An explicit player-marked target overrides the nearest-enemy auto-aim. For a
-        # bare-tile mark this returns None (no occupant); callers that need a position
-        # fall back to selected_target_tile() via effect_position/resolve_placement.
-        if self.has_target() and self.references_selected_target(target_id):
-            return self.selected_target_entity()
-        if target_id in {
-            "nearest_enemy",
-            "nearest enemy",
-            "enemy",
-            "nearest_foe",
-            "nearest_entity",
-            "nearest_target",
-            "closest_enemy",
-            "target",
-            "foe",
-            "nearest_actor",
-        }:
-            return self.nearest_enemy()
-        return self.state.entities.get(target_id)
+    def resolve_target(self, target_id: Any) -> Entity | None:
+        """Resolve a single-entity reference. Accepts legacy strings (`"player"`,
+        `"nearest_enemy"`, an entity id, the selected-target keywords) and the typed refs
+        in refs.py, all through the shared binder."""
+        return refs.bind_ref(self, refs.normalize_ref(target_id))
 
-    def resolve_target_group(self, target_id: str | None) -> list[Entity]:
-        target = normalize_id(str(target_id or ""))
-        if target in {"all", "everyone", "all_entities", "all_nearby", "everything"}:
-            return [
-                entity
-                for entity in self.state.entities.values()
-                if entity.kind in {"actor", "npc"} and entity.hp > 0
-            ]
-        if target in {
-            "all_enemies",
-            "enemies",
-            "all_foes",
-            "all_hostiles",
-            "nearby_enemies",
-            "every_enemy",
-        }:
-            return self.living_enemies()
-        if target in {"allies", "all_allies", "friends", "friendlies"}:
-            return [
-                entity
-                for entity in self.state.entities.values()
-                if entity.kind in {"actor", "npc"}
-                and entity.hp > 0
-                and entity.faction in {"ally", "player"}
-            ]
-        singular = singular_target_tag(target)
-        if not singular:
-            return []
-        return [
-            entity
-            for entity in self.state.entities.values()
-            if entity.kind in {"actor", "npc"}
-            and entity.hp > 0
-            and entity.id != self.state.player_id
-            and (
-                singular in entity.tags
-                or singular in normalize_id(entity.name).split("_")
-            )
-        ]
+    def resolve_target_group(self, target_id: Any) -> list[Entity]:
+        """Resolve a group reference (selectors like `all_enemies`/`allies`, a faction ref,
+        or a singular tag) through the shared binder."""
+        return refs.bind_group(self, refs.normalize_ref(target_id))
 
     def _verb(self, entity: Entity, second_person: str, third_person: str) -> str:
         """Pick the grammatically correct verb for f"{entity.name} {verb} ...".
@@ -3848,8 +3874,11 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                 if len(part) >= 4
             }
             matched_terms = sorted(spell_terms & (name_terms | tag_terms | desc_terms))
+            ordered_tags = sorted(
+                tags, key=lambda tag: (normalize_id(tag) not in spell_terms, tag)
+            )
             affordances: list[str] = []
-            for tag in tags:
+            for tag in ordered_tags:
                 for affordance in _PROP_TAG_AFFORDANCES.get(tag, []):
                     if affordance not in affordances:
                         affordances.append(affordance)
@@ -3866,16 +3895,27 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                 "lightning",
                 "toxic",
                 "acid",
+                "smoke",
+                "spice",
                 "cursed",
                 "death",
+                "debt",
+                "contract",
+                "law",
+                "rumor",
                 "blood",
                 "bone",
                 "crystal",
                 "glass",
                 "fragile",
                 "mechanical",
+                "time",
+                "thread",
                 "snaring",
                 "trap",
+                "trade",
+                "volatile",
+                "vint",
                 "empire",
                 "holy",
                 "music",
@@ -3926,17 +3966,21 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                 damage_type = "radiant"
             elif {"cursed", "death"} & entity.tags:
                 damage_type = "shadow"
+            elif {"debt", "contract", "law", "rumor"} & entity.tags:
+                damage_type = "force"
 
             terrain_tile = "mist"
             if {"fire", "hot", "flammable"} & entity.tags:
                 terrain_tile = "fire"
             elif {"toxic", "acid", "fungus"} & entity.tags:
                 terrain_tile = "poison_cloud"
+            elif {"smoke", "spice", "ink", "rumor"} & entity.tags:
+                terrain_tile = "mist"
             elif {"water", "wet", "liquid"} & entity.tags:
                 terrain_tile = "water"
             elif "cold" in entity.tags:
                 terrain_tile = "slick_ice"
-            elif {"plant", "snaring", "rope", "silk"} & entity.tags:
+            elif {"plant", "snaring", "rope", "silk", "thread", "cloth"} & entity.tags:
                 terrain_tile = "vines"
             elif {"stone", "debris", "broken", "heavy"} & entity.tags:
                 terrain_tile = "rubble"
@@ -4062,159 +4106,9 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         return [note.to_dict() for note in notes]
 
     def context_for_llm(self, spell: str) -> dict[str, Any]:
-        player = self.state.player
-        current_room = self.room_profile_at(player.x, player.y)
-        current_room_tags = set(current_room.tags if current_room else [])
-        current_room_tags.update(current_room.topics if current_room else [])
-        nearby_entities = [
-            entity.to_public_dict()
-            for entity in self.state.entities.values()
-            if entity.alive
-            and self.is_visible(entity.x, entity.y)
-            and abs(entity.x - player.x) <= self.state.fov_radius
-            and abs(entity.y - player.y) <= self.state.fov_radius
-        ]
-        floor_items = [
-            {
-                "id": e.id,
-                "name": e.name,
-                "item_type": e.item_type,
-                "material": e.material,
-                "quantity": e.quantity,
-                "x": e.x,
-                "y": e.y,
-                "tags": sorted(e.tags),
-                **({"traits": list(e.traits)} if e.traits else {}),
-            }
-            for e in self.state.entities.values()
-            if e.kind == "item"
-            and self.is_visible(e.x, e.y)
-            and abs(e.x - player.x) <= self.state.fov_radius
-            and abs(e.y - player.y) <= self.state.fov_radius
-        ]
-        return {
-            "spell": spell,
-            # Consumed by the prompt builder (spliced into the system prompt),
-            # stripped from the user-message JSON. See _wild_prompt_messages.
-            "region_style": self.region.prompt_style(),
-            # The profile of whoever is currently controlled (the player, or a body
-            # they've swapped into). Carries the Composure volatility band, plus the
-            # appearance/backstory/signature flavor lenses, so the resolver styles
-            # casts for the soul-in-the-body rather than a hardcoded "player".
-            "caster_profile": (player.profile or CharacterProfile()).to_public_dict(),
-            "turn": self.state.turn,
-            "depth": self.state.depth,
-            "max_depth": self.state.max_depth,
-            "player": player.to_public_dict(),
-            # The square the player explicitly clicked/marked, if any. Present only when
-            # set; the resolver is told (in the system prompt) that "target"/"there"/
-            # "that square" refer to it. None of this is required — the engine resolves
-            # the same keywords deterministically — but it lets the model reason about
-            # range, line of sight, and what is actually standing there.
-            **(
-                {"selected_target": self._selected_target_context()}
-                if self.has_target()
-                else {}
-            ),
-            "inventory": self.state.inventory,
-            "curses": [curse.to_public_dict() for curse in self.state.curses.values()],
-            "world_flags": self.state.flags,
-            "event_timers": self.state.event_timers,
-            "triggers": self.state.triggers,
-            "current_room": current_room.to_public_dict() if current_room else None,
-            "nearby_rooms": self.visible_room_profiles(),
-            "nearby_canon": self.nearby_canon_records(tags=current_room_tags),
-            "visible_tile_count": len(self.state.visible),
-            "explored_tile_count": len(self.state.explored),
-            "nearby_entities": nearby_entities,
-            # Place/faction/world semantic notes in scope for this cast. Entity-attached
-            # traits already ride along inside nearby_entities. See wildmagic/semantics.py.
-            "scene_notes": self.collect_scene_notes(
-                self.scene_anchors_around(
-                    player.x, player.y, self.state.fov_radius, include=[player]
-                )
-            ),
-            "spell_anchors": self.nearby_spell_anchors(spell),
-            "floor_items": floor_items,
-            "nearby_map": self.nearby_map_strings(radius=9),
-            "nearby_tile_details": self.nearby_tile_details(radius=5),
-            "tile_legend": {
-                tile: {"name": name, "tags": sorted(TILE_TAGS.get(tile, set()))}
-                for tile, name in TILE_NAMES.items()
-            },
-            "supported_effects": [
-                "damage",
-                "area_damage",
-                "area_status",
-                "heal",
-                "restore_mana",
-                "teleport",
-                "push",
-                "pull",
-                "create_tile",
-                "create_tiles",
-                "add_status",
-                "remove_status",
-                "summon",
-                "spawn_item",
-                "conjure_item",
-                "conjure_creature",
-                "modify_inventory",
-                "transform_entity",
-                "change_faction",
-                "possess",
-                "add_tag",
-                "remove_tag",
-                "add_resistance",
-                "add_weakness",
-                "set_flag",
-                "schedule_event",
-                "create_trigger",
-                "message",
-            ],
-            "supported_costs": [
-                "mana",
-                "health",
-                "max_health",
-                "max_mana",
-                "item",
-                "status",
-                "curse",
-            ],
-            "supported_statuses": sorted(MECHANICAL_STATUSES),
-            "conjuration_templates": {
-                "items": item_template_ids(),
-                "creatures": creature_template_ids(),
-            },
-            "damage_types": sorted(DAMAGE_TYPES),
-            "rules": {
-                "normal_strong_damage": "1-8",
-                "major_damage": "9-16 with meaningful cost",
-                "outrageous_spell": "reject outright or apply a severe permanent curse",
-                "technical_failure": "invalid JSON means the engine will not consume a turn",
-                "area_limits": "no hard radius cap — crazy AOE is fine with appropriate costs",
-                "cost_timing": "effects happen first, then costs are revealed and applied",
-                "environment": "fire+water=mist, water extinguishes burning, vines snare on entry, ice slides movement",
-            },
-        }
-
-    def _selected_target_context(self) -> dict[str, Any]:
-        """Compact description of the marked square for the resolver. Always called
-        behind has_target(), so the coordinates are real."""
-        tx, ty = self.state.target_x, self.state.target_y
-        player = self.state.player
-        occupant = self.selected_target_entity()
-        tile = self.tile_at(tx, ty)
-        return {
-            "x": tx,
-            "y": ty,
-            "tile": TILE_NAMES.get(tile, tile),
-            "distance": max(abs(tx - player.x), abs(ty - player.y)),
-            "has_line_of_sight": self.has_line_of_sight(player.x, player.y, tx, ty),
-            "entity_id": occupant.id if occupant is not None else None,
-            "entity_name": occupant.name if occupant is not None else None,
-            "occupied": occupant is not None,
-        }
+        """The resolver packet for one cast. Assembly lives in `state_view` so the
+        resolver, replay summary, and inspection share one read-only state surface."""
+        return state_view.spell_context_view(self, spell)
 
     def nearby_map_strings(self, radius: int = 9) -> list[str]:
         player = self.state.player
@@ -4248,35 +4142,3 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                     )
             rows.append("".join(chars))
         return rows
-
-    def nearby_tile_details(self, radius: int = 5) -> list[dict[str, Any]]:
-        player = self.state.player
-        details: list[dict[str, Any]] = []
-        for y in range(player.y - radius, player.y + radius + 1):
-            for x in range(player.x - radius, player.x + radius + 1):
-                if not self.in_bounds(x, y):
-                    continue
-                if not self.is_visible(x, y):
-                    continue
-                tile = self.tile_at(x, y)
-                key = self.tile_key(x, y)
-                duration = self.state.tile_durations.get(key)
-                if tile != FLOOR or duration is not None or key in self.state.tile_tags:
-                    detail = {
-                        "x": x,
-                        "y": y,
-                        "tile": tile,
-                        "name": TILE_NAMES.get(tile, "strange"),
-                        "tags": sorted(self.tile_tags_at(x, y)),
-                        "duration": duration,
-                    }
-                    room = self.room_profile_at(x, y)
-                    if room is not None:
-                        detail["room"] = {
-                            "id": room.id,
-                            "type": room.room_type,
-                            "era": room.era,
-                            "condition": room.condition,
-                        }
-                    details.append(detail)
-        return details[:60]

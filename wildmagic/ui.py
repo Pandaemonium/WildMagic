@@ -6,8 +6,13 @@ import json
 import os
 import time
 from typing import Any
+import warnings
 
 os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
+# pygame 2.6.1's pkgdata still imports pkg_resources, which setuptools >= 81 flags as
+# deprecated. The import is pygame's own and harmless; silence just that one warning so it
+# doesn't clutter startup. Remove once pygame ships a build without pkg_resources.
+warnings.filterwarnings("ignore", message=r"pkg_resources is deprecated as an API.*")
 
 import pygame
 
@@ -111,6 +116,13 @@ _MOVE_KEY_MAP: dict[int, str] = {
     pygame.K_KP3: "southeast",
 }
 CONTROLS_HINT_WRAP = 48
+
+# Hand-rolled auto-repeat for the text-deletion keys. pygame's own key repeat stays off
+# (it double-stepped movement — see set_repeat() in GameUI.__init__), so Backspace/Delete
+# repeat is driven off live key state instead: hold this long before it kicks in, then
+# erase a character at this cadence while held.
+_DELETE_REPEAT_DELAY_MS = 300
+_DELETE_REPEAT_INTERVAL_MS = 40
 
 LLM_AUDIT_FILES = (
     "wild_magic_audit.jsonl",
@@ -495,7 +507,12 @@ ENTITY_COLORS = {
 class GameUI:
     def __init__(self, autoplay: bool = False) -> None:
         pygame.init()
-        pygame.key.set_repeat(350, 35)
+        # No key auto-repeat: this is a turn-based game, so one physical key press must
+        # equal exactly one step. pygame's repeat (formerly set_repeat(350, 35)) synthesized
+        # extra KEYDOWNs once a key was held past the 350ms delay — and phantom repeats for
+        # keys whose KEYUP was buffered behind a slow (generation) frame — which double-stepped
+        # the player on a single intended move. set_repeat() with no args disables it.
+        pygame.key.set_repeat()
         pygame.display.set_caption("Wild Magic")
         self.screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
         self.clock = pygame.time.Clock()
@@ -594,10 +611,14 @@ class GameUI:
         )
         self._command_future: concurrent.futures.Future | None = None
         self._command_label: str = ""
-        # Coalesce turn-advancing actions to one per frame: a busy frame can buffer
-        # several key-repeat KEYDOWNs that `pygame.event.get()` then delivers in one
-        # batch, which otherwise steps the player twice on a single intended move.
+        # Coalesce turn-advancing actions to one per frame: a slow (generation) frame can
+        # buffer several genuine KEYDOWNs that `pygame.event.get()` then delivers in one
+        # batch, which would otherwise surge the player several steps at once. (Key
+        # auto-repeat is disabled, so these are only ever real presses, never synthetic.)
         self._acted_this_frame = False
+        # Held Backspace/Delete repeat (see _pump_text_delete_repeat). None when no
+        # deletion key is held; otherwise the next tick at which a char should be erased.
+        self._delete_repeat_at: int | None = None
 
         # Out-of-process character-portrait generator (SDXL in its own venv). Lazily
         # spawns a worker on first request; absent venv -> available() is False.
@@ -659,6 +680,7 @@ class GameUI:
                         self.handle_mouse_wheel(event)
                     elif event.type == pygame.KEYDOWN:
                         self.handle_key(event)
+                self._pump_text_delete_repeat()
                 self._poll_command_future()
                 scene = self._active_scene()
                 if scene is not None:
@@ -714,6 +736,51 @@ class GameUI:
                 return scene
         return None
 
+    def _backspace_input(self) -> None:
+        """Erase the last character of the spell/talk text box."""
+        self.input_text = self.input_text[:-1]
+
+    def _focused_text_deleter(self):
+        """The callable that erases one character from whatever text field currently has
+        keyboard focus, or None when no field is accepting text. Shared by the
+        Backspace/Delete KEYDOWN handlers and the held-key repeat pump so a single tap and
+        a hold stay in sync. A modal scene owns input when active; otherwise the spell/talk
+        box does, but only when no overlay (menu, book, queue, trade, game-over) is up."""
+        scene = self._active_scene()
+        if scene is not None:
+            return getattr(scene, "backspace_focused", None)
+        if (
+            self.input_active
+            and self.input_mode != "control"
+            and not self.menu_active
+            and self.book_popup is None
+            and not self.queue_debug_active
+            and self.engine.state.pending_trade is None
+            and not self.engine.state.game_over
+        ):
+            return self._backspace_input
+        return None
+
+    def _pump_text_delete_repeat(self) -> None:
+        """Auto-repeat Backspace/Delete while held. pygame's own key repeat is disabled
+        (it double-stepped movement), so we drive just these two keys off live key state:
+        the KEYDOWN erases one char, then after a short delay a steady cadence kicks in for
+        as long as the key stays down and a text field keeps focus."""
+        pressed = pygame.key.get_pressed()
+        held = pressed[pygame.K_BACKSPACE] or pressed[pygame.K_DELETE]
+        deleter = self._focused_text_deleter() if held else None
+        if deleter is None:
+            self._delete_repeat_at = None
+            return
+        now = pygame.time.get_ticks()
+        if self._delete_repeat_at is None:
+            # First frame held: the KEYDOWN already erased one char, so just start the
+            # delay clock before the repeat kicks in.
+            self._delete_repeat_at = now + _DELETE_REPEAT_DELAY_MS
+        elif now >= self._delete_repeat_at:
+            deleter()
+            self._delete_repeat_at = now + _DELETE_REPEAT_INTERVAL_MS
+
     def _cycle_input_mode(self) -> None:
         """Tab steps Wild Spell -> Controls -> Talk (when an NPC is in range) -> ..."""
         order = ["spell", "control"]
@@ -732,6 +799,9 @@ class GameUI:
         if move_dir is not None:
             zone_before = (self.engine.state.zone_x, self.engine.state.zone_y)
             self.execute_command(f"move {move_dir}")
+            # Crossing a zone regenerates the region — the slowest move. Drop any presses
+            # that queued up during that frame so impatient extra taps don't immediately
+            # march you several tiles into the freshly revealed zone.
             if (self.engine.state.zone_x, self.engine.state.zone_y) != zone_before:
                 pygame.event.clear((pygame.KEYDOWN, pygame.KEYUP))
             return True
@@ -938,8 +1008,8 @@ class GameUI:
             if event.key == pygame.K_RETURN:
                 self.submit_input()
                 return
-            if event.key == pygame.K_BACKSPACE:
-                self.input_text = self.input_text[:-1]
+            if event.key in (pygame.K_BACKSPACE, pygame.K_DELETE):
+                self._backspace_input()
                 return
             if event.unicode and event.unicode.isprintable():
                 self.input_text += event.unicode
@@ -1388,9 +1458,9 @@ class GameUI:
                 self.session.execute_command, command
             )
             return None
-        # Drop a second turn-advancing action buffered into the same frame (a single
-        # intended move that key-repeat duplicated). Free actions before the first
-        # turn-consuming one still run; the flag is only raised once a turn is spent.
+        # Drop a second turn-advancing action buffered into the same frame (e.g. rapid
+        # presses a slow frame delivered in one event batch). Free actions before the
+        # first turn-consuming one still run; the flag is only raised once a turn is spent.
         if self._acted_this_frame:
             return None
         result = self.execute_command_blocking(command)

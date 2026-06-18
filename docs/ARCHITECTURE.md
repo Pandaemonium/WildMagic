@@ -4,6 +4,10 @@ Wild Magic is structured as a Python package (`wildmagic/`) with a clear separat
 data, logic, and presentation layers. The game engine is a single `GameEngine` class assembled
 from mixin modules so each concern lives in its own file.
 
+Related structural plan: `docs/WILD_MAGIC_STATE_SURFACE_PLAN.md` describes the staged work
+to make game state more legible to wild magic through shared state views, normalized refs,
+effect metadata, dynamic context/schema routing, and engine-owned operation primitives.
+
 ---
 
 ## Entry points
@@ -69,11 +73,14 @@ split into mixins, leaving engine.py with the infrastructure that everything els
 - Player actions: `attempt_player_move`, `wait_turn`, `open_door`, `open_adjacent_door`, `descend_stairs`, `ascend_stairs`, `teleport_entity`, `_move_to_nearest_open_tile`
 - Standard spells (deterministic, no LLM): `cast_standard_bolt`, `cast_standard_frost`, `cast_standard_heal`, `cast_standard_ward`, `cast_standard_reveal`
 - NPC dialogue/trade/promises: `find_talk_target`, `dialogue_context_for_llm`, `lore_extraction_context`, `promises_for_context`, `promise_hooks_for_zone`, `add_promises`, `apply_dialogue_exchange`, `resolve_pending_trade`, `should_consider_trade`, `trade_context_for_llm`
-- LLM context building: `context_for_llm`, `nearby_spell_anchors`, `nearby_map_strings`, `nearby_tile_details`.
+- LLM context building: `context_for_llm` (delegates to `state_view.spell_context_view`),
+  `nearby_spell_anchors`, `nearby_map_strings`.
   Context includes semantic room labels (`current_room`, `nearby_rooms`) and retrieved
   materialized canon (`nearby_canon`) so future richness prompts and wild magic share
   the same world facts.
-- Turn bookkeeping: `finish_player_turn`, `_regenerate_player`, `resolve_target`, `resolve_target_group`, `nearest_enemy`, `_verb`
+- Turn bookkeeping: `finish_player_turn`, `_regenerate_player`, `resolve_target`, `resolve_target_group`, `nearest_enemy`, `_verb`.
+  `resolve_target`/`resolve_target_group` are thin delegators to the `refs.py` binder, so they
+  accept both legacy strings and typed refs (`{kind: entity|tile|room|faction}`, `{selector: …}`).
 - Explicit targeting: `set_target`, `clear_target`, `has_target`, `selected_target_entity`,
   `selected_target_tile`, `references_selected_target`, `_aimed_enemy`. A player-marked
   square (clicked in the UI or set via the free `target <x> <y>` command) is stored on
@@ -90,6 +97,52 @@ split into mixins, leaving engine.py with the infrastructure that everything els
 ```
 GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _EffectsMixin)
 ```
+
+### `wildmagic/state_view.py`
+The read-only state surface over `GameState`. `GameState` stays the single source of truth;
+this module turns it into the compact, stable packets each consumer needs without mutating
+anything. It holds one builder per public-dict shape — `entity_card`, `item_card`,
+`tile_card`, `room_card`, `selected_target_card`, `scene_notes_card`, `nearby_tile_details` —
+and composes them into the two top-level views: `spell_context_view` (the resolver packet
+returned by `engine.context_for_llm`) and `state_summary` (exposed as `replay_summary_view`
+for `actions.summarize_state`/replay records and `inspection_view` for CLI/GUI inspection).
+Everything here is pure reads; `tile_counts` lives here too. See
+`docs/WILD_MAGIC_STATE_SURFACE_PLAN.md` (Stage 2). Imports only leaf modules
+(`models`, `capabilities`, `spell_contract`, `templates`), never `engine`, so it sits below
+the engine in the import order despite reading from it at call time.
+
+### `wildmagic/refs.py`
+Normalized references + selectors for resolver JSON (Stage 3). `normalize_ref(value)` turns a
+legacy string (`"player"`, `"nearest_enemy"`, `"there"`, an entity id) or a typed ref
+(`{kind: entity|tile|room|faction}`, `{selector: …}`) into a single `Ref`. `bind_ref`,
+`bind_position`, and `bind_group` are the engine-authoritative resolvers (to an entity, a tile
+position, or a group). Legacy strings are bound through the exact pre-refs logic, so existing
+JSON is unchanged; typed refs add explicit entity/tile/room/faction targeting. Routed through
+by `engine.resolve_target`/`resolve_target_group` and by `effects.effect_position`/
+`resolve_placement`. Pure resolution (reads engine, never mutates); imports only `normalize`,
+never `engine`.
+
+### `wildmagic/operations.py`
+Engine operation primitives + state deltas (Stages 6-7). `StateDelta` is the compact,
+observable record of one mutation; the typed primitives (`apply_damage`, `heal`, `apply_status`,
+`create_tile`, `move_entity`, `create_actor`/`create_item`) delegate to the engine's shared
+mutators, which record a delta while a cast is capturing. Stage 7 adds the durable world-memory
+lanes: `write_trait` (entity), `write_semantic_note`/`write_place_note`/`write_faction_note`/
+`write_world_note` (place/faction/world), `adjust_faction` (standing), and `emit_deed`. Capture
+is owned by the engine (`begin_delta_capture`/`end_delta_capture`/`discard_deltas`/`record_delta`),
+scoped to the effects+costs window of `apply_wild_magic_resolution`; the collected deltas ride
+out on `WildMagicOutcome.deltas` and are discarded on rollback. Imports only `semantics` +
+`models` types, never `engine`.
+
+### `wildmagic/effect_registry.py`
+The single metadata home for effects (Stage 4). `EffectSpec` records each effect's canonical
+name, one-line summary, whether it is a universal core effect or owned by capability cards,
+the context slices it needs, the alias type-strings that normalize to it, and the JSON fields
+its handler reads. `REGISTRY` covers every `SUPPORTED_EFFECTS` entry; tests assert it cannot
+drift from the contract, the capability cards, the alias map, or the schema doc. The alias map
+`EFFECT_TYPE_ALIASES` lives here and is imported by `resolution_parsing.py`. Metadata only — it
+does not move handler logic; `effects._apply_effect` still owns application. Imports only
+`spell_contract` and `capabilities`.
 
 ### `wildmagic/combat.py` — `_CombatMixin`
 Everything that changes HP or resolves physical contact:
@@ -411,9 +464,9 @@ and `_conjure_creature` in `effects.py` and by `_spawn_from_template` in `genera
 ### `wildmagic/props.py`
 Static environmental scenery that the LLM can target as spell anchors. Frozen dataclass
 `PropTemplate` (`id`, `char`, `name`, `description`, `blocks`, `tags`). `PROP_TEMPLATES`
-dict of ~120 props across eight thematic categories: Arcane & Ritual, Ruined & Abandoned,
-Old Traditions (buried strata of pre-charter magic), Imperial, Natural & Overgrown,
-Dungeon Infrastructure, Alchemical, Religious, Furniture. Look-up functions
+dict of ~130 props across ten thematic categories: Arcane & Ritual, Ruined & Abandoned,
+Old Traditions (buried strata of pre-charter magic), Imperial, Saltmarket/Vint,
+Natural & Overgrown, Dungeon Infrastructure, Alchemical, Religious, Furniture. Look-up functions
 `get_prop_template` and `get_all_prop_ids`. Props are spawned via `engine.spawn_prop()`,
 stored as `Entity(kind="prop")`, and appear in the LLM context's `nearby_entities` list
 with their description and tags once visible. `GameEngine.nearby_spell_anchors()` also
@@ -496,7 +549,11 @@ main.py / cli.py
             │       ├── items.py    (_ItemsMixin)
             │       ├── ai.py       (_AIMixin)
             │       ├── generation.py (_GenerationMixin)
-            │       └── effects.py  (_EffectsMixin)
+            │       ├── effects.py  (_EffectsMixin)
+            │       ├── state_view.py (read-only views: resolver context, replay, inspection)
+            │       ├── refs.py       (normalized refs/selectors: bind_ref/position/group)
+            │       ├── operations.py (operation primitives + StateDelta capture)
+            │       └── effect_registry.py (effect metadata + EFFECT_TYPE_ALIASES)
             ├── wild_magic.py (spell provider + resolve_spell orchestration)
             │       ├── resolution_parsing.py (raw LLM text -> normalized effect dict)
             │       ├── llm_client.py   (Ollama HTTP)

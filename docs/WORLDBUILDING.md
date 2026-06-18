@@ -220,6 +220,12 @@ Magic **tapestries** are common and a famous **export**: you'll see expensive Vi
 hung in halls across the world, though Vintan **woven charms themselves are rarely worn by
 non-Vintans**. The cloth carries the culture abroad even where the magic stays home.
 
+In a Vintan bazaar, even ordinary market furniture has civic drama worked into it: red-thread
+ledgers track debts, brass scales weigh more than coin, awnings catch gossip in charm-knots,
+and tariff posts bristle with imperial tags. These objects are not sacred relics. They are the
+everyday tools of trade, rumor, policy, and spite, which makes them excellent fuel for wild
+magic.
+
 **The politics is gloriously unstable.** It is driven far more by **rumor and gossip** than by
 policy, so the **politicians** churn constantly — upheaval of the ruling figures is more common
 than not. But here's the trick: **policy changes far less than politics.** The officeholders

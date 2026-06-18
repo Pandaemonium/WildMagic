@@ -114,6 +114,7 @@ If the context contains a "selected_target" object, the player has explicitly ma
 
 {semantic_preamble}
 Two context fields carry this narrative weight, not rules: entities in "nearby_entities" may have a "traits" list, and "scene_notes" holds notes about the place, factions, and world. Let them color how you resolve (a goblin-hating hat's wearer reads as more menacing to goblins; a floor that "remembers a murder" colors a divination). You MAY also MINT a lasting trait with the add_trait effect when a spell's enduring meaning is narrative rather than mechanical — add_trait fields: target (entity id / "player" / "nearest_enemy"), text (the trait, in plain words), salience 1-5. Use it for "brand him a coward so others see it", "let the blade remember this betrayal"; pair it with a real cost when it is consequential, and prefer a concrete mechanical effect when the spell wants an immediate, reliable result.
+Soft semantic writes vs mechanical crystallization: a SOFT write is a fact the world remembers but that has no fixed rule — a trait on a person/object (add_trait) or a place/faction the engine notes ("make this room remember my name" colors later scenes, it does not buff you). MECHANICAL crystallization is when the spell should reliably DO something — a status, aura, resistance, curse, trigger, faction change, or a spoken-into-the-world promise. When a spell wants a guaranteed effect, crystallize it; when it wants lasting flavor, write it soft. Never make a soft note the only thing a clearly-mechanical spell does.
 
 Cost catalog:
 - mana, health, max_health, max_mana, item (fields: item name, amount), status, curse.
@@ -288,11 +289,12 @@ _CONJURE_ITEM = CapabilityCard(
     ),
     index_line="conjure_item — create or transmute objects, materials, body parts, and loose items",
     effect_types=("conjure_item", "spawn_item", "transform_item", "modify_inventory"),
+    required_context=("conjurable_items",),
     prompt_block=(
         "- conjure_item: template, name, material, tags, target, placement, count.\n"
         "  Item templates: generic_object, body_part, glass_shard, ritual_component, weapon_like, food, key_like, treasure.\n"
         "- spawn_item: name, item_type, x, y, char, material, quantity, tags.\n"
-        "- transform_item: target (inventory|nearest_item|...), item, new_item_type, material, tags.\n"
+        "- transform_item: target (inventory|nearest_item|nearest_prop|nearest_object|a prop id from spell_anchors), item if matching by name, new_name/new_item_type, material, description, tags.\n"
         "- modify_inventory: item, mode ('add'|'remove'), amount.\n"
         "Creative names/materials/tags are allowed; mechanics come from the chosen template."
     ),
@@ -662,6 +664,7 @@ _PROPHECY = CapabilityCard(
     ),
     index_line="prophecy — speak a place/person/danger/treasure into the wider world via create_promise",
     effect_types=("create_promise",),
+    required_context=("promise_summaries",),
     prompt_block=(
         "For prophecy spells — speaking a place, person, danger, or treasure into existence somewhere "
         "BEYOND this map — use create_promise. Fields: kind ('prophecy|threat|place|person'), subject, "
@@ -751,6 +754,7 @@ _STRUCTURE_ANIMATION = CapabilityCard(
     ),
     index_line="structure_animation — bring an existing object/prop (door, wall, statue, furniture) to life as a creature",
     effect_types=("animate_object",),
+    required_context=("nearby_structures",),
     prompt_block=(
         "- animate_object: target (a prop id from spell_anchors, or omit / 'nearest_object' to "
         "animate the nearest scenery), faction ('ally'|'enemy', default ally), name, char, hp, "
@@ -1269,6 +1273,16 @@ def selected_effect_types(
     for card in selected:
         result.update(card.effect_types)
     return frozenset(result)
+
+
+def selected_context_slices(selected: list[CapabilityCard]) -> tuple[str, ...]:
+    """The card-driven context slices a cast needs = sorted union of the selected cards'
+    `required_context`. Empty for a plain spell that routes to no specialist cards. The slice
+    names map to builders in state_view.card_context_slices (Stage 5 / docs §5.4)."""
+    slices: set[str] = set()
+    for card in selected:
+        slices.update(card.required_context)
+    return tuple(sorted(slices))
 
 
 def assemble_card_blocks(selected: list[CapabilityCard]) -> str:

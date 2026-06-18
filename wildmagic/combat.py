@@ -6,6 +6,7 @@ from .game_data import EQUIPMENT_SPECS
 from .geometry import sign
 from .models import FIRE, FLOOR, POISON_CLOUD, RUBBLE, SLICK_ICE, WALL, WATER, Entity
 from .normalize import clamp_int, normalize_id, status_duration
+from .operations import StateDelta
 from .semantics import place_anchor
 
 
@@ -160,6 +161,21 @@ class _CombatMixin:
                 self.state.stats.damage_taken += actual
             elif entity.kind == "actor":
                 self.state.stats.damage_dealt += actual
+            if actual and self._delta_capture:
+                self.record_delta(
+                    StateDelta(
+                        op="damage",
+                        target=entity.id,
+                        summary=f"{entity.name} took {actual} {damage_type} damage",
+                        details={
+                            "amount": amount,
+                            "damage_type": damage_type,
+                            "dealt": actual,
+                            "hp_before": hp_before,
+                            "hp_after": entity.hp,
+                        },
+                    )
+                )
             if actual > 0:
                 self._fire_damage_triggers(entity, source, actual, damage_type)
             if entity.hp <= 0:
@@ -224,6 +240,42 @@ class _CombatMixin:
                         self.state.add_message(
                             "You die. The wild takes its color back, and keeps your echo."
                         )
+                elif entity.kind == "prop":
+                    old_name = entity.name
+                    old_description = entity.description or ""
+                    entity.tags.update({"broken", "destroyed"})
+                    entity.details.setdefault("intact_name", old_name)
+                    if old_description:
+                        entity.details.setdefault("intact_description", old_description)
+                    if not entity.name.startswith("broken "):
+                        entity.name = f"broken {entity.name}"[:40]
+                    entity.description = (
+                        f"Broken remnants of {old_name}. "
+                        f"{old_description or 'Magic has left it in pieces.'}"
+                    )[:240]
+                    self.state.add_message(f"The {old_name} breaks apart.")
+                    if self._delta_capture:
+                        self.record_delta(
+                            StateDelta(
+                                op="destroy_prop",
+                                target=entity.id,
+                                summary=f"{old_name} broke apart",
+                                details={
+                                    "x": entity.x,
+                                    "y": entity.y,
+                                    "tags": sorted(entity.tags),
+                                },
+                            )
+                        )
+                    breaker = source.name if source is not None else "wild magic"
+                    self.record_note(
+                        place_anchor(entity.x, entity.y),
+                        f"The {old_name} was broken here by {breaker}.",
+                        kind="event",
+                        source="prop",
+                        salience=3,
+                        ttl=400,
+                    )
                 elif entity.kind == "npc":
                     # NPCs have no kill stat, loot table, or victory check of their own --
                     # this is the one piece of feedback the whole "you can lose them, and
@@ -466,6 +518,19 @@ class _CombatMixin:
         actual = entity.hp - before
         if entity.id == self.state.player_id:
             self.state.stats.hp_healed += actual
+        if actual and self._delta_capture:
+            self.record_delta(
+                StateDelta(
+                    op="heal",
+                    target=entity.id,
+                    summary=f"{entity.name} healed {actual}",
+                    details={
+                        "amount": amount,
+                        "restored": actual,
+                        "hp_after": entity.hp,
+                    },
+                )
+            )
         return actual
 
     def _split_slime(self, parent: Entity) -> None:

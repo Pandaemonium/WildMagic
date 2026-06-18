@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 from typing import Any
 
 
@@ -243,6 +244,22 @@ SPELL_RESPONSE_JSON_SCHEMA: dict[str, Any] = {
     ],
     "additionalProperties": True,
 }
+
+
+def per_cast_response_schema(
+    effect_types: "list[str] | set[str] | None",
+) -> dict[str, Any]:
+    """A copy of SPELL_RESPONSE_JSON_SCHEMA with the effect `type` enum narrowed to the
+    effects this cast is allowed to emit (the routed core + capability-card effects). A plain
+    direct-damage spell gets a smaller enum than a memory-edit or prophecy spell. Falls back to
+    the full SUPPORTED_EFFECTS set when no narrowing is supplied.
+
+    The shape is otherwise identical to the full schema, so it can be passed to the Ollama JSON
+    `format` path interchangeably."""
+    allowed = sorted(effect_types) if effect_types else sorted(SUPPORTED_EFFECTS)
+    schema = copy.deepcopy(SPELL_RESPONSE_JSON_SCHEMA)
+    schema["properties"]["effects"]["items"]["properties"]["type"]["enum"] = allowed
+    return schema
 
 
 def validate_resolution(data: dict[str, Any]) -> str | None:

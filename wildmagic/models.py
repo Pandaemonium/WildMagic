@@ -503,6 +503,9 @@ class WildMagicOutcome:
     consumed_turn: bool
     technical_failure: bool
     messages: list[str]
+    # Operation deltas (Stage 6): the mutations this cast applied, in order. Empty unless the
+    # cast was accepted and applied. See wildmagic/operations.py.
+    deltas: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
