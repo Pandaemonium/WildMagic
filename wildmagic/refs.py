@@ -165,6 +165,11 @@ def _bind_raw_entity(engine: "GameEngine", raw: str | None) -> "Entity | None":
     if engine.has_target() and engine.references_selected_target(raw):
         return engine.selected_target_entity()
     if raw in _NEAREST_ENEMY_KEYWORDS:
+        cached_id = getattr(engine, "_cast_ref_cache", {}).get("nearest_enemy")
+        if cached_id:
+            cached = engine.state.entities.get(cached_id)
+            if cached is not None and cached.hp > 0:
+                return cached
         return engine.nearest_enemy()
     return engine.state.entities.get(raw)
 

@@ -92,6 +92,10 @@ split into mixins, leaving engine.py with the infrastructure that everything els
   and stair transitions (coordinates become meaningless).
 - Environment tick: `_tick_environment`, `_tick_fire_spread`, `_tick_poison_spread`, `_apply_tile_entry`, `_ambient_sounds`, `_tick_simple_statuses`, `_tick_tile_durations`, `_tick_event_timers`
 - Trigger system: `_trigger_event`, `_tick_triggers`, `_fire_triggers`, `_fire_damage_triggers`, `_fire_death_triggers`, `_trigger_matches_target`, `_fill_trigger_effect_defaults`
+- Curse enforcement: accepted wild-magic resolutions are checked against active mechanical
+  curse limits before mutation. Semantic curses stay LLM-facing context; known mechanical
+  curses can enforce range, area radius, line of sight, or forbidden effect families.
+  Player-attributed enemy kills award placeholder experience used for curse clearing.
 
 `GameEngine` inherits from five mixins (all via `self.*` — no wrapper code needed):
 ```
@@ -149,6 +153,14 @@ Everything that changes HP or resolves physical contact:
 `equipment_bonus`, `effective_attack`, `effective_defense`, `attack`, `_is_canonical`,
 `damage_entity`, `_conduct_lightning_through_water`, `_modified_damage`, `heal_entity`,
 `_split_slime`, `_drop_loot`, `_on_entity_death`.
+
+### `wildmagic/curses.py`
+Curse catalogue and curse-facing helpers. Defines known mixed/mechanical curse templates
+(`Close Curse`, `Far Curse`, `Narrow Curse`, `Straight Path Curse`, `Anchored Curse`) plus
+semantic templates for recurring costs such as `Wild Debt`; normalizes new curse payloads
+from the resolver, builds public curse cards for context/UI/CLI, resolves curse names for
+clearing commands, and validates accepted wild-magic resolutions against engine-owned
+mechanical curse limits.
 
 ### `wildmagic/items.py` — `_ItemsMixin`
 Inventory management and item use:
@@ -415,7 +427,8 @@ recorded on the wild-magic action record so replays reproduce the deed with no m
 
 ### Engine integration (`engine.py`)
 `GameState` gains `deed_ledger`/`faction_ledger`/`legend_ledger`, `player_soul_id`, the
-day/night clock (derived from `turn`), `ticked_through_day`, `pending_backlash`. The daily
+day/night clock (derived from `turn`), placeholder `experience` for curse clearing,
+`ticked_through_day`, `pending_backlash`. The daily
 **Simulator** is `_maybe_run_daily_tick` (fires once per in-game day at 05:00):
 `run_world_tick` (apply deeds → standing + legend + compress) · `_simulate_empire_pressure`
 (D9 kill-emperor gate) · `_simulate_backlash` (factions spend to act) · `_simulate_bonds`
@@ -440,6 +453,8 @@ All shared data types and tile constants. No game logic.
   or descriptions that have become game canon. `Entity.details` stores engine-side
   nonmechanical metadata such as a book's procedural shelf card; feature-specific
   context builders decide what, if anything, becomes visible to an LLM.
+  `Curse` stores both semantic prompt text and optional engine-owned mechanics; unknown
+  curses are semantic by default.
 
 ### `wildmagic/game_data.py`
 All hand-authored game content and tunable constants:
@@ -553,7 +568,8 @@ main.py / cli.py
             │       ├── state_view.py (read-only views: resolver context, replay, inspection)
             │       ├── refs.py       (normalized refs/selectors: bind_ref/position/group)
             │       ├── operations.py (operation primitives + StateDelta capture)
-            │       └── effect_registry.py (effect metadata + EFFECT_TYPE_ALIASES)
+            │       ├── effect_registry.py (effect metadata + EFFECT_TYPE_ALIASES)
+            │       └── curses.py (curse templates + mechanical validation)
             ├── wild_magic.py (spell provider + resolve_spell orchestration)
             │       ├── resolution_parsing.py (raw LLM text -> normalized effect dict)
             │       ├── llm_client.py   (Ollama HTTP)

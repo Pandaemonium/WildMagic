@@ -20,6 +20,7 @@ from .config import (
     flesh_enabled,
     lore_enabled,
 )
+from .curses import curse_card, find_curse_key
 from .deed_interpreter import (
     DeedInterpreterProvider,
     make_deed_interpreter_provider,
@@ -348,6 +349,28 @@ class GameSession:
                 action = "journal"
                 success = True
                 explicit_messages = describe_journal(self.engine)
+            elif verb in {"curses", "hexes"}:
+                action = "curses"
+                success = True
+                explicit_messages = describe_curses(self.engine)
+            elif verb in {"curse", "hex"}:
+                action = "curse"
+                success = True
+                explicit_messages = describe_curses(
+                    self.engine, command_argument(original_command, tokens)
+                )
+            elif (
+                verb in {"clear", "cleanse"}
+                and len(tokens) > 1
+                and tokens[1].lower()
+                in {
+                    "curse",
+                    "hex",
+                }
+            ):
+                action = "clear_curse"
+                target = " ".join(tokens[2:]).strip()
+                success, explicit_messages = clear_curse(self.engine, target)
             elif verb in {"standing", "reputation", "rep", "factions"}:
                 # Free action: how the world's powers regard you (the emergent-world
                 # standing readout). Mirrored in the GUI panel and CLI footer.
@@ -2776,12 +2799,13 @@ def _parse_rest_arg(arg: str) -> tuple[float | None, float | None, str | None]:
 
 def command_help() -> list[str]:
     return [
-        "Commands: move north/south/east/west, open, descend, ascend, wait (recover 1 MP), rest [hours | until <time>] (camp 8h by default), cast <spell>, target <x> <y>, talk <message>, possess [name], examine, read [book], use <item>, equip <item>, unequip <slot>, drop <item>, pickup, inspect (or inventory), journal (or rumors), standing, wares (or browse), quit.",
+        "Commands: move north/south/east/west, open, descend, ascend, wait (recover 1 MP), rest [hours | until <time>] (camp 8h by default), cast <spell>, target <x> <y>, talk <message>, possess [name], examine, read [book], use <item>, equip <item>, unequip <slot>, drop <item>, pickup, inspect (or inventory), curses, clear curse <name>, journal (or rumors), standing, wares (or browse), quit.",
         "Targeting: click a square (or 'target <x> <y>') to mark it - a free action, no turn. Then 'cast fireball at target', 'teleport to target', etc. aim there, and the standard spark/frost spells hit your marked foe. Click it again, 'untarget', or Esc to clear.",
         "Possessing: 'possess' (or 'swap'/'inhabit') leaps your soul into the nearest body - or 'possess <name>' for a specific one. You become that body entirely: its stats, its hit points, its inventory. The body you leave drops as an inert husk. Costs a turn.",
         "Reading: stand on or next to a book and 'read' (or 'read <name>' to pick one). The first reading takes a turn and fixes the book's title and pages forever; rereading is free. What books claim about the world is hearsay - but the world has a way of honoring what gets written down.",
         "Investigating: 'investigate' (or 'search') studies the room - it costs 1-3 turns while the world keeps moving, and what you learn is permanent. If something here is hidden, careful search turns up a clue; investigate the thing the clue points at ('investigate <name>') to see what it was protecting.",
         "Journal: 'journal' lists everything the world has told you - rumors heard, claims corroborated, places found true - with a rough direction when one was given. Free, costs no turn.",
+        "Curses: 'curses' lists active curse names, descriptions, and mechanical limits. 'clear curse <name>' spends experience to remove one stack.",
         "Standing: 'standing' (or 'reputation'/'factions') shows how the world's powers regard you - the mark your deeds have left on the Empire and those who oppose it. Free, costs no turn.",
         "Followers: 'followers' (or 'retinue') lists those who have come to follow you and the organizations you've founded; 'found <name>' raises a banner of your own. Free, costs no turn.",
         "Freeing captives: stand next to someone held in a cell and 'free' (or 'release') to strike their chains. What they do then is their own - some take up arms and come to follow you, some simply thank you and go, and a few repay you with what they know.",
@@ -2799,6 +2823,60 @@ def _canon_display_lines(record: CanonRecord) -> list[str]:
         lines.append(record.title)
     lines.append(record.text)
     return lines
+
+
+def describe_curses(engine: GameEngine, query: str = "") -> list[str]:
+    state = engine.state
+    if not state.curses:
+        return ["You carry no curses."]
+    curses = state.curses
+    if query:
+        curse_key = find_curse_key(curses, query)
+        if curse_key is None:
+            return [f"No curse matches {query!r}."]
+        selected = [(curse_key, curses[curse_key])]
+    else:
+        selected = sorted(curses.items())
+    lines = [f"Curses - experience {state.experience}:"]
+    for curse_id, curse in selected:
+        card = curse_card(curse)
+        stack_text = f" x{curse.stacks}" if curse.stacks > 1 else ""
+        lines.append(f"  {card['name']}{stack_text} [{card['mode']}]")
+        lines.append(f"    {card['description']}")
+        if card["mechanical_limits"]:
+            lines.append("    Limits: " + "; ".join(card["mechanical_limits"]))
+        if card["semantic_prompt"]:
+            lines.append(f"    Flavor: {card['semantic_prompt']}")
+        lines.append(
+            f"    Clear one stack: {card['xp_to_clear']} XP with 'clear curse {curse_id}'."
+        )
+    return lines
+
+
+def clear_curse(engine: GameEngine, query: str) -> tuple[bool, list[str]]:
+    if not query:
+        return False, ["Clear which curse? Use 'clear curse <name>'."]
+    state = engine.state
+    curse_key = find_curse_key(state.curses, query)
+    if curse_key is None:
+        return False, [f"No curse matches {query!r}."]
+    curse = state.curses[curse_key]
+    cost = max(1, int(curse.xp_to_clear))
+    if state.experience < cost:
+        return (
+            False,
+            [
+                f"{curse.name} needs {cost} XP to clear one stack; you have {state.experience}."
+            ],
+        )
+    state.experience -= cost
+    curse.stacks -= 1
+    if curse.stacks <= 0:
+        state.curses.pop(curse_key, None)
+        return True, [f"You spend {cost} XP. {curse.name} breaks."]
+    return True, [
+        f"You spend {cost} XP. {curse.name} weakens to {curse.stacks} stack(s)."
+    ]
 
 
 def describe_journal(engine: GameEngine) -> list[str]:
@@ -3011,7 +3089,7 @@ def describe_state(engine: GameEngine) -> list[str]:
         or "none"
     )
     lines = [
-        f"Turn {state.turn} | {state.clock_label()} | HP {player.hp}/{player.max_hp} | MP {player.mana}/{player.max_mana}",
+        f"Turn {state.turn} | {state.clock_label()} | HP {player.hp}/{player.max_hp} | MP {player.mana}/{player.max_mana} | XP {state.experience}",
         f"Depth {state.depth}/{state.max_depth} | Position {player.x},{player.y} | Scenario {state.scenario}",
         f"Visible tiles: {len(state.visible)} | Explored tiles: {len(state.explored)}",
         f"Statuses: {statuses}",
@@ -3044,7 +3122,8 @@ def describe_state(engine: GameEngine) -> list[str]:
         f"Stats: spells {s.spells_cast}/{s.spells_cast + s.spells_failed} | "
         f"kills {s.enemies_killed} | items used {s.items_used} | "
         f"dmg out {s.damage_dealt} | dmg in {s.damage_taken} | "
-        f"healed {s.hp_healed} | curses {s.curses_gained} | floor {s.deepest_floor}"
+        f"healed {s.hp_healed} | curses {s.curses_gained} | "
+        f"xp {s.experience_gained} | floor {s.deepest_floor}"
     )
     return lines
 

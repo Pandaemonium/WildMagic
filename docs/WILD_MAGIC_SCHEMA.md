@@ -17,6 +17,25 @@ The LLM receives visible entities, terrain, inventory, and a compact `spell_anch
 
 Props do not add a separate spell system. They are environmental prompts for normal mechanics: center an `area_damage` on a brazier, create mist from a pool, reveal through a mirror, summon from a ritual circle, web/root from ropes or vines, curse through a notice or tablet, bind through a contract ledger, delay through a water clock, and so on. For attacks, prefer targeting creatures while using a prop as the center/origin; only target a prop directly when the spell explicitly destroys, animates, repairs, or transforms that object. Destroyed props remain as broken scenery with `broken`/`destroyed` tags so the consequence is inspectable.
 
+`active_curses` contains the controlled body's current curses as full cards. Unknown curses
+are semantic: the resolver should let their description bite by narrowing the spell's flavor,
+costs, compromises, and backfires according to the scene. Known mixed/mechanical curses also
+carry engine-enforced `mechanics`, such as `max_distance`, `min_distance`, `max_radius`,
+`require_line_of_sight`, or `forbidden_effects`; the resolver should avoid emitting JSON that
+violates those limits. If the requested spell cannot fit the curses, reject it or resolve a
+smaller curse-shaped version. The engine checks mechanical curses before mutation.
+
+Current recognized mechanical curses:
+
+- `close_curse` / Close Curse: effects must stay within 3 squares.
+- `far_curse` / Far Curse: effects must be at least 4 squares away.
+- `narrow_curse` / Narrow Curse: area radius cannot exceed 1.
+- `straight_path_curse` / Straight Path Curse: effects must stay in line of sight.
+- `anchored_curse` / Anchored Curse: forbids teleport and possess.
+
+The resolver may still invent vivid semantic curses as costs, and those should be tailored
+to the spell and current context.
+
 `supported_effects` in the context is routed per spell: universal core effects are always
 present, and specialist effects appear when the capability router loads their mechanic cards.
 `supported_costs` comes from the shared spell contract.
@@ -85,6 +104,8 @@ Supported cost types:
 - `curse`
 
 Costs are applied after effects, so the player discovers the price after the spell happens.
+Curse costs should include `id`, `name`, and `description` when possible. Unknown curse ids
+become semantic curses; recognized ids gain their engine-owned mechanics.
 
 ## Terrain
 

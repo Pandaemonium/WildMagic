@@ -24,6 +24,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from .capabilities import select_cards, selected_effect_types
+from .curses import curse_card
 from .models import (
     CharacterProfile,
     DAMAGE_TYPES,
@@ -293,7 +294,9 @@ def spell_context_view(
             else {}
         ),
         "inventory": engine.state.inventory,
+        "experience": engine.state.experience,
         "curses": [curse.to_public_dict() for curse in engine.state.curses.values()],
+        "active_curses": [curse_card(curse) for curse in engine.state.curses.values()],
         "world_flags": engine.state.flags,
         "event_timers": engine.state.event_timers,
         "triggers": engine.state.triggers,
@@ -374,6 +377,7 @@ def state_summary(engine: "GameEngine") -> dict[str, Any]:
         "visible_count": len(state.visible),
         "explored_count": len(state.explored),
         "inventory": dict(sorted(state.inventory.items())),
+        "experience": state.experience,
         "flags": dict(sorted(state.flags.items())),
         "tile_counts": tile_counts(state.tiles),
         "current_room": room_card(current_room, engine, include_secrets=True)
@@ -420,11 +424,7 @@ def state_summary(engine: "GameEngine") -> dict[str, Any]:
             ),
         ),
         "curses": {
-            curse_id: {
-                "name": curse.name,
-                "description": curse.description,
-                "stacks": curse.stacks,
-            }
+            curse_id: curse_card(curse)
             for curse_id, curse in sorted(state.curses.items())
         },
         "quests": [

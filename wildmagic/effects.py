@@ -7,6 +7,7 @@ from typing import Any
 
 from . import refs
 from . import operations
+from .curses import build_curse, merge_curse, validate_resolution_against_curses
 from .geometry import bresenham_line, sign, unique_points
 from .models import (
     BLOCKING_TILES,
@@ -14,7 +15,6 @@ from .models import (
     MECHANICAL_STATUSES,
     TILE_NAMES,
     WALL,
-    Curse,
     Entity,
     WildMagicOutcome,
 )
@@ -107,10 +107,19 @@ class _EffectsMixin:
             self.finish_player_turn()
             return WildMagicOutcome(True, False, [reason])
 
+        curse_error = validate_resolution_against_curses(self, resolution)
+        if curse_error:
+            self.state.add_message(curse_error)
+            self.state.stats.spells_failed += 1
+            self.finish_player_turn()
+            return WildMagicOutcome(True, False, [curse_error])
+
         snapshot = copy.deepcopy(self.state)
         # Capture operation deltas while the spell's effects + costs apply (Stage 6). Turned
         # off before finish_player_turn so the turn's environment/AI ticks aren't counted.
         self.begin_delta_capture()
+        nearest = self.nearest_enemy()
+        self._cast_ref_cache = {"nearest_enemy": nearest.id} if nearest else {}
         try:
             if outcome_text:
                 self.state.add_message(outcome_text)
@@ -140,12 +149,14 @@ class _EffectsMixin:
 
             deltas = self.collected_deltas()
             self.end_delta_capture()
+            self._cast_ref_cache = {}
             self.state.stats.spells_cast += 1
             self.finish_player_turn()
             state_errors = self.validate_state()
             if state_errors:
                 self.state = snapshot
                 self.discard_deltas()
+                self._cast_ref_cache = {}
                 message = f"Wild magic failed state validation: {state_errors[0]}"
                 self.state.add_message(message)
                 return WildMagicOutcome(False, True, [message])
@@ -153,6 +164,7 @@ class _EffectsMixin:
         except Exception as exc:
             self.state = snapshot
             self.discard_deltas()
+            self._cast_ref_cache = {}
             message = f"Wild magic failed during application: {exc}"
             self.state.add_message(message)
             return WildMagicOutcome(False, True, [message])
@@ -216,21 +228,13 @@ class _EffectsMixin:
                     self.state.inventory.pop(item, None)
             return f"Cost: {spent} {item}." if spent else f"Cost unpaid: no {item}."
         if cost_type == "curse":
-            curse_id = (
-                str(cost.get("id") or cost.get("name") or "nameless_curse")
-                .lower()
-                .replace(" ", "_")
-            )
-            name = str(cost.get("name") or curse_id.replace("_", " ").title())
-            description = str(
-                cost.get("description") or "Reality now remembers you incorrectly."
-            )
-            if curse_id in self.state.curses:
-                self.state.curses[curse_id].stacks += 1
+            curse = build_curse(cost, turn=self.state.turn)
+            if curse.id in self.state.curses:
+                merge_curse(self.state.curses[curse.id], curse)
             else:
-                self.state.curses[curse_id] = Curse(curse_id, name, description)
+                self.state.curses[curse.id] = curse
             self.state.stats.curses_gained += 1
-            return f"Curse gained: {name}."
+            return f"Curse gained: {curse.name}."
         if cost_type == "status":
             raw_status = str(cost.get("status") or cost.get("id") or "strained")
             status = normalize_id(raw_status)
@@ -246,14 +250,19 @@ class _EffectsMixin:
             if status not in MECHANICAL_STATUSES:
                 name = display_name or status.replace("_", " ").title()
                 curse_id = f"wild_condition_{status}"
-                if curse_id in self.state.curses:
-                    self.state.curses[curse_id].stacks += 1
+                curse = build_curse(
+                    {
+                        "id": curse_id,
+                        "name": name,
+                        "description": f"Wild magic leaves you with an uncanny condition: {name}.",
+                        "semantic_prompt": f"Let this uncanny condition shape future spells: {name}.",
+                    },
+                    turn=self.state.turn,
+                )
+                if curse.id in self.state.curses:
+                    merge_curse(self.state.curses[curse.id], curse)
                 else:
-                    self.state.curses[curse_id] = Curse(
-                        curse_id,
-                        name,
-                        f"Wild magic leaves you with an uncanny condition: {name}.",
-                    )
+                    self.state.curses[curse.id] = curse
                 return f"Cost became a curse: {name}."
             dur_val3: int | str = (
                 "permanent" if duration == "permanent" else clamp_int(duration, 1, 999)

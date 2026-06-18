@@ -256,7 +256,7 @@ def render_screen(session: GameSession) -> str:
         location = f"Depth {state.depth}/{state.max_depth}"
     footer = [
         "",
-        f"Turn {state.turn} | {state.clock_label()} | {location} | HP {player.hp}/{player.max_hp} | MP {player.mana}/{player.max_mana}",
+        f"Turn {state.turn} | {state.clock_label()} | {location} | HP {player.hp}/{player.max_hp} | MP {player.mana}/{player.max_mana} | XP {state.experience}",
         f"Inventory: {inventory}",
         f"Curses: {curses}",
         f"Standing: {standing_summary(state)}",

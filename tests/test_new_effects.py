@@ -195,6 +195,43 @@ def test_transform_item_can_alter_prop_by_anchor_id() -> None:
     assert {"law", "animated"} <= prop.tags
 
 
+def test_nearest_enemy_stays_bound_across_multi_effect_spell() -> None:
+    """A spell that turns the nearest enemy friendly and then marks it should not have
+    the second effect retarget the next hostile creature."""
+    engine = GameEngine(seed=7, scenario="test_chamber")
+    first = engine.nearest_enemy()
+    assert first is not None
+    others = [enemy for enemy in engine.living_enemies() if enemy.id != first.id]
+    assert others
+
+    outcome = engine.apply_wild_magic_resolution(
+        {
+            "accepted": True,
+            "severity": "major",
+            "outcome_text": "A hostile thought changes its coat.",
+            "effects": [
+                {
+                    "type": "change_faction",
+                    "target": "nearest_enemy",
+                    "faction": "ally",
+                },
+                {
+                    "type": "add_tag",
+                    "target": "nearest_enemy",
+                    "tag": "oath_bound",
+                },
+            ],
+            "costs": [],
+            "rejected_reason": None,
+        }
+    )
+
+    assert outcome.consumed_turn
+    assert first.faction == "ally"
+    assert "oath_bound" in first.tags
+    assert not any("oath_bound" in enemy.tags for enemy in others)
+
+
 # --- disfigure: the 'weakened' status (a maimed limb deals less damage) -----------------
 
 

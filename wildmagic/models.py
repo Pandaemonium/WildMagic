@@ -365,6 +365,12 @@ class Curse:
     name: str
     description: str
     stacks: int = 1
+    semantic_prompt: str = ""
+    mechanics: dict[str, Any] = field(default_factory=dict)
+    tags: set[str] = field(default_factory=set)
+    xp_to_clear: int = 3
+    clear_progress: int = 0
+    source_turn: int = 0
 
     def to_public_dict(self) -> dict[str, Any]:
         return {
@@ -372,6 +378,12 @@ class Curse:
             "name": self.name,
             "description": self.description,
             "stacks": self.stacks,
+            "semantic_prompt": self.semantic_prompt,
+            "mechanics": dict(self.mechanics),
+            "tags": sorted(self.tags),
+            "xp_to_clear": self.xp_to_clear,
+            "clear_progress": self.clear_progress,
+            "source_turn": self.source_turn,
         }
 
 
@@ -482,6 +494,7 @@ class GameStats:
     damage_dealt: int = 0
     damage_taken: int = 0
     hp_healed: int = 0
+    experience_gained: int = 0
 
     def to_dict(self) -> "dict[str, Any]":
         return {
@@ -495,6 +508,7 @@ class GameStats:
             "damage_dealt": self.damage_dealt,
             "damage_taken": self.damage_taken,
             "hp_healed": self.hp_healed,
+            "experience_gained": self.experience_gained,
         }
 
 

@@ -292,6 +292,10 @@ class _CombatMixin:
                 else:
                     self.state.add_message(f"{entity.name} dies.")
                     self.state.stats.enemies_killed += 1
+                    if self._deed_attributed_to_player(source):
+                        self.state.experience += 1
+                        self.state.stats.experience_gained += 1
+                        self.state.add_message("You gain 1 experience.")
                     # Emergent world: a kill the player's soul is responsible for can
                     # become a deed (Phase 0 records imperial kills). Recorded now;
                     # consequences are applied later by the daily tick (§1.8).
