@@ -22,7 +22,6 @@ from dataclasses import dataclass
 
 from .prompts import SUPPORTED_STATUS_TEXT
 from .semantics import SEMANTIC_PREAMBLE
-from .spell_contract import SUPPORTED_EFFECTS
 
 
 # ----------------------------------------------------------------------------------------

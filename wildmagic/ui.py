@@ -4,8 +4,6 @@ import concurrent.futures
 from datetime import datetime, timezone
 import json
 import os
-import random
-import textwrap
 import time
 from typing import Any
 
@@ -14,13 +12,6 @@ os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "1")
 import pygame
 
 from .actions import ActionResult, GameSession, describe_state
-from .character import (
-    CREATION_POINTS,
-    ORIGINS,
-    STAT_CAP,
-    STATS,
-    build_profile,
-)
 from .autoplay import (
     AgentObservation,
     OllamaAgent,
@@ -59,7 +50,7 @@ from .ui_theme import (
     blend_color,
     wrap_text,
 )
-from .wild_magic import fetch_ollama_models
+from .llm_client import fetch_ollama_models
 from .models import (
     DOOR,
     FIRE,
@@ -3509,80 +3500,6 @@ class GameUI:
             return None
         target_thumb_y = mouse_y - self.log_drag_grab_dy
         return (target_thumb_y - track.y) / usable
-
-    def _build_llm_lines_legacy_unused(
-        self, wrap_chars: int
-    ) -> list[tuple[str, tuple[int, int, int]]]:
-        lines: list[tuple[str, tuple[int, int, int]]] = []
-
-        def emit(text: str, color: tuple[int, int, int]) -> None:
-            for raw_line in text.splitlines() or [""]:
-                for wrapped in wrap_text(raw_line, wrap_chars):
-                    lines.append((wrapped, color))
-
-        emit("Prompt", ACCENT)
-        emit("(legacy debug renderer is inactive)", MUTED)
-        lines.append(("", MUTED))
-        lines.append(("=" * wrap_chars, PANEL_EDGE))
-
-        pending = getattr(self.engine, "_pending_towns", {})
-        if pending:
-            lines.append(("", MUTED))
-            emit("TOWN GENERATION IN PROGRESS", GOLD)
-            now = time.monotonic()
-            for key in pending:
-                ctx = getattr(self.engine, "_pending_town_contexts", {}).get(key, {})
-                start = getattr(self.engine, "_pending_town_start_times", {}).get(
-                    key, now
-                )
-                elapsed = now - start
-                remaining = max(0.0, _TOWN_GEN_TIMEOUT - elapsed)
-                zx, zy = key
-                emit(f"  Zone ({zx}, {zy}) — {remaining:.0f}s remaining", MODE_ORANGE)
-                if ctx.get("settlement_type"):
-                    emit(f"  Type: {ctx['settlement_type']}", TEXT)
-                if ctx.get("location"):
-                    emit(f"  Location: {ctx['location']}", TEXT)
-                if ctx.get("defining_trait"):
-                    emit(f"  Trait: {ctx['defining_trait']}", TEXT)
-                if ctx.get("current_situation"):
-                    emit(f"  Situation: {ctx['current_situation']}", TEXT)
-                lines.append(("", MUTED))
-            lines.append(("=" * wrap_chars, PANEL_EDGE))
-
-        if not self.llm_debug_entries:
-            lines.append(("", MUTED))
-            emit(
-                "No spells cast yet — type one in the spell box and press Enter to see it here.",
-                MUTED,
-            )
-            return lines
-
-        for entry in self.llm_debug_entries:
-            lines.append(("", MUTED))
-            header = f'— Turn {entry["turn"]}  ·  "{entry["spell"]}"  ·  provider: {entry["provider"]}'
-            emit(header, DANGER if entry["technical_failure"] else GOLD)
-            if entry.get("error"):
-                emit(f"error: {entry['error']}", DANGER)
-
-            emit("CONTEXT SENT TO MODEL:", ACCENT)
-            context = entry.get("context")
-            if context is not None:
-                emit(json.dumps(context, indent=2, ensure_ascii=False), TEXT)
-            else:
-                emit("(context unavailable — this cast came from a replay)", MUTED)
-
-            emit("Response", ACCENT)
-            thinking = entry.get("thinking")
-            if thinking:
-                emit(thinking, MUTED)
-            else:
-                emit("(model returned no <think> reasoning block)", MUTED)
-
-            emit("Response", ACCENT)
-            emit(entry.get("response") or "(no response captured)", TEXT)
-
-        return lines
 
     def _refresh_llm_debug_entries(self) -> None:
         entries_changed = False

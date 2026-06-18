@@ -224,7 +224,7 @@ def summarize_live(report: dict[str, Any]) -> None:
 
 def run_audit_replay(path: str) -> dict[str, Any]:
     """Re-parse recorded raw responses with the CURRENT contract code."""
-    from .wild_magic import parse_resolution_json
+    from .resolution_parsing import parse_resolution_json
     from .spell_contract import validate_resolution
 
     total = 0

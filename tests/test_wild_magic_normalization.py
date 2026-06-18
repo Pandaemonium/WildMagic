@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from wildmagic.spell_contract import validate_resolution
-from wildmagic.wild_magic import parse_resolution_json
+from wildmagic.resolution_parsing import parse_resolution_json
 
 
 def parse(data: dict[str, object]) -> dict[str, object]:

@@ -2778,7 +2778,7 @@ class _GenerationMixin:
 
     def _get_town_spec(self, zx: int, zy: int) -> tuple[Any, dict[str, Any]]:
         """Return TownSpec for (zx, zy) — from pending future or generate now. Never blocks >_TOWN_GEN_TIMEOUT."""
-        from .wild_magic import MockTownProvider
+        from .town_gen import MockTownProvider
 
         key = (zx, zy)
         if self._town_executor is None:

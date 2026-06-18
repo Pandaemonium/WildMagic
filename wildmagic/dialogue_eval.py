@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from .actions import GameSession
-from .wild_magic import OllamaDialogueProvider, resolve_dialogue
+from .dialogue import OllamaDialogueProvider, resolve_dialogue
 
 
 DEFAULT_MODELS = [

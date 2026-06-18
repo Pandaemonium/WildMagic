@@ -1,18 +1,15 @@
 from __future__ import annotations
 
-from collections import deque
 import concurrent.futures
 from dataclasses import dataclass, field
 import math
 import random
 import re
-import time
 from typing import Any
 from collections.abc import Iterable
 
 from .models import (
     BLOCKING_TILES,
-    Room,
     ZoneSnapshot,
     DOOR,
     DAMAGE_TYPES,
@@ -23,7 +20,6 @@ from .models import (
     MIST,
     OPEN_DOOR,
     POISON_CLOUD,
-    ROAD,
     RUBBLE,
     SLICK_ICE,
     STAIRS_DOWN,
@@ -38,13 +34,10 @@ from .models import (
     CanonRecord,
     RoomProfile,
     TILE_NAMES,
-    TILE_ALIASES,
     TILE_TAGS,
-    WildMagicOutcome,
 )
 from .semantics import (
     SemanticLedger,
-    SEMANTIC_PREAMBLE,
     entity_anchor,
     faction_anchor,
     place_anchor,
@@ -71,12 +64,10 @@ from .generation import _GenerationMixin
 from .effects import _EffectsMixin
 from .items import _ItemsMixin
 from .templates import (
-    creature_template,
     creature_template_ids,
-    item_template,
     item_template_ids,
 )
-from .props import get_prop_template, get_all_prop_ids
+from .props import get_prop_template
 from .prop_gen import make_prop_provider, PropProvider, PropSpec, MECHANICAL_TAGS
 from .regions import Region, get_region
 from .lore_cards import seed_npc_lore
@@ -101,30 +92,13 @@ from .game_data import (
     MAP_WIDTH,
     MAP_HEIGHT,
     NPC_PERCEPTION_RADIUS,
-    WILD_ENEMY_TEMPLATES,
-    LEGION_ENEMY_TEMPLATES,
     FACTION_HOSTILITIES,
-    ITEM_USE_SPECS,
     TRAP_SPECS,
-    LOCKED_DOOR_KEYS,
-    EQUIPMENT_SPECS,
-    DEFAULT_ITEM_USE_SPEC,
-    TRADE_KEYWORDS,
     scan_for_trade_intent,
-    _BUILDING_SIZES,
-    _DEFAULT_BUILDING_SIZE,
-    _ROLE_STATS,
-    _DEFAULT_NPC_STATS,
-    _TOWN_LOCATIONS,
-    _TOWN_DEFINING_TRAITS,
-    _TOWN_SITUATIONS,
-    _TOWN_GEN_TIMEOUT,
-    _TOWN_SETTLEMENT_TYPES,
 )
-from .geometry import sign, bresenham_line, unique_points, _on_bresenham
+from .geometry import bresenham_line
 from .normalize import (
     clamp_int,
-    optional_duration,
     status_duration,
     parse_tile_key,
     normalize_id,
@@ -132,13 +106,7 @@ from .normalize import (
     normalize_trigger_name,
     infer_behavior_tags,
     singular_target_tag,
-    normalize_numeric_map,
-    sanitize_name,
-    sanitize_char,
     coerce_list,
-    _flatten_effect,
-    area_damage_affects,
-    tile_from_name,
 )
 
 
@@ -508,7 +476,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         self._pending_town_contexts: dict[tuple[int, int], dict] = {}
         self._pending_town_start_times: dict[tuple[int, int], float] = {}
         self._town_executor: concurrent.futures.ThreadPoolExecutor | None = None
-        from .wild_magic import make_town_provider
+        from .town_gen import make_town_provider
 
         self.town_provider = make_town_provider(provider_name)
         self._setup_prop_generation(provider_name, prop_provider)

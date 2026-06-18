@@ -6,7 +6,6 @@ GameEngine._tick_auras."""
 from __future__ import annotations
 
 from wildmagic.engine import GameEngine
-from wildmagic.models import Entity
 
 
 def _engine_with_enemy(dx: int = 1):

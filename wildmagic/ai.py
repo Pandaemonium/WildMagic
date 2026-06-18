@@ -3,7 +3,6 @@ from __future__ import annotations
 from collections import deque
 import math
 import re
-from typing import Any
 
 from .game_data import NPC_PERCEPTION_RADIUS
 from .models import BLOCKING_TILES, DOOR, Entity
@@ -16,10 +15,9 @@ class _AIMixin:
     def can_sense(self, observer: Entity, target: Entity | None = None) -> bool:
         """Whether `observer` can currently notice `target` (defaulting to the player).
 
-        Generalized from the old player-only `enemy_can_sense_player` so any
-        entity can be judged for visibility/range to any other -- the same
-        distance/line-of-sight/status rules just no longer assume the player
-        is the only thing worth noticing.
+        Any entity can be judged for visibility/range to any other, using the same
+        distance/line-of-sight/status rules without assuming the player is the only
+        thing worth noticing.
         """
         target = target if target is not None else self.state.player
         distance = self.distance(observer, target)
@@ -429,9 +427,6 @@ class _AIMixin:
             offensive = nearby
             beneficial = [e for e in nearby if e.faction == source.faction]
         return offensive, beneficial
-
-    def enemy_can_sense_player(self, enemy: Entity) -> bool:
-        return self.can_sense(enemy)
 
     def next_path_step(
         self, entity: Entity, goal_x: int, goal_y: int
