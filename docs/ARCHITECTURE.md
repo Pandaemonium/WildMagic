@@ -108,7 +108,7 @@ Also holds `_EQUIPMENT_SLOT_ALIASES`.
 NPC perception and turn execution:
 `can_sense`, `_select_target`, `_update_npc_perceptions`, `_enemy_turns`, `_enemy_single_action`,
 `_try_enemy_summon`, `_ally_turns`, `_npc_turns`, `_process_entity_behaviors`,
-`_behavior_targets`, `enemy_can_sense_player`, `next_path_step`, `_flee_step`, `path_neighbors`.
+`_behavior_targets`, `next_path_step`, `_flee_step`, `path_neighbors`.
 Also holds the `_AURA_RE` regex used for aura parsing.
 
 ### `wildmagic/generation.py` — `_GenerationMixin`
@@ -181,12 +181,12 @@ Owns **orchestration**: `resolve_spell` (prompt build → provider call → retr
 `_wild_prompt_messages` (input/prompt assembly), and the wild-magic audit log writer. The
 **output parsing** that turns the model's raw text into a normalized resolution dict was
 split into `resolution_parsing.py` (below); `resolve_spell` calls `parse_resolution_json`
-from there. For backward compatibility `wild_magic.py` re-exports the dialogue/trade/town
-symbols from their new homes, so existing `from .wild_magic import ...` call sites keep
-working.
+from there.
 
 Spell operation constants, status flavor aliases, structural validation, and the
-JSON Schema used for constrained spell decoding live in `spell_contract.py`.
+JSON Schema used for constrained spell decoding live in `spell_contract.py`. Dialogue,
+trade, town generation, resolution parsing, and Ollama model-list helpers are imported
+from their own modules rather than through this spell module.
 
 ### `wildmagic/resolution_parsing.py`
 The spell-resolution **output parser**: a pure `str → dict` transform with no I/O or
@@ -272,10 +272,10 @@ promise realizations per zone and directional overflow spilling outward.
 
 ### `wildmagic/llm_client.py`
 Raw Ollama HTTP transport, completely decoupled from game logic:
-`_post_ollama_chat`, `parse_ollama_error_body`, `strip_thinking`, `extract_thinking`,
-`normalize_ollama_url`, and `fetch_ollama_models`. Configuration helpers are imported
-from `wildmagic.config` and re-exported here for compatibility with existing provider
-imports.
+`_post_ollama_chat`, `_post_ollama_chat_with_json_retry`, `parse_ollama_error_body`,
+`strip_thinking`, `extract_thinking`, `normalize_ollama_url`, and `fetch_ollama_models`.
+Provider modules import request configuration directly from `wildmagic.config`; this
+module owns transport behavior only.
 
 ### `wildmagic/config.py`
 The single configuration boundary. Loads the project `.env` without overriding shell
@@ -301,8 +301,8 @@ Wild-magic contract data that is shared by resolver and engine code:
 ### `wildmagic/prompts.py`
 System prompt strings only — `SYSTEM_PROMPT`, `DIALOGUE_SYSTEM_PROMPT`,
 `TRADE_SYSTEM_PROMPT`, `TOWN_SYSTEM_PROMPT`, `LORE_EXTRACTION_SYSTEM_PROMPT`,
-`FLESH_SYSTEM_PROMPT`, and `CANON_SYSTEM_PROMPT`. No logic; imported by the provider
-modules and re-exported for display in `ui.py`.
+`PROPS_SYSTEM_PROMPT`, `DEED_INTERPRETER_SYSTEM_PROMPT`, `FLESH_SYSTEM_PROMPT`, and
+`CANON_SYSTEM_PROMPT`. No logic; imported by the provider modules.
 
 ### `wildmagic/fallbacks.py`
 Pure-Python regex spell parser used when the LLM is unavailable or returns garbage.

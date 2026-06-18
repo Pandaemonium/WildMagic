@@ -9,23 +9,7 @@ from typing import Any
 
 from .config import (
     ollama_autostart_enabled,
-    ollama_dialogue_num_predict,
-    ollama_dialogue_temperature,
     ollama_host,
-    ollama_json_format_enabled,
-    ollama_keep_alive,
-    ollama_num_ctx,
-    ollama_num_gpu,
-    ollama_num_predict,
-    ollama_props_num_predict,
-    ollama_props_temperature,
-    ollama_resolution_attempts,
-    ollama_temperature,
-    ollama_thinking_enabled,
-    ollama_timeout_seconds,
-    ollama_town_num_predict,
-    ollama_trade_num_predict,
-    ollama_trade_temperature,
 )
 
 
@@ -127,6 +111,19 @@ def _post_ollama_chat(
         body = exc.read().decode("utf-8", errors="replace")
         detail = parse_ollama_error_body(body)
         raise ValueError(f"Ollama HTTP {exc.code}: {detail or exc.reason}") from exc
+
+
+def _post_ollama_chat_with_json_retry(
+    base_url: str, payload: dict[str, Any], timeout_seconds: float
+) -> dict[str, Any]:
+    try:
+        return _post_ollama_chat(base_url, payload, timeout_seconds)
+    except ValueError as exc:
+        if "Unexpected empty grammar stack" not in str(exc) or "format" not in payload:
+            raise
+        retry_payload = dict(payload)
+        retry_payload.pop("format", None)
+        return _post_ollama_chat(base_url, retry_payload, timeout_seconds)
 
 
 def ollama_reachable(base_url: str, timeout_seconds: float = 0.5) -> bool:

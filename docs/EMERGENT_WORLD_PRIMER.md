@@ -1,8 +1,8 @@
 # Emergent World — a 5-minute primer
 
 A quick orientation to the systems that make the world *react to what the player does*. For
-the full design see `EMERGENT_WORLD_STRATEGY.md`; for the build/decisions see
-`EMERGENT_WORLD_IMPLEMENTATION.md` and `implementation_session_log.md`.
+the full design see `EMERGENT_WORLD_STRATEGY.md`; for the implementation map see
+`EMERGENT_WORLD_IMPLEMENTATION.md`.
 
 ## The one big idea
 

@@ -6,12 +6,12 @@ backlash + consequence props + bonds/followers). They are **general primitives**
 doing it the way the strategy asks: **data tables + small emission hooks that multiply through
 the systems**, not bespoke scripted scenes.
 
-> **Status (2026-06-14):** Workstreams **A and B are largely implemented** (see
-> `implementation_session_log.md` → "Content workstreams A+B"). B: NPC disposition derivation
-> closes the bonds-differentiation gap. A: `defended_townsfolk` now fires, and the Hollowmere
-> dungeon is a literal prison — free captives → a `freed_captive` deed, some follow by
-> disposition, a knower reveals a real item's location. **Remaining in A:** `spared_enemy`
-> emission. Then C (legibility variety), D (milestones/epithets/nemeses), E/F.
+> **Status (2026-06-14):** Workstreams **A and B are largely implemented**. NPC
+> disposition derivation closes the bonds-differentiation gap. `defended_townsfolk` now
+> fires, and the Hollowmere dungeon is a literal prison: free captives → a
+> `freed_captive` deed, some follow by disposition, and a knower reveals a real item's
+> location. **Remaining in A:** `spared_enemy` emission. Then C (legibility variety),
+> D (milestones/epithets/nemeses), E/F.
 
 ## The guiding test
 

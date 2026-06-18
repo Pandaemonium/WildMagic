@@ -8,28 +8,27 @@ from typing import Any, Protocol
 
 from .config import (
     audit_dir,
+    fallbacks_enabled,
     get_wild_magic_model,
     get_wild_magic_provider,
+    ollama_host,
+    ollama_json_format_enabled,
+    ollama_keep_alive,
+    ollama_num_ctx,
+    ollama_num_gpu,
+    ollama_num_predict,
+    ollama_resolution_attempts,
+    ollama_temperature,
+    ollama_thinking_enabled,
+    ollama_timeout_seconds,
 )
 from .fallbacks import (
     bias_resolution_for_profile,
     fallback_resolution_from_spell,
-    fallbacks_enabled,
 )
 from .llm_client import (
-    _post_ollama_chat,
+    _post_ollama_chat_with_json_retry,
     normalize_ollama_url,
-    ollama_host,
-    fetch_ollama_models,  # noqa: F401 -- re-exported for wildmagic.ui
-    ollama_timeout_seconds,
-    ollama_num_predict,
-    ollama_num_ctx,
-    ollama_temperature,
-    ollama_thinking_enabled,
-    ollama_json_format_enabled,
-    ollama_num_gpu,
-    ollama_keep_alive,
-    ollama_resolution_attempts,
 )
 from .capabilities import assemble_resolver_system_prompt
 from .llm_resolver import _write_jsonl_audit, should_retry_resolution, retry_context
@@ -120,24 +119,13 @@ class OllamaWildMagicProvider:
         }
         if ollama_json_format_enabled(self.purpose):
             payload["format"] = "json"
-        try:
-            data = self._post_chat(payload)
-        except ValueError as exc:
-            if (
-                "Unexpected empty grammar stack" not in str(exc)
-                or "format" not in payload
-            ):
-                raise
-            retry_payload = dict(payload)
-            retry_payload.pop("format", None)
-            data = self._post_chat(retry_payload)
+        data = _post_ollama_chat_with_json_retry(
+            self.base_url, payload, self.timeout_seconds
+        )
         content = data.get("message", {}).get("content")
         if not isinstance(content, str) or not content.strip():
             raise ValueError("Ollama response did not include message.content")
         return content
-
-    def _post_chat(self, payload: dict[str, Any]) -> dict[str, Any]:
-        return _post_ollama_chat(self.base_url, payload, self.timeout_seconds)
 
 
 class MockWildMagicProvider:
@@ -680,52 +668,6 @@ def make_provider(provider_name: str | None = None) -> WildMagicProvider:
     if provider == "ollama":
         return OllamaWildMagicProvider()
     return AutoWildMagicProvider()
-
-
-# Dialogue, trade, and town generation are separate LLM subsystems that used to
-# live here; each now has its own module. They are re-exported so existing
-# `from .wild_magic import ...` call sites keep working unchanged.
-from .dialogue import (  # noqa: F401
-    DialogueResolution,
-    DialogueProvider,
-    OllamaDialogueProvider,
-    MockDialogueProvider,
-    AutoDialogueProvider,
-    make_dialogue_provider,
-    resolve_dialogue,
-    write_dialogue_audit_log,
-    _is_degenerate_echo,
-    _is_self_repetition,
-    _dialogue_provider_name,
-    _dialogue_retry_context,
-)
-from .trade import (  # noqa: F401
-    TradeResolution,
-    TradeProvider,
-    OllamaTradeProvider,
-    MockTradeProvider,
-    AutoTradeProvider,
-    make_trade_provider,
-    parse_trade_json,
-    validate_trade_resolution,
-    resolve_trade_proposal,
-    write_trade_audit_log,
-    _trade_provider_name,
-    _validate_trade_item_list,
-    _trade_retry_context,
-)
-from .town_gen import (  # noqa: F401
-    BuildingSpec,
-    NpcSpec,
-    TownSpec,
-    TownProvider,
-    OllamaTownProvider,
-    MockTownProvider,
-    AutoTownProvider,
-    make_town_provider,
-    _parse_town_spec,
-    _write_town_audit,
-)
 
 
 def resolve_spell(

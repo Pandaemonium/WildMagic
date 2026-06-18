@@ -1,7 +1,6 @@
 # The Promise Ledger — unifying rumors, quests, and emergent world creation
 
-Design drafted June 2026; revised per `WORLD_PROMISES_NOTES_TO_CLAUDE.md` (Codex/user
-feedback). Decisions locked with the designer:
+Design drafted June 2026. Decisions locked with the designer:
 
 Implementation note: M1-M4 are now partially implemented. The live code has a unified
 `WorldPromise` ledger, deterministic binding/reservations, `promise_hooks` for reserved

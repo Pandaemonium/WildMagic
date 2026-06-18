@@ -71,8 +71,7 @@ same profile to bias its canned anchors so the stats still bite without an LLM.
 - **Gender** → Male / Female / Other (custom text). Stored on the profile; when set it is
   prepended as the **first word of the physical description sent to the portrait LLM**.
 - **Physical description** → stored on the entity (`description`) and fed to the LLM:
-  the spell resolver's `caster_profile` (done) AND NPC dialogue context (TODO — NPCs
-  don't yet perceive the player's appearance).
+  the spell resolver's `caster_profile` and NPC dialogue context.
 - **Backstory blurb** → resolver idiom + NPC reactions, layered on the mechanical origin.
 - **Magical signature** → persistent flavor lens injected into every spell resolution.
 

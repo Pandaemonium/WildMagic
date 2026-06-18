@@ -19,20 +19,24 @@ from datetime import datetime, timezone
 import json
 from typing import Any, Protocol
 
-from .config import audit_dir, get_props_model, get_props_provider
-from .llm_client import (
-    _post_ollama_chat,
-    strip_thinking,
-    normalize_ollama_url,
+from .config import (
+    audit_dir,
+    get_props_model,
+    get_props_provider,
     ollama_host,
-    ollama_timeout_seconds,
+    ollama_json_format_enabled,
+    ollama_keep_alive,
     ollama_num_ctx,
     ollama_num_gpu,
-    ollama_keep_alive,
-    ollama_thinking_enabled,
-    ollama_json_format_enabled,
     ollama_props_num_predict,
     ollama_props_temperature,
+    ollama_thinking_enabled,
+    ollama_timeout_seconds,
+)
+from .llm_client import (
+    _post_ollama_chat_with_json_retry,
+    strip_thinking,
+    normalize_ollama_url,
 )
 from .llm_resolver import _write_jsonl_audit
 from .prompts import PROPS_SYSTEM_PROMPT, MECHANICAL_TAGS_PROMPT
@@ -164,17 +168,9 @@ class OllamaPropProvider:
         }
         if ollama_json_format_enabled(self.purpose):
             payload["format"] = "json"
-        try:
-            data = _post_ollama_chat(self.base_url, payload, self.timeout_seconds)
-        except ValueError as exc:
-            if (
-                "Unexpected empty grammar stack" not in str(exc)
-                or "format" not in payload
-            ):
-                raise
-            retry_payload = dict(payload)
-            retry_payload.pop("format", None)
-            data = _post_ollama_chat(self.base_url, retry_payload, self.timeout_seconds)
+        data = _post_ollama_chat_with_json_retry(
+            self.base_url, payload, self.timeout_seconds
+        )
         content = data.get("message", {}).get("content")
         if not isinstance(content, str) or not content.strip():
             _write_prop_audit(self, context, None, None, True, "no message.content")

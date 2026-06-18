@@ -3,8 +3,6 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from .config import fallbacks_enabled
-
 
 def fallback_resolution_from_spell(spell: str) -> dict[str, Any] | None:
     force_wave = _force_wave_fallback_from_spell(spell)

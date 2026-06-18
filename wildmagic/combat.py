@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections import deque
-from typing import Any
 
 from .game_data import EQUIPMENT_SPECS
 from .geometry import sign

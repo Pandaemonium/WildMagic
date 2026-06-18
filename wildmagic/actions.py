@@ -54,19 +54,22 @@ from .secrets import (
 from .promises import WorldPromise
 from .promises import Objective, Reward
 from .lore_router import book_lore_cards, dialogue_lore_cards
-from .wild_magic import (
+from .dialogue import (
     DialogueProvider,
     DialogueResolution,
-    MagicResolution,
-    TradeProvider,
-    TradeResolution,
-    WildMagicProvider,
     make_dialogue_provider,
-    make_provider,
-    make_trade_provider,
     resolve_dialogue,
-    resolve_spell,
+)
+from .trade import (
+    TradeProvider,
+    make_trade_provider,
     resolve_trade_proposal,
+)
+from .wild_magic import (
+    MagicResolution,
+    WildMagicProvider,
+    make_provider,
+    resolve_spell,
 )
 
 

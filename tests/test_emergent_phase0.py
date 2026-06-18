@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from wildmagic.actions import GameSession, describe_standing
+from wildmagic.actions import GameSession
 from wildmagic.deeds import Deed, DeedLedger
 from wildmagic.engine import GameEngine
 from wildmagic.factions import FactionLedger, seed_phase0_factions

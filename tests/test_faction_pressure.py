@@ -11,7 +11,7 @@ See docs/EMERGENT_WORLD_IMPLEMENTATION.md §3 (Phase B), §0.5 (D9).
 from __future__ import annotations
 
 from wildmagic.engine import GameEngine
-from wildmagic.factions import EMPIRE_DEFENSE_START, FactionLedger, seed_phase0_factions
+from wildmagic.factions import EMPIRE_DEFENSE_START, seed_phase0_factions
 from wildmagic.promises import Reward
 
 

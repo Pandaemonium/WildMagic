@@ -15,24 +15,24 @@ from typing import Any, Protocol
 
 from .config import (
     audit_dir,
+    fallbacks_enabled,
     get_background_canon_model,
     get_canon_model,
     get_canon_provider,
     ollama_canon_num_predict,
     ollama_canon_temperature,
-    ollama_resolution_attempts,
-)
-from .fallbacks import fallbacks_enabled
-from .llm_client import (
-    _post_ollama_chat,
-    normalize_ollama_url,
     ollama_host,
     ollama_json_format_enabled,
     ollama_keep_alive,
     ollama_num_ctx,
     ollama_num_gpu,
+    ollama_resolution_attempts,
     ollama_thinking_enabled,
     ollama_timeout_seconds,
+)
+from .llm_client import (
+    _post_ollama_chat_with_json_retry,
+    normalize_ollama_url,
     strip_thinking,
 )
 from .llm_resolver import _write_jsonl_audit
@@ -124,17 +124,9 @@ class OllamaCanonProvider:
         }
         if ollama_json_format_enabled(self.purpose):
             payload["format"] = "json"
-        try:
-            data = _post_ollama_chat(self.base_url, payload, self.timeout_seconds)
-        except ValueError as exc:
-            if (
-                "Unexpected empty grammar stack" not in str(exc)
-                or "format" not in payload
-            ):
-                raise
-            retry_payload = dict(payload)
-            retry_payload.pop("format", None)
-            data = _post_ollama_chat(self.base_url, retry_payload, self.timeout_seconds)
+        data = _post_ollama_chat_with_json_retry(
+            self.base_url, payload, self.timeout_seconds
+        )
         content = data.get("message", {}).get("content")
         if not isinstance(content, str) or not content.strip():
             raise ValueError("Ollama response did not include message.content")

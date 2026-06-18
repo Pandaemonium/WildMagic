@@ -5,7 +5,7 @@ from typing import Any
 from wildmagic.actions import GameSession
 from wildmagic.lore import MockLoreProvider, normalize_lore_promises, parse_lore_json
 from wildmagic.promises import WorldPromise
-from wildmagic.wild_magic import MockTownProvider
+from wildmagic.town_gen import MockTownProvider
 
 
 class FixedDialogueProvider:

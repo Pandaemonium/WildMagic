@@ -764,15 +764,13 @@ doc's "Next pieces"): live-model capture shakedown (funnel-scoring `lore_eval` b
 live run pending review), M6 eval graduation + agent playtest, a player-facing promise
 journal, then prophecy spells as the first new producer bridging back to Phase 8.
 
-Revised after Codex review (`WORLD_PROMISES_NOTES_TO_CLAUDE.md`): **every milestone now
-ends with named legacy writers deleted** (M1 kills `LoreClaim`/`lore_claims`, M2 kills
-`lore_hooks`/`mark_lore_redeemed`, M4 kills persistent `Quest`/`maybe_spawn_quest_item`);
-the schema separates `claimed_space` from `bound_space` so always-honor relocations are
-recorded, not silent; objective/reward schemas are typed from M1; the replay contract
-(record creation/binding/reservation/realization/flesh; zero model calls on replay) and
-golden binding tests start in M2, not M6. Old replay files are deleted outright — no
-migration parser; the format version bumps so stale files fail fast, and new goldens are
-recorded fresh.
+The Promise Ledger plan keeps legacy writers deleted rather than preserving parallel
+systems: `LoreClaim`/`lore_claims`, `lore_hooks`/`mark_lore_redeemed`, and persistent
+`Quest`/`maybe_spawn_quest_item` are gone. The schema separates `claimed_space` from
+`bound_space` so always-honor relocations are recorded, not silent; objective/reward
+schemas are typed; the replay contract records creation/binding/reservation/realization/
+flesh apply points with zero model calls on replay. Old replay files are deleted outright
+when the format changes, so stale files fail fast and new goldens are recorded fresh.
 
 Future producers already designed for: prophecy spells (wild magic that mints promises),
 NPC rendezvous commitments ("I'll meet you at the chapel"), clerk/flier threat-promises

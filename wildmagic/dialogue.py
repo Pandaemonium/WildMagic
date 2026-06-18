@@ -15,20 +15,24 @@ import json
 import urllib.error
 from typing import Any, Protocol
 
-from .config import audit_dir, get_dialogue_model, get_dialogue_provider
-from .fallbacks import fallbacks_enabled
+from .config import (
+    audit_dir,
+    fallbacks_enabled,
+    get_dialogue_model,
+    get_dialogue_provider,
+    ollama_dialogue_num_predict,
+    ollama_dialogue_temperature,
+    ollama_host,
+    ollama_keep_alive,
+    ollama_num_ctx,
+    ollama_num_gpu,
+    ollama_thinking_enabled,
+    ollama_timeout_seconds,
+)
 from .llm_client import (
     _post_ollama_chat,
     strip_thinking,
     normalize_ollama_url,
-    ollama_host,
-    ollama_timeout_seconds,
-    ollama_dialogue_temperature,
-    ollama_dialogue_num_predict,
-    ollama_num_ctx,
-    ollama_num_gpu,
-    ollama_keep_alive,
-    ollama_thinking_enabled,
 )
 from .llm_resolver import _write_jsonl_audit
 from .prompts import DIALOGUE_SYSTEM_PROMPT
