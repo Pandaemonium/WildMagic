@@ -85,7 +85,35 @@ LLM_PANEL_WIDTH = 520
 MAP_OFFSET_X = LLM_PANEL_WIDTH
 WINDOW_WIDTH = LLM_PANEL_WIDTH + MAP_PIXEL_WIDTH + PANEL_WIDTH
 WINDOW_HEIGHT = 800
-UI_SCALE = 2
+# Largest integer UI scale the toggle offers. Auto-detection (see _auto_ui_scale)
+# only selects it when the desktop can actually fit the scaled-up window.
+MAX_UI_SCALE = 2
+
+
+def _auto_ui_scale() -> int:
+    """Pick the largest integer UI scale (up to MAX_UI_SCALE) whose scaled window
+    fits the primary desktop, leaving headroom for the taskbar / title bar.
+
+    On a 4K display the 2x window (3412x1600) fits comfortably; on 1080p/1440p it
+    doesn't, so we stay at 1x and let the user opt into 2x via the toggle.
+    Requires pygame.display to be initialised; falls back to 1x if unavailable.
+    """
+    try:
+        desktop_w, desktop_h = pygame.display.get_desktop_sizes()[0]
+    except (pygame.error, IndexError, AttributeError):
+        return 1
+    # Reserve vertical room so the window isn't shoved partly off-screen by the
+    # taskbar and the OS title bar at the chosen scale.
+    usable_h = desktop_h - 80
+    scale = 1
+    for candidate in range(2, MAX_UI_SCALE + 1):
+        if (
+            WINDOW_WIDTH * candidate <= desktop_w
+            and WINDOW_HEIGHT * candidate <= usable_h
+        ):
+            scale = candidate
+    return scale
+
 
 CONTROLS_HINT = (
     "Keyboard controls active - arrows/WASD/keypad move, > descend, < ascend, o open, "
@@ -517,7 +545,7 @@ class GameUI:
         # the player on a single intended move. set_repeat() with no args disables it.
         pygame.key.set_repeat()
         pygame.display.set_caption("Wild Magic")
-        self.ui_scale = UI_SCALE
+        self.ui_scale = _auto_ui_scale()
         self.display = pygame.display.set_mode(
             (WINDOW_WIDTH * self.ui_scale, WINDOW_HEIGHT * self.ui_scale)
         )
@@ -741,7 +769,7 @@ class GameUI:
         )
 
     def _toggle_ui_scale(self) -> None:
-        self.ui_scale = 1 if self.ui_scale == 2 else 2
+        self.ui_scale = 1 if self.ui_scale >= MAX_UI_SCALE else MAX_UI_SCALE
         self.display = pygame.display.set_mode(
             (WINDOW_WIDTH * self.ui_scale, WINDOW_HEIGHT * self.ui_scale)
         )
