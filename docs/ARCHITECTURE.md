@@ -214,12 +214,15 @@ Wild magic resolution and every effect/cost handler:
 - `apply_wild_magic_resolution` — top-level entry point; validates the spell contract,
   snapshots state transactionally, fires `on_next_spell` triggers, iterates the resolution's
   `effects` and `costs` arrays, and rolls back on validation/application failure
-- `_apply_effect` — dispatches on `effect["type"]` for 25+ effect types: `damage`,
+- `_apply_effect` — dispatches on `effect["type"]` for 35+ effect types: `damage`,
   `area_damage`, `area_status`, `heal`, `restore_mana`, `teleport`, `push/pull`,
   `create_tile/set_tile`, `add_status`, `remove_status`, `summon`, `spawn_item`,
   `conjure_item`, `conjure_creature`, `transform_item`, `modify_inventory`,
-  `transform_entity`, `change_faction`, `add_tag/remove_tag`, `add_resistance/add_weakness`,
-  `set_flag`, `schedule_event`, `create_trigger/ward`, `add_curse`, `message`
+  `transform_entity`, `edit_memory`, `animate_object`, `aura`, `add_trait`,
+  `change_faction`, `possess`, `add_tag/remove_tag`, `add_resistance/add_weakness`,
+  `set_flag`, `schedule_event`, `create_trigger/ward`, `create_persistent_effect`,
+  `create_promise`, `add_curse`, `message`. The authoritative operation catalogue and
+  generated documentation metadata live in `spell_contract.py`.
 - `_apply_cost` — dispatches on `cost["type"]`: `mana`, `health/hp`, `max_health`,
   `max_mana`, `item`, `curse`, `status`
 - Placement helpers: `effect_position`, `resolve_placement`, `random_visible_floor`,
@@ -377,7 +380,10 @@ Shared retry and audit utilities:
 ### `wildmagic/spell_contract.py`
 Wild-magic contract data that is shared by resolver and engine code:
 `SUPPORTED_EFFECTS`, `SUPPORTED_COSTS`, `STATUS_FLAVOR_ALIASES`,
-`SPELL_RESPONSE_JSON_SCHEMA`, and `validate_resolution`.
+`EFFECT_DOCUMENTATION`, `COST_DOCUMENTATION`, `SPELL_RESPONSE_JSON_SCHEMA`,
+`render_operation_reference`, `update_operation_reference`, and `validate_resolution`.
+Run `python -m wildmagic.spell_contract --write-docs` after changing the operation
+catalogue to refresh the generated block in `docs/WILD_MAGIC_SCHEMA.md`.
 
 ### `wildmagic/prompts.py`
 System prompt strings only — `SYSTEM_PROMPT`, `DIALOGUE_SYSTEM_PROMPT`,

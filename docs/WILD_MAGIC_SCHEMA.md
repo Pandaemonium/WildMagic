@@ -53,55 +53,64 @@ present, and specialist effects appear when the capability router loads their me
 }
 ```
 
-## Effects
+## Operation Reference
 
-Supported effect types:
+The effect and cost lists below are generated from `wildmagic.spell_contract`. A contract
+test fails if this block drifts from the engine-owned operation catalogue. Regenerate it
+with `python -m wildmagic.spell_contract --write-docs`.
 
-- `damage`: damage one target.
-- `area_damage`: damage entities in a radius.
-- `area_status`: apply a status to entities in a radius.
-- `heal`: restore HP.
-- `restore_mana`: restore mana.
-- `teleport`: move an entity to a specific tile.
-- `push` / `pull`: move an entity away from or toward an origin.
-- `create_tile` / `set_tile`: change one tile.
-- `create_tiles`: change an area, a line/path, or an explicit list of tiles.
-- `add_status` / `remove_status`: apply or clear statuses.
-- `summon`: create an actor.
-- `spawn_item`: create an item.
-- `conjure_item`: create an item from a safe template while allowing a creative name/material/tags.
-- `conjure_creature`: create one or more creatures from a safe template while allowing a creative name/faction/tags.
-- `transform_item`: alter an item or prop into a new item form.
-- `modify_inventory`: add, remove, or set carried item counts.
-- `transform_entity`: alter actor stats, name, glyph, material, or tags.
-- `edit_memory`: add, alter, or erase a nearby NPC memory.
-- `animate_object`: turn a nearby prop into an actor.
-- `aura`: attach an ongoing damage or status emanation to an entity or tile.
-- `add_trait`: attach a soft narrative trait to an entity.
-- `change_faction`: make an entity enemy, ally, neutral, etc.
-- `possess`: move player control into another living body.
-- `add_tag` / `remove_tag`: alter entity tags.
-- `add_resistance` / `add_weakness`: alter damage modifiers.
-- `set_flag`: set a persistent world flag.
-- `schedule_event`: create a delayed event.
-- `create_trigger`: create a charged reaction that fires when a later event happens.
-- `create_persistent_effect`: create an anchored trigger such as a sympathetic link or ward.
-- `create_promise`: speak a prophecy, rumor, threat, or place claim into the promise ledger.
-- `add_curse`: add a curse as an effect.
-- `message`: add log text.
+<!-- BEGIN GENERATED OPERATION REFERENCE -->
+### Effects
 
-## Costs
+- `damage`: Damage one target.
+- `area_damage`: Damage entities in an area.
+- `area_status`: Apply a status to entities in an area.
+- `heal`: Restore HP.
+- `restore_mana`: Restore mana.
+- `teleport`: Move an entity to a specific tile.
+- `push`: Move an entity away from an origin.
+- `pull`: Move an entity toward an origin.
+- `create_tile`: Change one tile.
+- `set_tile`: Change one tile.
+- `create_tiles`: Change an area, shape, path, or explicit tile list.
+- `add_status`: Apply a mechanical status.
+- `remove_status`: Clear a mechanical status.
+- `summon`: Create an actor from explicit bounded stats.
+- `spawn_item`: Create an item from explicit bounded fields.
+- `conjure_item`: Create a flavored item from a safe template.
+- `conjure_creature`: Create flavored creatures from a safe template.
+- `transform_item`: Alter an existing item's type, material, or tags.
+- `modify_inventory`: Add, remove, or set carried item counts.
+- `transform_entity`: Alter an actor's identity, appearance, stats, or tags.
+- `edit_memory`: Add or remove bounded semantic memories from an actor.
+- `animate_object`: Turn an existing prop into a bounded actor.
+- `aura`: Attach a persistent area effect to an entity or tile.
+- `add_trait`: Add a durable semantic trait to an entity.
+- `change_faction`: Change an entity's faction.
+- `possess`: Move player control into another valid actor.
+- `add_tag`: Add a tag to an entity.
+- `remove_tag`: Remove a tag from an entity.
+- `add_resistance`: Alter an entity's resistance to a damage type.
+- `add_weakness`: Alter an entity's weakness to a damage type.
+- `set_flag`: Set a persistent world flag.
+- `schedule_event`: Schedule bounded effects for a later turn.
+- `create_trigger`: Create a charged reaction to a later event.
+- `create_persistent_effect`: Create an anchored trigger such as a sympathetic link or ward.
+- `create_promise`: Add a world commitment to the Promise Ledger.
+- `add_curse`: Add or stack a curse.
+- `message`: Add text to the game log.
 
-Supported cost types:
+### Costs
 
-- `mana`
-- `health`
-- `hp`
-- `max_health`
-- `max_mana`
-- `item`
-- `status`
-- `curse`
+- `mana`: Spend current mana.
+- `health`: Lose current health.
+- `hp`: Alias for `health`.
+- `max_health`: Lose maximum health.
+- `max_mana`: Lose maximum mana.
+- `item`: Consume inventory items.
+- `status`: Gain a temporary mechanical status.
+- `curse`: Gain or stack a curse.
+<!-- END GENERATED OPERATION REFERENCE -->
 
 Costs are applied after effects, so the player discovers the price after the spell happens.
 Curse costs should include `id`, `name`, and `description` when possible. Unknown curse ids
