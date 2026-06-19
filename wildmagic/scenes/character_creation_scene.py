@@ -108,6 +108,7 @@ class CharacterCreationScene:
         if self.host.portraits.available():
             order.append("portrait")
         order.append("zone")
+        order.append("scale")
         order.append("begin")
         return order
 
@@ -177,6 +178,9 @@ class CharacterCreationScene:
                 self._set_focus(cid[len("field_") :])
             elif cid == "portrait_btn":
                 self._request_portrait()
+            elif cid == "scale":
+                self.host._toggle_ui_scale()
+                self._set_focus("scale")
             elif cid == "begin":
                 self._begin()
             return
@@ -201,12 +205,16 @@ class CharacterCreationScene:
             s["gender_mode"] = (s["gender_mode"] + delta) % len(_GENDER_OPTIONS)
         elif focus == "zone":
             s["zone_index"] = (s["zone_index"] + delta) % len(START_ZONES)
+        elif focus == "scale":
+            self.host._toggle_ui_scale()
 
     def _activate(self, focus: str) -> None:
         if focus == "random":
             self.host.finish_creation(None, self._scenario())
         elif focus == "portrait":
             self._request_portrait()
+        elif focus == "scale":
+            self.host._toggle_ui_scale()
         elif focus in ("begin", "origins"):
             self._begin()
         else:  # Enter on a field/stat moves to the next control
@@ -304,6 +312,26 @@ class CharacterCreationScene:
         width = screen.get_width()
         margin = 40
         self._text("CHARACTER CREATION", margin, 32, host.tile_font, ACCENT)
+        scale_rect = pygame.Rect(width - margin - 130, 26, 130, 36)
+        scale_focused = self._focused() == "scale"
+        pygame.draw.rect(
+            screen,
+            ACCENT if scale_focused else PANEL_EDGE,
+            scale_rect,
+            width=2,
+            border_radius=4,
+        )
+        scale_label = host.ui_font.render(
+            f"UI Scale: {host.ui_scale}x", True, ACCENT if scale_focused else TEXT
+        )
+        screen.blit(
+            scale_label,
+            (
+                scale_rect.centerx - scale_label.get_width() // 2,
+                scale_rect.centery - scale_label.get_height() // 2,
+            ),
+        )
+        self.hitboxes["scale"] = scale_rect
         top = 92
         left_x, left_w = margin, 300
         right_w = 300
