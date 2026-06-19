@@ -85,6 +85,7 @@ LLM_PANEL_WIDTH = 520
 MAP_OFFSET_X = LLM_PANEL_WIDTH
 WINDOW_WIDTH = LLM_PANEL_WIDTH + MAP_PIXEL_WIDTH + PANEL_WIDTH
 WINDOW_HEIGHT = 800
+UI_SCALE = 2
 
 CONTROLS_HINT = (
     "Keyboard controls active - arrows/WASD/keypad move, > descend, < ascend, o open, "
@@ -516,7 +517,11 @@ class GameUI:
         # the player on a single intended move. set_repeat() with no args disables it.
         pygame.key.set_repeat()
         pygame.display.set_caption("Wild Magic")
-        self.screen = pygame.display.set_mode((WINDOW_WIDTH, WINDOW_HEIGHT))
+        self.ui_scale = UI_SCALE
+        self.display = pygame.display.set_mode(
+            (WINDOW_WIDTH * self.ui_scale, WINDOW_HEIGHT * self.ui_scale)
+        )
+        self.screen = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT))
         self.clock = pygame.time.Clock()
         self.tile_font = pygame.font.SysFont("consolas", 20, bold=True)
         self.ui_font = pygame.font.SysFont("consolas", 17)
@@ -672,6 +677,7 @@ class GameUI:
             while running:
                 self._acted_this_frame = False
                 for event in pygame.event.get():
+                    event = self._logical_mouse_event(event)
                     if event.type == pygame.QUIT:
                         running = False
                     elif event.type in {
@@ -704,6 +710,9 @@ class GameUI:
                     # only while one is actually in flight — otherwise it's a real bug.
                     if self._command_future is None:
                         raise
+                pygame.transform.scale(
+                    self.screen, self.display.get_size(), self.display
+                )
                 pygame.display.flip()
                 self.clock.tick(30)
         finally:
@@ -712,6 +721,30 @@ class GameUI:
             self.portraits.close()
             self.session.close()
             pygame.quit()
+
+    def _logical_mouse_event(self, event: pygame.event.Event) -> pygame.event.Event:
+        if not hasattr(event, "pos"):
+            return event
+        attributes = event.dict.copy()
+        attributes["pos"] = tuple(
+            coordinate // self.ui_scale for coordinate in event.pos
+        )
+        if "rel" in attributes:
+            attributes["rel"] = tuple(
+                coordinate / self.ui_scale for coordinate in attributes["rel"]
+            )
+        return pygame.event.Event(event.type, attributes)
+
+    def _logical_mouse_pos(self) -> tuple[int, int]:
+        return tuple(
+            coordinate // self.ui_scale for coordinate in pygame.mouse.get_pos()
+        )
+
+    def _toggle_ui_scale(self) -> None:
+        self.ui_scale = 1 if self.ui_scale == 2 else 2
+        self.display = pygame.display.set_mode(
+            (WINDOW_WIDTH * self.ui_scale, WINDOW_HEIGHT * self.ui_scale)
+        )
 
     def _awaiting_command(self) -> bool:
         """True while a player-issued LLM command is still resolving on the worker."""
@@ -915,7 +948,7 @@ class GameUI:
             # Ctrl acts as a temporary Controls modifier so letter hotkeys (incl. Ctrl+c
             # for the character sheet) work without leaving Wild Spell mode. Copy still
             # works, but only when text is actually selected; Ctrl+A select-all stays.
-            hovering_llm = self.llm_content_rect.collidepoint(pygame.mouse.get_pos())
+            hovering_llm = self.llm_content_rect.collidepoint(self._logical_mouse_pos())
             if event.key == pygame.K_c:
                 if (
                     self.llm_selection_anchor is not None
@@ -1233,6 +1266,10 @@ class GameUI:
         if self.menu_page == "main":
             return [
                 {"label": "Resume", "action": "resume"},
+                {
+                    "label": f"UI Scale: {self.ui_scale}x",
+                    "action": "toggle_ui_scale",
+                },
                 {"label": "Configuration", "action": "config"},
                 {"label": "Quit", "action": "quit"},
             ]
@@ -1394,6 +1431,8 @@ class GameUI:
         action = item["action"]
         if action == "resume":
             self._close_menu()
+        elif action == "toggle_ui_scale":
+            self._toggle_ui_scale()
         elif action == "quit":
             pygame.event.post(pygame.event.Event(pygame.QUIT))
         elif action == "config":
@@ -3101,7 +3140,7 @@ class GameUI:
 
     def draw_curse_tooltip(self) -> None:
         hover_id = None
-        mouse = pygame.mouse.get_pos()
+        mouse = self._logical_mouse_pos()
         for rect, curse_id in self.curse_rects:
             if rect.collidepoint(mouse):
                 hover_id = curse_id
@@ -3805,7 +3844,7 @@ class GameUI:
                 min(self._queue_debug_max_scroll, self.queue_debug_scroll - event.y),
             )
             return
-        pos = pygame.mouse.get_pos()
+        pos = self._logical_mouse_pos()
         if self.llm_content_rect.collidepoint(pos):
             self.llm_scroll_offset -= event.y * 3
             self.llm_scroll_offset = max(
