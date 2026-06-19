@@ -1,64 +1,135 @@
 from __future__ import annotations
 
+import argparse
 import copy
+from pathlib import Path
 from typing import Any
 
 
-SUPPORTED_EFFECTS = {
-    "damage",
-    "area_damage",
-    "area_status",
-    "heal",
-    "restore_mana",
-    "teleport",
-    "push",
-    "pull",
-    "create_tile",
-    "set_tile",
-    "create_tiles",
-    "add_status",
-    "remove_status",
-    "summon",
-    "spawn_item",
-    "conjure_item",
-    "conjure_creature",
-    "transform_item",
-    "modify_inventory",
-    "transform_entity",
-    "edit_memory",
-    "animate_object",
-    "aura",
-    "add_trait",
-    "change_faction",
-    "possess",
-    "add_tag",
-    "remove_tag",
-    "add_resistance",
-    "add_weakness",
-    "set_flag",
-    "schedule_event",
-    "delay_incoming",
-    "accelerate_status",
-    "set_behavior",
-    "create_flow",
-    "create_trigger",
-    "create_persistent_effect",
-    "create_promise",
-    "add_curse",
-    "message",
+OPERATION_REFERENCE_START = "<!-- BEGIN GENERATED OPERATION REFERENCE -->"
+OPERATION_REFERENCE_END = "<!-- END GENERATED OPERATION REFERENCE -->"
+
+
+# These ordered catalogues are the authoritative public operation surface. The JSON
+# schema, validator, resolver capability coverage, and docs all derive from them.
+EFFECT_DOCUMENTATION: dict[str, str] = {
+    "damage": "Damage one target.",
+    "area_damage": "Damage entities in an area.",
+    "area_status": "Apply a status to entities in an area.",
+    "heal": "Restore HP.",
+    "restore_mana": "Restore mana.",
+    "teleport": "Move an entity to a specific tile.",
+    "push": "Move an entity away from an origin.",
+    "pull": "Move an entity toward an origin.",
+    "create_tile": "Change one tile.",
+    "set_tile": "Change one tile.",
+    "create_tiles": "Change an area, shape, path, or explicit tile list.",
+    "add_status": "Apply a mechanical status.",
+    "remove_status": "Clear a mechanical status.",
+    "summon": "Create an actor from explicit bounded stats.",
+    "spawn_item": "Create an item from explicit bounded fields.",
+    "conjure_item": "Create a flavored item from a safe template.",
+    "conjure_creature": "Create flavored creatures from a safe template.",
+    "transform_item": "Alter an existing item's type, material, or tags.",
+    "modify_inventory": "Add, remove, or set carried item counts.",
+    "transform_entity": "Alter an actor's identity, appearance, stats, or tags.",
+    "edit_memory": "Add or remove bounded semantic memories from an actor.",
+    "animate_object": "Turn an existing prop into a bounded actor.",
+    "aura": "Attach a persistent area effect to an entity or tile.",
+    "add_trait": "Add a durable semantic trait to an entity.",
+    "change_faction": "Change an entity's faction.",
+    "possess": "Move player control into another valid actor.",
+    "add_tag": "Add a tag to an entity.",
+    "remove_tag": "Remove a tag from an entity.",
+    "add_resistance": "Alter an entity's resistance to a damage type.",
+    "add_weakness": "Alter an entity's weakness to a damage type.",
+    "set_flag": "Set a persistent world flag.",
+    "schedule_event": "Schedule bounded effects for a later turn.",
+    "delay_incoming": "Capture incoming damage and release it after a timer.",
+    "accelerate_status": "Resolve remaining damaging status ticks immediately.",
+    "set_behavior": "Temporarily change creature AI behavior.",
+    "create_flow": "Create a temporary tile current that moves creatures each turn.",
+    "create_trigger": "Create a charged reaction to a later event.",
+    "create_persistent_effect": (
+        "Create an anchored trigger such as a sympathetic link or ward."
+    ),
+    "create_promise": "Add a world commitment to the Promise Ledger.",
+    "add_curse": "Add or stack a curse.",
+    "message": "Add text to the game log.",
 }
 
 
-SUPPORTED_COSTS = {
-    "mana",
-    "health",
-    "hp",
-    "max_health",
-    "max_mana",
-    "item",
-    "status",
-    "curse",
+COST_DOCUMENTATION: dict[str, str] = {
+    "mana": "Spend current mana.",
+    "health": "Lose current health.",
+    "hp": "Alias for `health`.",
+    "max_health": "Lose maximum health.",
+    "max_mana": "Lose maximum mana.",
+    "item": "Consume inventory items.",
+    "status": "Gain a temporary mechanical status.",
+    "curse": "Gain or stack a curse.",
 }
+
+
+SUPPORTED_EFFECTS = frozenset(EFFECT_DOCUMENTATION)
+SUPPORTED_COSTS = frozenset(COST_DOCUMENTATION)
+
+
+def render_operation_reference() -> str:
+    """Render the contract-owned operation lists embedded in the schema guide."""
+
+    lines = ["### Effects", ""]
+    lines.extend(
+        f"- `{name}`: {description}"
+        for name, description in EFFECT_DOCUMENTATION.items()
+    )
+    lines.extend(["", "### Costs", ""])
+    lines.extend(
+        f"- `{name}`: {description}" for name, description in COST_DOCUMENTATION.items()
+    )
+    return "\n".join(lines)
+
+
+def update_operation_reference(path: Path) -> bool:
+    """Rewrite the generated operation block and report whether the file changed."""
+
+    original = path.read_text(encoding="utf-8")
+    before, separator, remainder = original.partition(OPERATION_REFERENCE_START)
+    if not separator:
+        raise ValueError(f"missing operation reference start marker in {path}")
+    _, separator, after = remainder.partition(OPERATION_REFERENCE_END)
+    if not separator:
+        raise ValueError(f"missing operation reference end marker in {path}")
+    updated = (
+        before
+        + OPERATION_REFERENCE_START
+        + "\n"
+        + render_operation_reference()
+        + "\n"
+        + OPERATION_REFERENCE_END
+        + after
+    )
+    if updated == original:
+        return False
+    path.write_text(updated, encoding="utf-8")
+    return True
+
+
+def _main() -> None:
+    parser = argparse.ArgumentParser(
+        description="Update contract-generated spell schema documentation."
+    )
+    parser.add_argument(
+        "--write-docs",
+        action="store_true",
+        help="rewrite the generated operation reference in docs/WILD_MAGIC_SCHEMA.md",
+    )
+    args = parser.parse_args()
+    if not args.write_docs:
+        parser.error("--write-docs is required")
+    schema_path = Path(__file__).resolve().parents[1] / "docs" / "WILD_MAGIC_SCHEMA.md"
+    changed = update_operation_reference(schema_path)
+    print(f"{'Updated' if changed else 'Already current'}: {schema_path}")
 
 
 STATUS_FLAVOR_ALIASES: dict[str, str] = {
@@ -334,3 +405,7 @@ def validate_resolution(data: dict[str, Any]) -> str | None:
         if cost_type not in SUPPORTED_COSTS:
             return f"unsupported cost type: {cost_type or '(missing)'}"
     return None
+
+
+if __name__ == "__main__":
+    _main()
