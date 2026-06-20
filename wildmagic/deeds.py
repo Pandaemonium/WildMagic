@@ -28,6 +28,7 @@ from typing import Any
 #: DEED_RULES below; the LLM interpreter (A.2) handles deeds it can't classify by rule.
 DEED_TYPES: tuple[str, ...] = (
     "killed_imperials",
+    "killed_combatant",
     "killed_civilians",
     "spared_enemy",
     "freed_captive",
@@ -57,7 +58,18 @@ PUBLIC_VISIBILITY: frozenset[str] = frozenset({"witnessed", "public", "mythic"})
 #: Deed types that record killing a faction's member — the basis of per-faction kill
 #: accounting (`FACTION_KILL_REPUTATION.md` K2). Each carries a ``victim_faction``. New
 #: kill types (e.g. a generic combatant kill, rolled-faction kills) are added here.
-KILL_DEEDS: frozenset[str] = frozenset({"killed_imperials", "killed_civilians"})
+KILL_DEEDS: frozenset[str] = frozenset(
+    {"killed_imperials", "killed_combatant", "killed_civilians"}
+)
+
+#: Kill deeds whose standing consequences are **relational** (K3): computed at record time
+#: from each faction's stance toward the victim's faction, *overriding* any role-based rule.
+#: Killing a faction's combatant pleases that faction's enemies and angers its friends —
+#: generalizing the hardcoded empire↔resistance reaction to the whole rolled roster. Civilian
+#: killings stay rule-based (the qualitatively different butchery reaction), so they are out.
+RELATIONAL_KILL_DEEDS: frozenset[str] = frozenset(
+    {"killed_imperials", "killed_combatant"}
+)
 
 
 @dataclass
@@ -324,6 +336,7 @@ class StoryBeat:
 #: How a cluster of same-type deeds reads once compressed into a beat.
 _BEAT_SUMMARIES: dict[str, str] = {
     "killed_imperials": "a campaign of strikes against the Empire",
+    "killed_combatant": "a tally of fighters cut down",
     "killed_civilians": "a trail of slaughter among the helpless",
     "spared_enemy": "a pattern of mercy to the beaten",
     "freed_captive": "a run of jailbreaks and freed captives",

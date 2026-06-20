@@ -3030,6 +3030,21 @@ def describe_standing(engine: GameEngine) -> list[str]:
             or "neutral"
         )
         lines.append(f"  {faction.name} ({faction.mood}): {axes}")
+    # Who you've been killing, by faction (FACTION_KILL_REPUTATION.md K4) — the raw fact beside
+    # the felt standing above. Sustained killing of one faction reads as a sworn blood feud (K5).
+    tally = engine.kills_by_faction()
+    if tally:
+        feuds = engine.feuding_factions()
+        lines.append("Blood on your hands:")
+        for fid in sorted(tally, key=lambda f: (-tally[f], f)):
+            count = tally[fid]
+            if fid == "civilian":
+                label = "the innocent"
+            else:
+                faction = ledger.factions.get(fid)
+                label = faction.name if faction else fid
+            feud = " — a blood feud is sworn against you" if fid in feuds else ""
+            lines.append(f"  {label}: {count} slain{feud}")
     legend = state.legend_ledger.top_tags(state.player_soul_id, n=4)
     if legend:
         legend_text = ", ".join(f"{tag} {weight:+.1f}" for tag, weight in legend)

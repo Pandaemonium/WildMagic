@@ -36,6 +36,7 @@ from .models import (
     TILE_NAMES,
     TILE_TAGS,
     NONCOMBATANT_ROLES,
+    character_is_noncombatant,
     role_from_tags,
 )
 from .semantics import (
@@ -52,7 +53,12 @@ from .bonds import (
     disposition_inclination,
     drift_bond,
 )
-from .deeds import Deed, DeedLedger, interpret_deed_rules
+from .deeds import (
+    Deed,
+    DeedLedger,
+    RELATIONAL_KILL_DEEDS,
+    interpret_deed_rules,
+)
 from .factions import (
     EMPIRE_PATROLS_START,
     REBELLION_CELLS_START,
@@ -287,6 +293,11 @@ EMPIRE_PRESSURE_RATE = 1.0
 CRACKDOWN_THRESHOLD = 1.0  # empire imperial_threat
 UPRISING_THRESHOLD = 1.0  # rebellion gratitude
 MAX_PENDING_BACKLASH = 4  # the world can only have so much in motion at once
+
+# Sustained killing of one faction past this many of its members hardens into a **blood feud**
+# (FACTION_KILL_REPUTATION.md K5): that faction reads you as a sworn enemy and will spend its
+# resources hunting you. The civilian bucket is exempt (it is not a faction that can swear one).
+BLOOD_FEUD_KILLS = 5
 
 
 @dataclass
@@ -1044,6 +1055,16 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             deed
         )  # consequences from the bounded rules table (by role)
         deed.standing_deltas = self._resolve_role_deltas(deed.standing_deltas)
+        # K3: a combatant kill's standing is *relational* — computed from every faction's stance
+        # toward the victim's faction (overriding the role rule), so killing the same person
+        # lands differently across the rolled roster. The legend tag (e.g. "defiant") stays.
+        if (
+            deed.type in RELATIONAL_KILL_DEEDS
+            and deed.victim_faction in state.faction_ledger.factions
+        ):
+            deed.standing_deltas = self._relational_kill_deltas(
+                deed.victim_faction, deed.magnitude
+            )
         deed.interpretation_source = interpretation_source  # who *judged* it (D5)
         state.deed_ledger.record(deed)
         # NPC memory line (legibility): witnesses carry it even before the tick, so it
@@ -1105,33 +1126,47 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         return getattr(source, "owner_soul_id", None) == self.state.player_soul_id
 
     def _record_kill_deed(self, victim: Entity, source: Entity | None) -> None:
-        """Translate a combat kill the player's soul is responsible for into a deed.
-        Imperial dead and slain civilians read very differently (the rules table sorts
-        out the consequences); other creatures aren't (yet) deed-worthy."""
+        """Translate a combat kill the player's soul is responsible for into a deed. The kill's
+        meaning is read from **identity × role** (FACTION_KILL_REPUTATION.md §0): butchering a
+        non-combatant reads very differently from cutting down a soldier, and *whose* member
+        died (``victim_faction``) drives both the per-faction tally (K1/K2) and the relational
+        standing reaction (§3.4, applied in ``record_deed``). Unaligned creatures aren't
+        deed-worthy — beasts are not politics."""
         if not self._deed_attributed_to_player(source):
             return
-        # Whose member died — stamped on the kill deed so it feeds the per-faction kill
-        # tally (FACTION_KILL_REPUTATION.md K1/K2). Reactions stay role-based for now; the
-        # tally is pure data capture. "defended_townsfolk" is not a kill, so it carries none.
         victim_faction = resolve_faction(
             victim.tags,
             victim.kind,
             self.state.faction_ledger,
             identity=victim.identity,
         )
-        if "empire" in victim.tags:
+        # Butchering someone who bore no arms and never came at you — the qualitatively
+        # different (butcher) reaction, whatever their nation. The faction still rides along.
+        if character_is_noncombatant(victim) and not self._was_hostile_to_player(
+            victim
+        ):
+            self.record_deed(
+                "killed_civilians",
+                magnitude=0.2,
+                summary=f"struck down {victim.name}, who bore no arms",
+                at=(victim.x, victim.y),
+                target_tags=["civilian"],
+                victim_faction=victim_faction,
+                evidence_tags=["bloodstain", "survivor_testimony"],
+            )
+            return
+        # Striking the Empire: the defiant legend, plus a defence of any common folk the
+        # imperial stood over (one act, two deeds — the "people's champion" arc).
+        if "empire" in victim.tags or victim_faction == "empire":
             self.record_deed(
                 "killed_imperials",
-                magnitude=0.2,  # one imperial; Phase A may scale by count/severity
+                magnitude=0.2,
                 summary=f"cut down {victim.name}, one of the Empire's own",
                 at=(victim.x, victim.y),
                 target_tags=["empire"],
-                victim_faction=victim_faction,
+                victim_faction=victim_faction or "empire",
                 evidence_tags=["bloodstain"],
             )
-            # Cutting down an imperial who stood over the common folk *also* reads as
-            # defending them (one act, two deeds — the rules table sorts the consequences).
-            # This is how the "people's champion" / protector legend arises in play.
             bystander = self._endangered_civilian_near(victim.x, victim.y)
             if bystander is not None:
                 self.record_deed(
@@ -1142,17 +1177,20 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                     target_tags=["civilian"],
                     evidence_tags=["survivor_testimony"],
                 )
-        elif (
-            victim.kind == "npc" or "civilian" in victim.tags
-        ) and not self._was_hostile_to_player(victim):
+            return
+        # A faction-aligned combatant of any *other* power — the general hostile-kill deed
+        # (EMERGENT_QUESTS Q1b). Its standing is relational: the victim's faction grudges you,
+        # their enemies thank you. Unaligned creatures (no faction, or the civilian bucket with
+        # no real nation) stay deed-free.
+        if victim_faction and victim_faction != "civilian":
             self.record_deed(
-                "killed_civilians",
+                "killed_combatant",
                 magnitude=0.2,
-                summary=f"struck down {victim.name}, who bore no arms",
+                summary=f"cut down {victim.name}",
                 at=(victim.x, victim.y),
-                target_tags=["civilian"],
+                target_tags=[victim_faction],
                 victim_faction=victim_faction,
-                evidence_tags=["bloodstain", "survivor_testimony"],
+                evidence_tags=["bloodstain"],
             )
 
     def _was_hostile_to_player(self, victim: Entity) -> bool:
@@ -1172,6 +1210,68 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         the player has killed. A pure projection over the deed ledger (never decays; the
         `civilian` bucket included, unaligned creatures excluded)."""
         return self.state.deed_ledger.kills_by_faction()
+
+    def feuding_factions(self) -> set[str]:
+        """Faction ids the player has killed enough of to provoke a **blood feud** (K5) — they
+        now read you as a sworn enemy. Derived from the tally; the civilian bucket is exempt."""
+        return {
+            fid
+            for fid, count in self.kills_by_faction().items()
+            if fid != "civilian" and count >= BLOOD_FEUD_KILLS
+        }
+
+    def _relational_kill_deltas(
+        self, victim_faction: str, magnitude: float
+    ) -> dict[str, dict[str, float]]:
+        """Per-faction standing deltas for killing a member of ``victim_faction`` — the
+        relational reaction K3 (`FACTION_KILL_REPUTATION.md` §3.4). Each faction reacts by its
+        stance toward the victim's faction: the victim's own people mark you a threat and fear
+        you; their **enemies** are grateful and emboldened; their **friends** recoil; the
+        indifferent merely fear you a little. The Empire is the one antagonist that never thanks
+        a wild sorcerer — spilled blood only ever marks you a larger threat to it. Volume scales
+        with **diminishing returns**, so the 50th kill of a faction moves standing far less than
+        the 1st. This *overrides* the role-based rule for combatant kills, generalizing the old
+        hardcoded empire↔resistance reaction to the whole rolled roster."""
+        ledger = self.state.faction_ledger
+        if victim_faction not in ledger.factions:
+            return {}
+        prior = self.kills_by_faction().get(victim_faction, 0)
+        # Diminishing returns (the 50th kill of a faction moves standing far less than the
+        # 1st), but gently enough that sustained pressure still crosses the crackdown/uprising
+        # thresholds the win-condition relies on.
+        scale = magnitude / (1.0 + 0.05 * prior)
+        deltas: dict[str, dict[str, float]] = {}
+        for fid in ledger.factions:
+            axes: dict[str, float] = {}
+            if fid == victim_faction:
+                axes = {"fear": 0.5 * scale, "notoriety": 0.4 * scale}
+                if (
+                    fid == "empire"
+                ):  # the win-pressure axis is the empire core's alone (D9)
+                    axes["imperial_threat"] = 1.0 * scale
+            elif fid == "empire":
+                # The Empire never befriends a wild sorcerer; any blood marks you a threat.
+                axes = {"imperial_threat": 0.25 * scale}
+            else:
+                regard = ledger.regard(fid, victim_faction)
+                if regard < 0:  # my enemy's killer is my friend
+                    weight = -regard
+                    axes = {
+                        "gratitude": 0.8 * weight * scale,
+                        "legitimacy": 0.3 * weight * scale,
+                        "notoriety": 0.2 * weight * scale,
+                    }
+                elif regard > 0:  # you struck down a friend of mine
+                    axes = {
+                        "fear": 0.5 * regard * scale,
+                        "gratitude": -0.4 * regard * scale,
+                    }
+                else:
+                    axes = {"fear": 0.15 * scale}
+            cleaned = {axis: round(value, 4) for axis, value in axes.items() if value}
+            if cleaned:
+                deltas[fid] = cleaned
+        return deltas
 
     def run_world_tick(self, day: int | None = None) -> bool:
         """The world Simulator's daily beat. Applies every unapplied deed's proposed
@@ -2823,6 +2923,39 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             ),
         }
 
+    def _kill_standing_note(self, npc: Entity) -> str:
+        """A one-line read, for dialogue, of how this NPC's people regard the blood the player
+        has spilled (FACTION_KILL_REPUTATION.md K4): have you butchered their kin (a blood
+        feud?), or struck down those they count as enemies? Reads the kill tally through the
+        NPC's own faction and the relationship graph, so a rebel hails the scourge of the
+        Censor's men while an imperial clerk shrinks from the same record."""
+        tally = self.kills_by_faction()
+        if not tally:
+            return ""
+        ledger = self.state.faction_ledger
+        npc_faction = resolve_faction(npc.tags, npc.kind, ledger, identity=npc.identity)
+        if not npc_faction or npc_faction == "civilian":
+            return (
+                "you are known for spilling innocent blood"
+                if tally.get("civilian", 0) >= 2
+                else ""
+            )
+        own = tally.get(npc_faction, 0)
+        if own >= BLOOD_FEUD_KILLS:
+            return "you have slaughtered our people — a blood feud stands between us"
+        if own > 0:
+            return f"you have killed {own} of our own"
+        enemy_kills = sum(
+            count
+            for fid, count in tally.items()
+            if fid != "civilian"
+            and fid in ledger.factions
+            and ledger.regard(npc_faction, fid) < 0
+        )
+        if enemy_kills >= 2:
+            return "you have struck down those we count as enemies"
+        return ""
+
     def dialogue_context_for_llm(self, npc: Entity, message: str) -> dict[str, Any]:
         profile = self.state.npc_profiles[npc.id]
         player = self.state.player
@@ -2856,6 +2989,11 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         legend = self.legend_words(self.state.player_soul_id)
         if legend:
             player_block["legend"] = legend
+        # How this NPC's people regard the blood you've spilled (K4) — keyed to their faction,
+        # so the same kill record reads as heroism to one and horror to another.
+        blood_note = self._kill_standing_note(npc)
+        if blood_note:
+            player_block["how_you_stand_with_my_people"] = blood_note
         return {
             "npc": profile.to_dialogue_context(),
             "player": player_block,
