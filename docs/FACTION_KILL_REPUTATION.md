@@ -8,12 +8,15 @@ deed→standing path already in the repo. It also carries the **character-unific
 philosophy** (§0) — NPCs and enemies are one kind of thing — because robust faction
 attribution depends on it.
 
-Status: **K1–K2 implemented** (2026-06-19). The relational layers (**K3–K5**) are
-**deferred** until the nations worldbuilding lands — the inter-faction relationship system
-arrives with it — so the data is captured now and the differentiated *reactions* are built on
-top later. The civilian/hostile prerequisite also shipped: `killed_civilians` no longer fires
-when the victim was hostile to the player before being struck
-(`engine._was_hostile_to_player`; see §2).
+Status: **K1–K5 implemented** (K1–K2 2026-06-19; K3–K5 + §0 unification 2026-06-20, once the
+nations worldbuilding landed the inter-faction relationship system). The relationship graph
+lives on `FactionLedger` (`stance`/`regard`/`are_hostile`, seeded by the world roll);
+`_relational_kill_deltas` computes each faction's reaction from its stance toward the victim's
+faction (K3); the standing screen + per-NPC dialogue note surface the kill tally (K4); a
+`BLOOD_FEUD_KILLS` threshold marks sworn enemies (K5). The §0 unification shipped too: typed
+`identity`/`role`/`affiliations` on every character, `resolve_faction` reads identity, and
+combat stance is **derived** (`is_hostile_to` reads faction relations + role). The
+civilian/hostile prerequisite shipped earlier (`engine._was_hostile_to_player`; see §2).
 
 ---
 

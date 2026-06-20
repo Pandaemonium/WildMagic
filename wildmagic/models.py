@@ -666,6 +666,12 @@ class NPCProfile:
     # in gratitude, telling you where a cache lies. Shape: {"item", "x", "y"}. None = no
     # secret. Kept off the dialogue context so it surfaces through the act, not idle chatter.
     lead: dict[str, Any] | None = None
+    # A plight this NPC carries that can become an emergent quest (EMERGENT_QUESTS §3.2): a
+    # missing kin to rescue, a tormentor to slay, a place to defend. Surfaced to dialogue as
+    # `my_concern` so the NPC voices it ("my daughter is missing"), and opened into a quest
+    # promise when the player engages them. Shape: {"type", "subject", "subject_soul"?,
+    # "victim_faction"?, "reward_gold"?, ...}. None = nothing weighs on them.
+    concern: dict[str, Any] | None = None
 
     def bond_feeling(self) -> list[str]:
         """The bond rendered as plain words for prompts/readouts — the math stays
@@ -885,6 +891,12 @@ class NPCProfile:
             context["quest_status"] = (
                 "I have already received my requested item and rewarded the player."
             )
+        if self.concern and self.concern.get("subject"):
+            # A plight to voice naturally — the seed of an emergent quest (EMERGENT_QUESTS §4).
+            context["my_concern"] = {
+                "about": self.concern["subject"],
+                "what_i_want": self.concern.get("type", "help"),
+            }
         return context
 
     def player_memory_multiplier(self, player_soul_id: str) -> float:

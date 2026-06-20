@@ -6,7 +6,14 @@ emerge from what NPCs say (and what the player observes) and resolve from what t
 `EMERGENT_WORLD_IMPLEMENTATION.md` (the build). This doc is the *quest* slice of that
 vision and assumes its layers (L0 ledgers, L1 simulator, L2 interpreter, L3 narrator).
 
-Status: **design only — nothing here is built yet.** It reuses systems that already exist.
+Status: **the core loop is BUILT** (the relationship/quest layer, 2026-06-20). Q0 souls +
+the actor/persona unification (§13), and Q1/Q1b/Q4 — the deed→objective matcher closing
+`rescue`/`defend`/`slay`/`clear` from deeds, deferred rewards on the tick, and `rescue`→`avenge`
+mutation — are live in `wildmagic/quests.py` + `engine.py`, with a deterministic concern→quest
+opener (§4 floor) and `my_concern` in dialogue. **Remaining:** the LLM hook-extraction that turns
+*arbitrary free dialogue* into a concern (Q3 generative layer — the deterministic concern floor
+is built; auto-extraction from unstructured text is not), synthetic deeds for
+`fetch`/`deliver`/`visit` (Q1b), and the appeal layer (Q5). It reuses systems that already exist.
 
 Settled design decisions (2026-06-19):
 

@@ -56,8 +56,13 @@ from .bonds import (
 from .deeds import (
     Deed,
     DeedLedger,
+    KILL_DEEDS,
     RELATIONAL_KILL_DEEDS,
     interpret_deed_rules,
+)
+from .quests import (
+    advance_quests_with_deed,
+    rescue_quests_for_dead_subjects,
 )
 from .factions import (
     EMPIRE_PATROLS_START,
@@ -330,6 +335,16 @@ _VERBAL_TAGS: frozenset[str] = frozenset(
 )
 # How far the player can call out to someone they can see (EMERGENT_QUESTS §13 ranged talk).
 TALK_RANGE = 8
+
+# Player-facing quest-log status from the internal promise status (EMERGENT_QUESTS §7). The
+# objective being met reads as "completed" even before the giver's reward settles on the tick.
+_QUEST_LOG_STATUS: dict[str, str] = {
+    "fulfilled": "completed",
+    "objective_met": "completed",
+    "changed": "transformed",
+    "failed": "failed",
+    "cold": "cold",
+}
 
 
 @dataclass
@@ -1130,6 +1145,11 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                         source_event_id=deed.id,
                     )
                 )
+        # Emergent quests close from deeds (EMERGENT_QUESTS §5): advance any open quest
+        # objective this deed satisfies. The objective is marked met now (the legibility beat);
+        # the giver's reward is granted on the next world tick (the deferred half of §5).
+        for met in advance_quests_with_deed(deed, state.promises):
+            state.add_message(f"You have done what was asked: {met.subject}.")
         return deed
 
     def _resolve_role_deltas(
@@ -1348,8 +1368,81 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         state.deed_ledger.compress()
         if self.spread_daily_gossip(day=day):
             applied_any = True
+        # Emergent quests (EMERGENT_QUESTS §5/§6): grant the giver's deferred reward for
+        # objectives met since the last beat, then mutate quests the world has overtaken
+        # (a rescue whose subject was killed becomes an avenge).
+        self._settle_quest_rewards()
+        self._mutate_quests()
         state.simulated_through_turn = max(state.simulated_through_turn, state.turn)
         return applied_any
+
+    def _settle_quest_rewards(self) -> None:
+        """Grant the giver's reward for each quest whose objective was met since the last tick
+        (the deferred half of the hybrid reward, EMERGENT_QUESTS §5). Idempotent: the
+        ``objective_met`` → ``fulfilled`` transition fires the grant exactly once."""
+        for promise in self.state.promises:
+            if promise.kind == "quest" and promise.status == "objective_met":
+                if promise.reward is not None:
+                    self._grant_quest_reward(promise.reward)
+                promise.status = "fulfilled"
+                self.state.add_message(
+                    f"Your deed is acknowledged — {promise.subject} is settled."
+                )
+
+    def _grant_quest_reward(self, reward: Any) -> None:
+        """Pay out a quest reward: reputation (through the existing standing path) plus any
+        gold and items, dropped into the controlled body's inventory."""
+        self._grant_reward_reputation(reward)
+        player = self.state.player
+        if getattr(reward, "gold", 0):
+            player.inventory["gold"] = player.inventory.get("gold", 0) + int(
+                reward.gold
+            )
+        for item, quantity in getattr(reward, "items", {}).items():
+            if quantity:
+                player.inventory[item] = player.inventory.get(item, 0) + int(quantity)
+
+    def _mutate_quests(self) -> None:
+        """Rewrite quests the world has overtaken (EMERGENT_QUESTS §6). For now: a ``rescue``
+        whose subject was killed (their soul appears in a kill deed) transforms to ``avenge`` —
+        the rescue is marked ``changed`` and a successor avenge quest is minted referencing it
+        (additive: history is never silently rewritten)."""
+        dead_souls = {
+            ref
+            for deed in self.state.deed_ledger.deeds
+            if deed.type in KILL_DEEDS
+            for ref in deed.subject_refs
+        }
+        if not dead_souls:
+            return
+        for promise in rescue_quests_for_dead_subjects(self.state.promises, dead_souls):
+            promise.status = "changed"
+            subject = promise.objective.data.get("subject_name") or promise.subject
+            self.add_quest_promise(
+                name=f"Avenge {subject}",
+                description=f"{subject} was killed before you could reach them. Avenge them.",
+                contact=promise.giver_npc or promise.source,
+                location=promise.location,
+                objective=Objective(
+                    "avenge",
+                    {
+                        "deed_types": [
+                            "killed_imperials",
+                            "killed_combatant",
+                            "killed_civilians",
+                        ],
+                        "count": 1,
+                        "progress": 0,
+                        "from_quest": promise.id,
+                    },
+                ),
+                reward=promise.reward,
+                source=f"mutation:{promise.id}",
+                tags=["quest", "avenge"],
+            )
+            self.state.add_message(
+                f"Too late — {subject} is dead. Grief hardens into vengeance."
+            )
 
     def _maybe_run_daily_tick(self) -> bool:
         """Fire the 05:00 daily tick for each day boundary crossed since it last ran
@@ -2754,6 +2847,49 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         self.add_promises([promise])
         return promise
 
+    def register_heard_concern(self, npc_id: str) -> WorldPromise | None:
+        """Open an emergent quest from an NPC's voiced **concern** (EMERGENT_QUESTS §4 — the
+        deterministic floor: a plight becomes a quest the moment the player engages it, with
+        zero model calls). The objective type and match spec come straight from the concern;
+        closing it is the deed matcher's job. Idempotent (``add_quest_promise`` dedups by id)."""
+        profile = self.state.npc_profiles.get(npc_id)
+        if profile is None or not profile.concern:
+            return None
+        concern = profile.concern
+        ctype = str(concern.get("type") or "")
+        if ctype not in {"rescue", "defend", "slay", "clear", "avenge"}:
+            return None
+        subject = str(concern.get("subject") or "someone")
+        data: dict[str, Any] = {
+            "count": int(concern.get("count", 1) or 1),
+            "progress": 0,
+        }
+        if concern.get("subject_soul"):
+            data["subject_refs"] = [str(concern["subject_soul"])]
+            data["subject_name"] = subject
+        if concern.get("victim_faction"):
+            data["victim_faction"] = str(concern["victim_faction"])
+        if concern.get("required_tags"):
+            data["required_tags"] = [str(t) for t in concern["required_tags"]]
+        reward = Reward(
+            gold=int(concern.get("reward_gold", 0) or 0),
+            reputation={
+                str(k): int(v) for k, v in (concern.get("reputation") or {}).items()
+            },
+        )
+        return self.add_quest_promise(
+            name=str(concern.get("quest_name") or f"{profile.name}'s plea"),
+            description=str(
+                concern.get("description") or f"{profile.name} pleads about {subject}."
+            ),
+            contact=profile.name,
+            location=self.state.location_label(),
+            objective=Objective(ctype, data),
+            reward=reward,
+            source=f"concern:{profile.name}",
+            tags=["quest", ctype],
+        )
+
     def quest_log_entries(self) -> list[QuestLogEntry]:
         entries: list[QuestLogEntry] = []
         for promise in sorted(
@@ -2773,7 +2909,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                     description=promise.text,
                     contact=promise.giver_npc or promise.source,
                     location=promise.realized_in or promise.location or "unknown",
-                    status="completed" if promise.status == "fulfilled" else "active",
+                    status=_QUEST_LOG_STATUS.get(promise.status, "active"),
                 )
             )
         return entries
@@ -3308,6 +3444,9 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             from .npc_quests import register_heard_quest_item
 
             register_heard_quest_item(self, npc.id)
+        # A voiced plight becomes a quest the moment the player engages it (EMERGENT_QUESTS §4).
+        if profile.concern:
+            self.register_heard_concern(npc.id)
 
         if trade_data is not None and trade_data.get("trade_proposed"):
             trade_error = self._validate_trade_payload(npc, trade_data)
