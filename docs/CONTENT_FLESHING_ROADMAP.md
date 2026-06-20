@@ -17,6 +17,19 @@ This carries forward `EMERGENT_WORLD_CONTENT_PLAN.md` (2026-06-14): its workstre
 palette) is mostly done; its **B** (dispositions) is reframed here as faction-aware (Tier 2);
 its **C–F** (legibility, milestones, faction texture, LLM) are folded into Tiers 2–4.
 
+> **Status — the Tier 1 vertical slice + the opening/exposure model are BUILT** (2026-06-20,
+> branch `quests`). `wildmagic/populations.py` (realm rosters/denizens, concern templates,
+> disposition spread); realm zones populate with neutral, identity-typed people
+> (`generation._populate_realm_denizens`); the **exposure model** is live (witnessed wild magic
+> → `witnessed_forbidden_magic` deed → `is_hostile_to` turns imperial *soldiers* on you, clerks
+> only fear/report; provocation + blood-feud paths too); locals carry concerns that open as
+> quiet **leads** (`accept`/`decline`); the **opening occupation fork** stages at run start (the
+> frontier now opens in a conquered realm). 620 tests pass; **CLI-playtested** end-to-end (start
+> in occupied Ryolan → talk a local → cast wild magic → "Imperial eyes are on you" → the empire
+> bloc gains `imperial_threat` on the tick → the local's plight is a `[lead]`). **Remaining:**
+> Tier 1B rescue-with-captive-placement, Tier 2 (simulator reads the graph), Tier 3 (texture/
+> legibility), Tier 4 (smaller realms, items, names, `spared_enemy`), and tuning in playtest.
+
 ---
 
 ## Principles (settled)
