@@ -2675,6 +2675,19 @@ class _GenerationMixin:
                 if concern is not None:
                     profile = self.state.npc_profiles.get(entity.id)
                     if profile is not None:
+                        # A rescue needs a real captive to free — realize the kin as a bound
+                        # local in the zone and bind the concern to their soul (Tier 1B).
+                        if concern["type"] == "rescue":
+                            captive = self._place_rescue_captive(
+                                zone_rng, occupied, identity
+                            )
+                            if captive is None:
+                                concern = None
+                            else:
+                                concern["subject_soul"] = captive.soul_id
+                                concern["subject"] = (
+                                    f"{captive.name}, {concern['subject']}"
+                                )
                         profile.concern = concern
 
         for _ in range(zone_rng.randint(0, 1)):
@@ -2728,6 +2741,33 @@ class _GenerationMixin:
             faction="neutral",
             identity=list(identity),
         )
+
+    def _place_rescue_captive(
+        self,
+        zone_rng: random.Random,
+        occupied: set[tuple[int, int]],
+        identity: list[str],
+    ) -> Entity | None:
+        """Realize a rescue concern's kin as a **bound captive** in the zone (Tier 1B), so the
+        rescue closes by actually freeing them (``free`` → ``freed_captive`` with their soul).
+        Returns the captive, or None if there's no room."""
+        spot = self._random_open_ground_tile(zone_rng, occupied)
+        if spot is None:
+            return None
+        captive = self.spawn_npc(
+            zone_rng.choice(["kin", "daughter", "brother", "elder"]),
+            "p",
+            spot[0],
+            spot[1],
+            role="captive",
+            backstory="a local the garrison dragged off and bound",
+            traits=["oppressed"],
+            tags={"human", "townsfolk", "bound"},
+            faction="neutral",
+            identity=list(identity),
+        )
+        occupied.add(spot)
+        return captive
 
     def _stage_opening_occupation_scene(
         self,

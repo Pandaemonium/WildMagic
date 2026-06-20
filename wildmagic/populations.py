@@ -195,6 +195,16 @@ CONCERN_TEMPLATES: tuple[ConcernTemplate, ...] = (
         reward_gold=20,
     ),
     ConcernTemplate(
+        # A rescue: the kin is realized as a bound captive in the zone (generation places one
+        # and stamps the concern's subject_soul), so freeing them closes the quest.
+        roles=frozenset({"townsfolk", "merchant", "priest"}),
+        realm_roles=frozenset({"conquered"}),
+        kind="rescue",
+        subject="my kin, dragged off by the garrison",
+        victim_faction="",
+        reward_gold=30,
+    ),
+    ConcernTemplate(
         roles=frozenset({"merchant", "townsfolk"}),
         realm_roles=frozenset({"conquered"}),
         kind="slay",
