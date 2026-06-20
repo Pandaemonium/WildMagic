@@ -47,6 +47,43 @@ FACTION_KINDS: tuple[str, ...] = (
 )
 
 
+#: The bounded vocabulary of **directed** inter-faction stances — how faction A regards
+#: faction B (``FACTION_KILL_REPUTATION.md`` §10; the one input that unblocks both relational
+#: kill reactions K3–K5 and derived combat stance §0). Directed, because a relationship can be
+#: asymmetric: an empire holds a conquered realm as a ``subject`` while that realm regards the
+#: empire as an ``occupier``. The world roll seeds these from roles + ruler disposition
+#: (``worldgen.seed_factions_from_world``); the simulator and AI read them, never literal ids.
+FACTION_STANCES: tuple[str, ...] = (
+    "allied",  # close ally / same bloc — fights at your side
+    "friendly",  # warm but independent
+    "subject",  # A holds B in subjugation (the overlord's grip — control, not warmth)
+    "occupier",  # B's view of the power that conquered it — resentful submission
+    "wary",  # uneasy, watchful, no open break
+    "rival",  # standing opposition short of open war
+    "hostile",  # at open war / sworn enemy
+    "neutral",  # no strong feeling (the default for any unset pair)
+)
+
+#: Each stance's **sentiment** in [-1, 1] — how warmly A regards B. Drives relational kill
+#: reactions (a kill of X pleases X's enemies and angers X's friends, scaled by this) and the
+#: combat-stance derivation (negative-enough sentiment ⇒ willing to fight). Self is +1.
+STANCE_SENTIMENT: dict[str, float] = {
+    "allied": 1.0,
+    "friendly": 0.5,
+    "subject": -0.2,
+    "occupier": -0.6,
+    "wary": -0.2,
+    "rival": -0.5,
+    "hostile": -1.0,
+    "neutral": 0.0,
+}
+
+#: Stances at which A is willing to take up arms against B (derived combat stance §0). A
+#: ``subject`` overlord does not *fight* its subject by default (it polices it); open war is
+#: ``hostile``. Read symmetrically by ``engine.is_hostile_to`` (either direction at war ⇒ fight).
+COMBATIVE_STANCES: frozenset[str] = frozenset({"hostile"})
+
+
 # --- Placeholder names (swap-point for worldbuilding, D1) ---------------------------
 # These are deliberately the *only* place the Phase-0 faction names live, so they can be
 # renamed in one edit when lore lands (and Phase C's world roll supplies real names per
@@ -166,6 +203,11 @@ class Faction:
 @dataclass
 class FactionLedger:
     factions: dict[str, Faction] = field(default_factory=dict)
+    #: Directed inter-faction stances: ``(a_id, b_id) -> stance`` (one of FACTION_STANCES) —
+    #: how faction ``a`` regards faction ``b``. Absent pair ⇒ ``"neutral"``. Seeded by the
+    #: world roll; read by relational reactions and combat-stance derivation. A pure data
+    #: layer over the existing roster, so it serializes within a run and never between runs.
+    relationships: dict[tuple[str, str], str] = field(default_factory=dict)
 
     def get(self, faction_id: str) -> Faction | None:
         return self.factions.get(faction_id)
@@ -217,21 +259,69 @@ class FactionLedger:
         faction.resources[resource] -= n
         return True
 
+    # --- Inter-faction relationships (FACTION_KILL_REPUTATION.md §10) -----------------
+
+    def set_relationship(
+        self, a_id: str, b_id: str, stance: str, *, mutual: bool = False
+    ) -> None:
+        """Record that faction ``a`` regards faction ``b`` with ``stance``. ``mutual=True``
+        also sets the reverse with the same stance (use for symmetric stances like
+        ``hostile``/``allied``; set the two directions separately for asymmetric ones like
+        ``subject``/``occupier``)."""
+        if a_id == b_id:
+            return
+        self.relationships[(a_id, b_id)] = stance
+        if mutual:
+            self.relationships[(b_id, a_id)] = stance
+
+    def stance(self, a_id: str, b_id: str) -> str:
+        """How faction ``a`` regards faction ``b`` (one of FACTION_STANCES). ``"self"`` for a
+        faction toward itself; ``"neutral"`` for any pair with no recorded relationship."""
+        if a_id == b_id:
+            return "self"
+        return self.relationships.get((a_id, b_id), "neutral")
+
+    def regard(self, a_id: str, b_id: str) -> float:
+        """How warmly faction ``a`` regards faction ``b``, in [-1, 1] (self ⇒ +1). The signed
+        sentiment relational kill reactions scale by."""
+        if a_id == b_id:
+            return 1.0
+        return STANCE_SENTIMENT.get(self.stance(a_id, b_id), 0.0)
+
+    def are_hostile(self, a_id: str, b_id: str) -> bool:
+        """Whether factions ``a`` and ``b`` are at open war — true if *either* direction
+        carries a combative stance (war is mutual even when only one side declared it)."""
+        if a_id == b_id:
+            return False
+        return (
+            self.stance(a_id, b_id) in COMBATIVE_STANCES
+            or self.stance(b_id, a_id) in COMBATIVE_STANCES
+        )
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "factions": {
                 fid: faction.to_dict() for fid, faction in self.factions.items()
-            }
+            },
+            # Tuple keys can't be JSON keys; store as a flat list of [a, b, stance] triples.
+            "relationships": [
+                [a, b, stance] for (a, b), stance in self.relationships.items()
+            ],
         }
 
     @classmethod
     def from_dict(cls, raw: dict[str, Any]) -> "FactionLedger":
+        relationships: dict[tuple[str, str], str] = {}
+        for entry in (raw or {}).get("relationships", []):
+            if isinstance(entry, (list, tuple)) and len(entry) >= 3:
+                relationships[(str(entry[0]), str(entry[1]))] = str(entry[2])
         return cls(
             factions={
                 str(fid): Faction.from_dict(item)
                 for fid, item in (raw or {}).get("factions", {}).items()
                 if isinstance(item, dict)
-            }
+            },
+            relationships=relationships,
         )
 
 
@@ -265,4 +355,6 @@ def seed_phase0_factions() -> FactionLedger:
             notes_anchor=faction_anchor("rebellion"),
         )
     )
+    # The one standing conflict of the two-pole scaffold (the world roll seeds the full graph).
+    ledger.set_relationship("empire", "rebellion", "hostile", mutual=True)
     return ledger

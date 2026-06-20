@@ -517,12 +517,58 @@ def start_zone_for_scenario(world: WorldMap, scenario: str) -> Cell:
     return sorted(placement.cells)[0]
 
 
+#: Ruler dispositions that make a conquered realm regard the Empire as a bitter ``occupier``
+#: rather than a realm that has made its peace (``wary``). Flavors §10's relationship graph.
+_DEFIANT_DISPOSITIONS: frozenset[str] = frozenset({"proud", "ambitious", "zealous"})
+
+
+def _seed_world_relationships(ledger: FactionLedger, world: WorldMap) -> None:
+    """Seed the directed inter-faction stance graph from the rolled roles + ruler dispositions
+    (``FACTION_KILL_REPUTATION.md`` §10 — the keystone that unblocks relational kill reactions
+    and derived combat stance). Roles imply most of it; the ruler's disposition flavors how
+    bitterly a conquered realm regards its occupier. **Cross-realm peer feeling is left
+    ``neutral`` on purpose** — ``WORLDBUILDING.md`` keeps what a Brallman thinks of a Stalnazan
+    emergent, improvised per character, not fixed on the map."""
+    by_role: dict[str, list[str]] = {}
+    dispositions: dict[str, str] = {}
+    for pl in world.placements.values():
+        by_role.setdefault(pl.role, []).append(pl.faction_id)
+        dispositions[pl.faction_id] = pl.ruler.disposition
+    empire = "empire"
+    rebellion = "rebellion"
+    conquered = by_role.get("conquered", [])
+    proxies = by_role.get("proxy", [])
+    rivals = by_role.get("rival", [])
+
+    # The Empire holds its conquered realms as subjects; they resent the occupier (bitterly
+    # under a defiant ruler, grudgingly otherwise). The Unbound court the conquered's oppressed.
+    for cid in conquered:
+        ledger.set_relationship(empire, cid, "subject")
+        resentful = dispositions.get(cid, "") in _DEFIANT_DISPOSITIONS
+        ledger.set_relationship(cid, empire, "occupier" if resentful else "wary")
+        ledger.set_relationship(rebellion, cid, "friendly")
+        ledger.set_relationship(cid, rebellion, "wary")
+    # The client kingdom plays along (deferent) while the Empire rules it in fact, and keeps
+    # the free rival at arm's length to please its patron.
+    for pid in proxies:
+        ledger.set_relationship(empire, pid, "subject")
+        ledger.set_relationship(pid, empire, "friendly")
+        for rid in rivals:
+            ledger.set_relationship(pid, rid, "wary")
+    # The free rival is the Empire's standing military headache; the Unbound are its natural
+    # friends (it still lets wild magic breathe).
+    for rid in rivals:
+        ledger.set_relationship(empire, rid, "hostile", mutual=True)
+        ledger.set_relationship(rebellion, rid, "friendly", mutual=True)
+    ledger.set_relationship(empire, rebellion, "hostile", mutual=True)
+
+
 def seed_factions_from_world(world: WorldMap) -> FactionLedger:
     """Seed a :class:`FactionLedger` from a rolled world. Vigovia anchors the empire bloc as
     id ``"empire"``; conquered/proxy/rival realms each get their own faction; the cross-cutting
     ``"rebellion"`` resistance pole (the Unbound — not a placed realm) is kept so existing
     pressure/backlash/gratitude code is untouched. Replaces ``seed_phase0_factions`` for
-    world-bearing runs."""
+    world-bearing runs. Also seeds the directed inter-faction stance graph (§10)."""
     ledger = FactionLedger()
     for realm_id, pl in sorted(world.placements.items()):
         template = REALM_TEMPLATES[realm_id]
@@ -567,6 +613,7 @@ def seed_factions_from_world(world: WorldMap) -> FactionLedger:
             notes_anchor=faction_anchor("rebellion"),
         )
     )
+    _seed_world_relationships(ledger, world)
     return ledger
 
 
