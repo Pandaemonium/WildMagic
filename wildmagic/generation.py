@@ -1959,6 +1959,19 @@ class _GenerationMixin:
         state.add_message(
             "Walk to the edge of the land to cross into the next stretch of it."
         )
+        # Stage the opening occupation fork in the start zone itself, now that the player
+        # exists (the in-zone populate pass ran before the body was placed).
+        placement = (
+            state.world_map.placement_at(state.zone_x, state.zone_y)
+            if state.world_map is not None
+            else None
+        )
+        if placement is not None and placement.role == "conquered":
+            occupied = {(e.x, e.y) for e in state.entities.values()}
+            scene_rng = random.Random(
+                stable_seed(state.rng_seed, "opening_scene", state.zone_x, state.zone_y)
+            )
+            self._stage_opening_occupation_scene(scene_rng, occupied, placement)
         self.update_fov()
 
     def _imperial_density(self, zx: int, zy: int) -> float:

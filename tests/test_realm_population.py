@@ -102,3 +102,19 @@ def test_opening_occupation_scene_stages_once() -> None:
         1 for e in engine.state.entities.values() if e.name == "cornered local"
     )
     assert count_after == count_before
+
+
+def test_frontier_run_starts_in_occupied_territory_with_opening_scene() -> None:
+    engine = GameEngine(seed=1, scenario="frontier")
+    st = engine.state
+    placement = st.world_map.placement_at(st.zone_x, st.zone_y)
+    assert placement is not None and placement.role == "conquered"
+    assert st.flags.get("opening_scene_staged")
+    assert any(e.name == "cornered local" for e in st.entities.values())
+    # The realm's people are present and neutral (hostility is earned, not spawned).
+    locals_present = [
+        e
+        for e in st.entities.values()
+        if e.id != st.player_id and e.identity and e.faction == "neutral"
+    ]
+    assert locals_present

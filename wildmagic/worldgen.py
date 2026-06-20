@@ -497,10 +497,19 @@ def scenario_uses_world_map(scenario: str) -> bool:
 def start_zone_for_scenario(world: WorldMap, scenario: str) -> Cell:
     """Deterministic overworld start coordinate for a scenario.
 
-    The four current start hubs are placed in distinct old kingdoms; ``frontier`` starts
-    in an unowned central wild zone on the survey board, not at (0,0).
+    The four current start hubs are placed in distinct old kingdoms; ``frontier`` opens the run
+    in **occupied territory** — a conquered realm's marches, where the opening occupation fork
+    is staged (CONTENT_FLESHING_ROADMAP, decided) — not in empty wilds.
     """
     if scenario == "frontier":
+        for placement in sorted(
+            (pl for pl in world.placements.values() if pl.role == "conquered"),
+            key=lambda pl: pl.realm_id,
+        ):
+            for cell in sorted(placement.cells):
+                if cell != world.capital_zone and cell != (0, 0):
+                    return cell
+        # Fallback (no conquered realm rolled): an unowned central wild zone.
         for candidate in ((0, -1), (-1, 0), (1, 0), (0, 1)):
             if world.contains(*candidate) and world.realm_at(*candidate) is None:
                 return candidate
