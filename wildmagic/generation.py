@@ -2629,6 +2629,11 @@ class _GenerationMixin:
         """Populate a realm-owned zone with its people (Tier 1A): a light wild presence from
         non-imperial structures, then the realm's denizens (neutral, identity-typed), then a
         touch of wild pressure. Settled country is calmer than the open wilds."""
+        # The opening fork (CONTENT_FLESHING_ROADMAP, decided): the first time the player steps
+        # into occupied territory, imperial soldiers are menacing a local — defend them and
+        # reveal yourself, or keep your head down.
+        if placement.role == "conquered":
+            self._stage_opening_occupation_scene(zone_rng, occupied, placement)
         for building in buildings:
             if building["kind"] in {"imperial", "promise"}:
                 continue
@@ -2710,6 +2715,86 @@ class _GenerationMixin:
             faction="neutral",
             identity=list(identity),
         )
+
+    def _stage_opening_occupation_scene(
+        self,
+        zone_rng: random.Random,
+        occupied: set[tuple[int, int]],
+        placement: Any,
+    ) -> None:
+        """Stage the run's opening moral fork once: imperial soldiers (neutral to the player
+        until provoked) standing over a wounded local. Stepping in to cut them down defends the
+        local (``defended_townsfolk``) and — if you use wild magic — reveals you to the Empire
+        (the exposure model); walking on keeps you unfiled. Skipped if the player isn't placed
+        yet (the very first zone) or there's no room near them."""
+        state = self.state
+        if state.flags.get("opening_scene_staged"):
+            return
+        player = state.entities.get(state.player_id)
+        if player is None:
+            return
+        victim_spot = self._opening_spot_near(player.x, player.y, occupied)
+        if victim_spot is None:
+            return
+        state.flags["opening_scene_staged"] = True
+        vx, vy = victim_spot
+        victim = self.spawn_npc(
+            "cornered local",
+            "p",
+            vx,
+            vy,
+            role="townsfolk",
+            backstory="a local the soldiers have dragged into the road",
+            traits=["oppressed"],
+            tags={"human", "townsfolk"},
+            faction="neutral",
+            identity=[placement.realm_id],
+        )
+        victim.hp = max(1, victim.max_hp // 3)  # already roughed up
+        occupied.add(victim_spot)
+        placed = 0
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            spot = (vx + dx, vy + dy)
+            if spot in occupied or not self.can_occupy(*spot):
+                continue
+            self.spawn_actor(
+                zone_rng.choice(["legionary", "spearman"]),
+                "i",
+                spot[0],
+                spot[1],
+                10,
+                3,
+                1,
+                "neutral",
+                "legion",
+                tags={"human", "soldier"},
+                role="soldier",
+                identity=["imperial"],
+            )
+            occupied.add(spot)
+            placed += 1
+            if placed >= 2:
+                break
+        if placed:
+            state.add_message("Ahead, imperial soldiers have a local at swordpoint.")
+            state.add_message(
+                "Step in to defend them — and show the Empire what you are — "
+                "or keep your head down and walk on."
+            )
+
+    def _opening_spot_near(
+        self, cx: int, cy: int, occupied: set[tuple[int, int]]
+    ) -> tuple[int, int] | None:
+        """An open tile a few steps from (cx, cy) with room around it for the scene."""
+        for radius in (3, 4, 2, 5):
+            for dx in range(-radius, radius + 1):
+                for dy in range(-radius, radius + 1):
+                    if max(abs(dx), abs(dy)) != radius:
+                        continue
+                    spot = (cx + dx, cy + dy)
+                    if spot not in occupied and self.can_occupy(*spot):
+                        return spot
+        return None
 
     def _spawn_from_template(
         self,

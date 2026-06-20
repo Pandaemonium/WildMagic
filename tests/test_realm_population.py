@@ -72,3 +72,33 @@ def test_role_leaning_locals_keep_their_natural_disposition() -> None:
     # Partisans (rebel) and priests (pious) aren't distributed — they keep their lean.
     assert realm_disposition("conquered", "partisan", random.Random(1)) is None
     assert realm_disposition("conquered", "priest", random.Random(1)) is None
+
+
+def test_opening_occupation_scene_stages_once() -> None:
+    engine = GameEngine(
+        seed=1, scenario="frontier"
+    )  # player placed in the unowned start
+    placement = _conquered_placement(engine)
+    player = engine.state.player
+    engine._populate_realm_denizens(
+        random.Random(3), [], {(player.x, player.y)}, placement
+    )
+    assert engine.state.flags.get("opening_scene_staged")
+    names = {e.name for e in engine.state.entities.values()}
+    assert "cornered local" in names
+    # The menacing soldiers are imperial and NEUTRAL (the player chooses whether to provoke).
+    soldiers = [
+        e
+        for e in engine.state.entities.values()
+        if "imperial" in e.identity and e.role == "soldier"
+    ]
+    assert soldiers and all(s.faction == "neutral" for s in soldiers)
+    # Staged only once — a second occupied zone doesn't re-run it.
+    count_before = sum(
+        1 for e in engine.state.entities.values() if e.name == "cornered local"
+    )
+    engine._populate_realm_denizens(random.Random(4), [], set(), placement)
+    count_after = sum(
+        1 for e in engine.state.entities.values() if e.name == "cornered local"
+    )
+    assert count_after == count_before
