@@ -274,6 +274,15 @@ class Entity:
     status_display: dict[str, str] = field(default_factory=dict)
     status_expiry_text: dict[str, str] = field(default_factory=dict)
     tags: set[str] = field(default_factory=set)
+    # --- The character's typed identity dimensions (FACTION_KILL_REPUTATION.md §0) ---
+    # NPCs and enemies are one kind of *character*; these three are the source of truth for
+    # who someone is, kept off the loose `tags` bag so allegiance is no longer guessed.
+    # `identity`: faction allegiance (resolves to faction-ledger ids — see resolve_faction).
+    # `role`: the character's function (townsfolk/soldier/clerk/...), driving non-combatant
+    # kill semantics and fight-or-flee. `affiliations`: org membership, distinct from nation.
+    identity: list[str] = field(default_factory=list)
+    role: str = ""
+    affiliations: list[str] = field(default_factory=list)
     resistances: dict[str, int] = field(default_factory=dict)
     weaknesses: dict[str, int] = field(default_factory=dict)
     # Standing emanations this entity radiates each turn -- a hound whose shadow
@@ -346,6 +355,12 @@ class Entity:
             data["auras"] = self.auras
         if self.traits:
             data["traits"] = list(self.traits)
+        if self.identity:
+            data["identity"] = list(self.identity)
+        if self.role:
+            data["role"] = self.role
+        if self.affiliations:
+            data["affiliations"] = list(self.affiliations)
         if self.kind != "item":
             data.update(
                 {
@@ -368,6 +383,88 @@ class Entity:
                 }
             )
         return data
+
+
+#: Character roles that never take up arms — the non-combatant read for kill semantics
+#: (butchery) and the "a clerk won't draw a blade" rule in derived combat stance (§0). Small,
+#: open vocabulary; the unknown-role fallback in ``character_is_noncombatant`` covers the rest.
+NONCOMBATANT_ROLES: frozenset[str] = frozenset(
+    {
+        "townsfolk",
+        "civilian",
+        "peasant",
+        "commoner",
+        "clerk",
+        "merchant",
+        "trader",
+        "shopkeeper",
+        "priest",
+        "monk",
+        "acolyte",
+        "scholar",
+        "scribe",
+        "healer",
+        "elder",
+        "child",
+        "servant",
+        "beggar",
+        "artisan",
+        "bard",
+        "farmer",
+    }
+)
+
+#: Character roles whose function is to fight — they draw even when role alone is the question.
+COMBATANT_ROLES: frozenset[str] = frozenset(
+    {
+        "soldier",
+        "guard",
+        "enforcer",
+        "sentinel",
+        "warden",
+        "raider",
+        "bandit",
+        "brigand",
+        "warrior",
+        "knight",
+        "duelist",
+        "brute",
+        "skirmisher",
+        "captain",
+        "officer",
+        "mercenary",
+        "hunter",
+        "assassin",
+    }
+)
+
+
+_ALL_ROLES: frozenset[str] = NONCOMBATANT_ROLES | COMBATANT_ROLES
+
+
+def role_from_tags(tags: set[str]) -> str:
+    """Bridge for un-migrated spawners: read a character's ``role`` from any known role word in
+    its loose tags (deterministic; first by sort order). ``""`` when none is present."""
+    for tag in sorted(tags):
+        if tag in _ALL_ROLES:
+            return tag
+    return ""
+
+
+def character_is_noncombatant(entity: "Entity") -> bool:
+    """Whether a character would *not* take up arms — read from their typed ``role`` first
+    (a clerk or child never fights; a soldier always might), falling back to a bridge for
+    un-typed entities: a bound captive can't fight, and a bare ``kind == "npc"`` townsperson
+    is treated as a non-combatant while a combat ``actor`` is not. Used by derived combat
+    stance (§0) and the butchery axis of kill semantics."""
+    role = (entity.role or "").lower()
+    if role in NONCOMBATANT_ROLES:
+        return True
+    if role in COMBATANT_ROLES:
+        return False
+    if "bound" in entity.tags:
+        return True
+    return entity.kind == "npc"
 
 
 @dataclass

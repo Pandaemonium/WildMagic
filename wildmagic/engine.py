@@ -35,6 +35,7 @@ from .models import (
     RoomProfile,
     TILE_NAMES,
     TILE_TAGS,
+    role_from_tags,
 )
 from .semantics import (
     SemanticLedger,
@@ -56,6 +57,7 @@ from .factions import (
     REBELLION_CELLS_START,
     Faction,
     FactionLedger,
+    identity_from_tags,
     resolve_faction,
     seed_phase0_factions,
 )
@@ -580,6 +582,9 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         resistances: dict[str, int] | None = None,
         weaknesses: dict[str, int] | None = None,
         auras: list[dict[str, Any]] | None = None,
+        role: str = "",
+        identity: list[str] | None = None,
+        affiliations: list[str] | None = None,
     ) -> Entity:
         faction = normalize_faction(faction, default="ally")
         actor_tags = {
@@ -614,6 +619,13 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         )
         if auras:
             entity.auras = [dict(aura) for aura in auras]
+        # Typed character identity (§0): explicit when given, else bridged from the loose tags
+        # so existing content (empire-tagged enemies, role-worded creatures) is typed for free.
+        entity.role = role or role_from_tags(actor_tags)
+        entity.identity = (
+            list(identity) if identity is not None else identity_from_tags(actor_tags)
+        )
+        entity.affiliations = list(affiliations or [])
         self.state.entities[entity.id] = entity
         if self._delta_capture:
             self.record_delta(
@@ -653,6 +665,8 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         reward_gold: int = 0,
         reward_item: str | None = None,
         reward_qty: int = 0,
+        identity: list[str] | None = None,
+        affiliations: list[str] | None = None,
     ) -> Entity:
         """Spawn a talkable NPC: a physical Entity plus a parallel NPCProfile carrying
         persona/memory data (kept separate the same way Curse data lives off-Entity).
@@ -692,6 +706,13 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                 backstory=backstory,
             ),
         )
+        # Typed character identity (§0): the NPC's role is authoritative; allegiance is explicit
+        # when given, else bridged from tags (Hollowmere folk, imperial clerks, …).
+        entity.role = role
+        entity.identity = (
+            list(identity) if identity is not None else identity_from_tags(npc_tags)
+        )
+        entity.affiliations = list(affiliations or [])
         self.state.entities[entity.id] = entity
         npc_wares = dict(wares or {})
         if reward_gold > 0:
@@ -1092,7 +1113,10 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         # tally (FACTION_KILL_REPUTATION.md K1/K2). Reactions stay role-based for now; the
         # tally is pure data capture. "defended_townsfolk" is not a kill, so it carries none.
         victim_faction = resolve_faction(
-            victim.tags, victim.kind, self.state.faction_ledger
+            victim.tags,
+            victim.kind,
+            self.state.faction_ledger,
+            identity=victim.identity,
         )
         if "empire" in victim.tags:
             self.record_deed(

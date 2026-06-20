@@ -122,15 +122,59 @@ def faction_anchor(faction_id: str) -> str:
     return f"faction:{faction_id}"
 
 
-def resolve_faction(tags: set[str], kind: str, ledger: "FactionLedger") -> str:
-    """Resolve a victim (by its combat tags and entity kind) to the faction whose member it
-    was, for per-faction kill accounting (`FACTION_KILL_REPUTATION.md` K1). Returns, in order
-    of specificity: the **faction-ledger id** when one is tagged directly (e.g. a Phase-C
-    conquered kingdom's own id); the **primary faction of a tagged role** otherwise (so an
-    ``empire``-tagged soldier resolves to the empire bloc's lead faction); the ``civilian``
-    bucket for an unaligned person; and ``""`` for an unaligned creature — beasts are not
-    politics and stay tally-exempt. Pure: depends only on the tags, kind, and current roster,
-    so it generalizes automatically as the world roll seeds more factions."""
+#: Aliases mapping a character's typed ``identity`` allegiance token to how it resolves against
+#: the faction ledger. A token that is already a faction id or a role needs no alias; these
+#: cover the human-readable allegiances spawners use (``"imperial"`` for the empire bloc,
+#: ``"rebel"`` for the Unbound). Realm allegiances (e.g. ``"stalnaz"``) are faction ids and
+#: resolve directly. New aliases are added here, never inferred from prose.
+IDENTITY_ALIASES: dict[str, str] = {
+    "imperial": "empire",
+    "empire": "empire",
+    "vigovia": "empire",
+    "rebel": "rebellion",
+    "rebellion": "rebellion",
+    "unbound": "rebellion",
+    "resistance": "rebellion",
+}
+
+
+def resolve_identity_token(token: str, ledger: "FactionLedger") -> str:
+    """Resolve one typed ``identity`` allegiance token to a faction-ledger id (or ``""`` when it
+    names no known faction). Checks the alias map, then a direct faction id, then a role's
+    primary — so ``"imperial"`` → the empire bloc lead and ``"stalnaz"`` → the Stalnaz faction."""
+    token = token.strip().lower()
+    if not token:
+        return ""
+    canonical = IDENTITY_ALIASES.get(token, token)
+    if canonical in ledger.factions:
+        return canonical
+    if canonical in ROLE_TO_KINDS:
+        primary = ledger.primary(canonical)
+        if primary is not None:
+            return primary.id
+    if token in ledger.factions:
+        return token
+    return ""
+
+
+def resolve_faction(
+    tags: set[str],
+    kind: str,
+    ledger: "FactionLedger",
+    identity: list[str] | None = None,
+) -> str:
+    """Resolve a character to the faction whose member they are, for per-faction kill accounting
+    (`FACTION_KILL_REPUTATION.md` K1/§0). The typed **`identity`** allegiance is the source of
+    truth and is tried first (``["imperial"]`` → the empire bloc, ``["stalnaz"]`` → Stalnaz). It
+    falls back to the loose **`tags`** bag for un-migrated spawners — a directly-tagged faction
+    id, then a tagged role's primary — then the ``civilian`` bucket for an unaligned person, and
+    ``""`` for an unaligned creature (beasts are not politics and stay tally-exempt). Pure:
+    depends only on its inputs and the current roster, so it generalizes as the world roll seeds
+    more factions."""
+    for token in identity or []:
+        resolved = resolve_identity_token(token, ledger)
+        if resolved:
+            return resolved
     for faction_id in ledger.factions:
         if faction_id in tags:
             return faction_id
@@ -142,6 +186,18 @@ def resolve_faction(tags: set[str], kind: str, ledger: "FactionLedger") -> str:
     if kind == "npc" or "civilian" in tags:
         return "civilian"
     return ""
+
+
+def identity_from_tags(tags: set[str]) -> list[str]:
+    """Bridge for un-migrated spawners: infer the typed ``identity`` allegiance from a creature's
+    loose combat tags (empire markers → ``"imperial"``, rebel markers → ``"rebel"``). Realm-id
+    tags are left to ``resolve_faction``'s tag fallback. Empty when nothing political is tagged."""
+    identity: list[str] = []
+    if {"empire", "imperial"} & tags:
+        identity.append("imperial")
+    if {"rebel", "rebellion", "unbound", "resistance"} & tags:
+        identity.append("rebel")
+    return identity
 
 
 @dataclass
