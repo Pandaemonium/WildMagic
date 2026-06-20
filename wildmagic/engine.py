@@ -35,6 +35,9 @@ from .models import (
     RoomProfile,
     TILE_NAMES,
     TILE_TAGS,
+    NONCOMBATANT_ROLES,
+    character_is_noncombatant,
+    role_from_tags,
 )
 from .semantics import (
     SemanticLedger,
@@ -50,16 +53,34 @@ from .bonds import (
     disposition_inclination,
     drift_bond,
 )
-from .deeds import Deed, DeedLedger, interpret_deed_rules
+from .deeds import (
+    Deed,
+    DeedLedger,
+    KILL_DEEDS,
+    RELATIONAL_KILL_DEEDS,
+    interpret_deed_rules,
+)
+from .quests import (
+    advance_quests_with_deed,
+    rescue_quests_for_dead_subjects,
+)
 from .factions import (
     EMPIRE_PATROLS_START,
     REBELLION_CELLS_START,
     Faction,
     FactionLedger,
+    identity_from_tags,
     resolve_faction,
     seed_phase0_factions,
 )
 from .legend import LegendLedger
+from .worldgen import (
+    WorldMap,
+    roll_world,
+    scenario_uses_world_map,
+    seed_factions_from_world,
+    start_zone_for_scenario,
+)
 from .combat import _CombatMixin
 from .ai import _AIMixin
 from .generation import _GenerationMixin
@@ -278,6 +299,53 @@ CRACKDOWN_THRESHOLD = 1.0  # empire imperial_threat
 UPRISING_THRESHOLD = 1.0  # rebellion gratitude
 MAX_PENDING_BACKLASH = 4  # the world can only have so much in motion at once
 
+# Sustained killing of one faction past this many of its members hardens into a **blood feud**
+# (FACTION_KILL_REPUTATION.md K5): that faction reads you as a sworn enemy and will spend its
+# resources hunting you. The civilian bucket is exempt (it is not a faction that can swear one).
+BLOOD_FEUD_KILLS = 5
+
+# Talk-to-anyone (EMERGENT_QUESTS §13): which creatures can hold a conversation. Default is
+# "anyone with a persona, any npc, and any actor that isn't plainly mindless." A creature that
+# is a beast/slime/swarm cannot parley unless it also reads as a person (humanoid/spirit/…).
+_NONVERBAL_TAGS: frozenset[str] = frozenset(
+    {
+        "beast",
+        "vermin",
+        "slime",
+        "ooze",
+        "swarm",
+        "plant",
+        "construct",
+        "mindless",
+        "fungus",
+    }
+)
+_VERBAL_TAGS: frozenset[str] = frozenset(
+    {
+        "humanoid",
+        "human",
+        "spirit",
+        "fiend",
+        "undead",
+        "goblin",
+        "demon",
+        "fae",
+        "empire",
+    }
+)
+# How far the player can call out to someone they can see (EMERGENT_QUESTS §13 ranged talk).
+TALK_RANGE = 8
+
+# Player-facing quest-log status from the internal promise status (EMERGENT_QUESTS §7). The
+# objective being met reads as "completed" even before the giver's reward settles on the tick.
+_QUEST_LOG_STATUS: dict[str, str] = {
+    "fulfilled": "completed",
+    "objective_met": "completed",
+    "changed": "transformed",
+    "failed": "failed",
+    "cold": "cold",
+}
+
 
 @dataclass
 class GameState:
@@ -321,6 +389,7 @@ class GameState:
     # (summarize_state + deterministic replay) but never carried between runs.
     deed_ledger: DeedLedger = field(default_factory=DeedLedger)
     faction_ledger: FactionLedger = field(default_factory=seed_phase0_factions)
+    world_map: WorldMap | None = None
     # The mechanical legend: bounded-vocab weighted tags per actor soul, distilled from
     # deeds and read by the simulator/dialogue/scores (legend.py). The prose mirror lives
     # in the semantic ledger (§1.3).
@@ -526,6 +595,13 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
 
         self.town_provider = make_town_provider(provider_name)
         self._setup_prop_generation(provider_name, prop_provider)
+        if scenario_uses_world_map(scenario):
+            world = roll_world(seed)
+            self.state.world_map = world
+            self.state.faction_ledger = seed_factions_from_world(world)
+            self.state.zone_x, self.state.zone_y = start_zone_for_scenario(
+                world, scenario
+            )
         if scenario == "test_chamber":
             self._generate_test_chamber()
         elif scenario == "empire_compound":
@@ -565,6 +641,9 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         resistances: dict[str, int] | None = None,
         weaknesses: dict[str, int] | None = None,
         auras: list[dict[str, Any]] | None = None,
+        role: str = "",
+        identity: list[str] | None = None,
+        affiliations: list[str] | None = None,
     ) -> Entity:
         faction = normalize_faction(faction, default="ally")
         actor_tags = {
@@ -599,6 +678,14 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         )
         if auras:
             entity.auras = [dict(aura) for aura in auras]
+        # Typed character identity (§0): explicit when given, else bridged from the loose tags
+        # so existing content (empire-tagged enemies, role-worded creatures) is typed for free.
+        entity.role = role or role_from_tags(actor_tags)
+        entity.identity = (
+            list(identity) if identity is not None else identity_from_tags(actor_tags)
+        )
+        entity.affiliations = list(affiliations or [])
+        entity.soul_id = f"soul:{entity.id}"
         self.state.entities[entity.id] = entity
         if self._delta_capture:
             self.record_delta(
@@ -638,6 +725,8 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         reward_gold: int = 0,
         reward_item: str | None = None,
         reward_qty: int = 0,
+        identity: list[str] | None = None,
+        affiliations: list[str] | None = None,
     ) -> Entity:
         """Spawn a talkable NPC: a physical Entity plus a parallel NPCProfile carrying
         persona/memory data (kept separate the same way Curse data lives off-Entity).
@@ -677,6 +766,14 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                 backstory=backstory,
             ),
         )
+        # Typed character identity (§0): the NPC's role is authoritative; allegiance is explicit
+        # when given, else bridged from tags (Hollowmere folk, imperial clerks, …).
+        entity.role = role
+        entity.identity = (
+            list(identity) if identity is not None else identity_from_tags(npc_tags)
+        )
+        entity.affiliations = list(affiliations or [])
+        entity.soul_id = f"soul:{entity.id}"
         self.state.entities[entity.id] = entity
         npc_wares = dict(wares or {})
         if reward_gold > 0:
@@ -699,6 +796,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             role=role,
             backstory=backstory,
             appearance=appearance,
+            soul_id=entity.soul_id,
             traits=profile_traits,
             lore=seed_npc_lore(
                 role,
@@ -968,6 +1066,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         source: str = "combat",
         target_tags: list[str] | None = None,
         victim_faction: str = "",
+        subject_refs: list[str] | None = None,
         evidence_tags: list[str] | None = None,
         interpretation_source: str = "rules",
     ) -> Deed | None:
@@ -998,6 +1097,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             place_key=state.current_place_key(),
             target_tags=list(target_tags or []),
             victim_faction=victim_faction,
+            subject_refs=list(subject_refs or []),
             visibility="witnessed" if witnesses else "secret",
             witnesses=[w.id for w in witnesses],
             evidence_tags=list(evidence_tags or []),
@@ -1007,6 +1107,16 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             deed
         )  # consequences from the bounded rules table (by role)
         deed.standing_deltas = self._resolve_role_deltas(deed.standing_deltas)
+        # K3: a combatant kill's standing is *relational* — computed from every faction's stance
+        # toward the victim's faction (overriding the role rule), so killing the same person
+        # lands differently across the rolled roster. The legend tag (e.g. "defiant") stays.
+        if (
+            deed.type in RELATIONAL_KILL_DEEDS
+            and deed.victim_faction in state.faction_ledger.factions
+        ):
+            deed.standing_deltas = self._relational_kill_deltas(
+                deed.victim_faction, deed.magnitude
+            )
         deed.interpretation_source = interpretation_source  # who *judged* it (D5)
         state.deed_ledger.record(deed)
         # NPC memory line (legibility): witnesses carry it even before the tick, so it
@@ -1035,6 +1145,11 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                         source_event_id=deed.id,
                     )
                 )
+        # Emergent quests close from deeds (EMERGENT_QUESTS §5): advance any open quest
+        # objective this deed satisfies. The objective is marked met now (the legibility beat);
+        # the giver's reward is granted on the next world tick (the deferred half of §5).
+        for met in advance_quests_with_deed(deed, state.promises):
+            state.add_message(f"You have done what was asked: {met.subject}.")
         return deed
 
     def _resolve_role_deltas(
@@ -1068,30 +1183,50 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         return getattr(source, "owner_soul_id", None) == self.state.player_soul_id
 
     def _record_kill_deed(self, victim: Entity, source: Entity | None) -> None:
-        """Translate a combat kill the player's soul is responsible for into a deed.
-        Imperial dead and slain civilians read very differently (the rules table sorts
-        out the consequences); other creatures aren't (yet) deed-worthy."""
+        """Translate a combat kill the player's soul is responsible for into a deed. The kill's
+        meaning is read from **identity × role** (FACTION_KILL_REPUTATION.md §0): butchering a
+        non-combatant reads very differently from cutting down a soldier, and *whose* member
+        died (``victim_faction``) drives both the per-faction tally (K1/K2) and the relational
+        standing reaction (§3.4, applied in ``record_deed``). Unaligned creatures aren't
+        deed-worthy — beasts are not politics."""
         if not self._deed_attributed_to_player(source):
             return
-        # Whose member died — stamped on the kill deed so it feeds the per-faction kill
-        # tally (FACTION_KILL_REPUTATION.md K1/K2). Reactions stay role-based for now; the
-        # tally is pure data capture. "defended_townsfolk" is not a kill, so it carries none.
         victim_faction = resolve_faction(
-            victim.tags, victim.kind, self.state.faction_ledger
+            victim.tags,
+            victim.kind,
+            self.state.faction_ledger,
+            identity=victim.identity,
         )
-        if "empire" in victim.tags:
+        victim_souls = [victim.soul_id] if victim.soul_id else None
+        # Butchering someone who bore no arms and never came at you — the qualitatively
+        # different (butcher) reaction, whatever their nation. The faction still rides along.
+        if character_is_noncombatant(victim) and not self._was_hostile_to_player(
+            victim
+        ):
+            self.record_deed(
+                "killed_civilians",
+                magnitude=0.2,
+                summary=f"struck down {victim.name}, who bore no arms",
+                at=(victim.x, victim.y),
+                target_tags=["civilian"],
+                victim_faction=victim_faction,
+                subject_refs=victim_souls,
+                evidence_tags=["bloodstain", "survivor_testimony"],
+            )
+            return
+        # Striking the Empire: the defiant legend, plus a defence of any common folk the
+        # imperial stood over (one act, two deeds — the "people's champion" arc).
+        if "empire" in victim.tags or victim_faction == "empire":
             self.record_deed(
                 "killed_imperials",
-                magnitude=0.2,  # one imperial; Phase A may scale by count/severity
+                magnitude=0.2,
                 summary=f"cut down {victim.name}, one of the Empire's own",
                 at=(victim.x, victim.y),
                 target_tags=["empire"],
-                victim_faction=victim_faction,
+                victim_faction=victim_faction or "empire",
+                subject_refs=victim_souls,
                 evidence_tags=["bloodstain"],
             )
-            # Cutting down an imperial who stood over the common folk *also* reads as
-            # defending them (one act, two deeds — the rules table sorts the consequences).
-            # This is how the "people's champion" / protector legend arises in play.
             bystander = self._endangered_civilian_near(victim.x, victim.y)
             if bystander is not None:
                 self.record_deed(
@@ -1100,19 +1235,24 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                     summary=f"stood between the Empire and {bystander.name}",
                     at=(victim.x, victim.y),
                     target_tags=["civilian"],
+                    subject_refs=[bystander.soul_id] if bystander.soul_id else None,
                     evidence_tags=["survivor_testimony"],
                 )
-        elif (
-            victim.kind == "npc" or "civilian" in victim.tags
-        ) and not self._was_hostile_to_player(victim):
+            return
+        # A faction-aligned combatant of any *other* power — the general hostile-kill deed
+        # (EMERGENT_QUESTS Q1b). Its standing is relational: the victim's faction grudges you,
+        # their enemies thank you. Unaligned creatures (no faction, or the civilian bucket with
+        # no real nation) stay deed-free.
+        if victim_faction and victim_faction != "civilian":
             self.record_deed(
-                "killed_civilians",
+                "killed_combatant",
                 magnitude=0.2,
-                summary=f"struck down {victim.name}, who bore no arms",
+                summary=f"cut down {victim.name}",
                 at=(victim.x, victim.y),
-                target_tags=["civilian"],
+                target_tags=[victim_faction],
                 victim_faction=victim_faction,
-                evidence_tags=["bloodstain", "survivor_testimony"],
+                subject_refs=victim_souls,
+                evidence_tags=["bloodstain"],
             )
 
     def _was_hostile_to_player(self, victim: Entity) -> bool:
@@ -1132,6 +1272,68 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         the player has killed. A pure projection over the deed ledger (never decays; the
         `civilian` bucket included, unaligned creatures excluded)."""
         return self.state.deed_ledger.kills_by_faction()
+
+    def feuding_factions(self) -> set[str]:
+        """Faction ids the player has killed enough of to provoke a **blood feud** (K5) — they
+        now read you as a sworn enemy. Derived from the tally; the civilian bucket is exempt."""
+        return {
+            fid
+            for fid, count in self.kills_by_faction().items()
+            if fid != "civilian" and count >= BLOOD_FEUD_KILLS
+        }
+
+    def _relational_kill_deltas(
+        self, victim_faction: str, magnitude: float
+    ) -> dict[str, dict[str, float]]:
+        """Per-faction standing deltas for killing a member of ``victim_faction`` — the
+        relational reaction K3 (`FACTION_KILL_REPUTATION.md` §3.4). Each faction reacts by its
+        stance toward the victim's faction: the victim's own people mark you a threat and fear
+        you; their **enemies** are grateful and emboldened; their **friends** recoil; the
+        indifferent merely fear you a little. The Empire is the one antagonist that never thanks
+        a wild sorcerer — spilled blood only ever marks you a larger threat to it. Volume scales
+        with **diminishing returns**, so the 50th kill of a faction moves standing far less than
+        the 1st. This *overrides* the role-based rule for combatant kills, generalizing the old
+        hardcoded empire↔resistance reaction to the whole rolled roster."""
+        ledger = self.state.faction_ledger
+        if victim_faction not in ledger.factions:
+            return {}
+        prior = self.kills_by_faction().get(victim_faction, 0)
+        # Diminishing returns (the 50th kill of a faction moves standing far less than the
+        # 1st), but gently enough that sustained pressure still crosses the crackdown/uprising
+        # thresholds the win-condition relies on.
+        scale = magnitude / (1.0 + 0.05 * prior)
+        deltas: dict[str, dict[str, float]] = {}
+        for fid in ledger.factions:
+            axes: dict[str, float] = {}
+            if fid == victim_faction:
+                axes = {"fear": 0.5 * scale, "notoriety": 0.4 * scale}
+                if (
+                    fid == "empire"
+                ):  # the win-pressure axis is the empire core's alone (D9)
+                    axes["imperial_threat"] = 1.0 * scale
+            elif fid == "empire":
+                # The Empire never befriends a wild sorcerer; any blood marks you a threat.
+                axes = {"imperial_threat": 0.25 * scale}
+            else:
+                regard = ledger.regard(fid, victim_faction)
+                if regard < 0:  # my enemy's killer is my friend
+                    weight = -regard
+                    axes = {
+                        "gratitude": 0.8 * weight * scale,
+                        "legitimacy": 0.3 * weight * scale,
+                        "notoriety": 0.2 * weight * scale,
+                    }
+                elif regard > 0:  # you struck down a friend of mine
+                    axes = {
+                        "fear": 0.5 * regard * scale,
+                        "gratitude": -0.4 * regard * scale,
+                    }
+                else:
+                    axes = {"fear": 0.15 * scale}
+            cleaned = {axis: round(value, 4) for axis, value in axes.items() if value}
+            if cleaned:
+                deltas[fid] = cleaned
+        return deltas
 
     def run_world_tick(self, day: int | None = None) -> bool:
         """The world Simulator's daily beat. Applies every unapplied deed's proposed
@@ -1166,8 +1368,81 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         state.deed_ledger.compress()
         if self.spread_daily_gossip(day=day):
             applied_any = True
+        # Emergent quests (EMERGENT_QUESTS §5/§6): grant the giver's deferred reward for
+        # objectives met since the last beat, then mutate quests the world has overtaken
+        # (a rescue whose subject was killed becomes an avenge).
+        self._settle_quest_rewards()
+        self._mutate_quests()
         state.simulated_through_turn = max(state.simulated_through_turn, state.turn)
         return applied_any
+
+    def _settle_quest_rewards(self) -> None:
+        """Grant the giver's reward for each quest whose objective was met since the last tick
+        (the deferred half of the hybrid reward, EMERGENT_QUESTS §5). Idempotent: the
+        ``objective_met`` → ``fulfilled`` transition fires the grant exactly once."""
+        for promise in self.state.promises:
+            if promise.kind == "quest" and promise.status == "objective_met":
+                if promise.reward is not None:
+                    self._grant_quest_reward(promise.reward)
+                promise.status = "fulfilled"
+                self.state.add_message(
+                    f"Your deed is acknowledged — {promise.subject} is settled."
+                )
+
+    def _grant_quest_reward(self, reward: Any) -> None:
+        """Pay out a quest reward: reputation (through the existing standing path) plus any
+        gold and items, dropped into the controlled body's inventory."""
+        self._grant_reward_reputation(reward)
+        player = self.state.player
+        if getattr(reward, "gold", 0):
+            player.inventory["gold"] = player.inventory.get("gold", 0) + int(
+                reward.gold
+            )
+        for item, quantity in getattr(reward, "items", {}).items():
+            if quantity:
+                player.inventory[item] = player.inventory.get(item, 0) + int(quantity)
+
+    def _mutate_quests(self) -> None:
+        """Rewrite quests the world has overtaken (EMERGENT_QUESTS §6). For now: a ``rescue``
+        whose subject was killed (their soul appears in a kill deed) transforms to ``avenge`` —
+        the rescue is marked ``changed`` and a successor avenge quest is minted referencing it
+        (additive: history is never silently rewritten)."""
+        dead_souls = {
+            ref
+            for deed in self.state.deed_ledger.deeds
+            if deed.type in KILL_DEEDS
+            for ref in deed.subject_refs
+        }
+        if not dead_souls:
+            return
+        for promise in rescue_quests_for_dead_subjects(self.state.promises, dead_souls):
+            promise.status = "changed"
+            subject = promise.objective.data.get("subject_name") or promise.subject
+            self.add_quest_promise(
+                name=f"Avenge {subject}",
+                description=f"{subject} was killed before you could reach them. Avenge them.",
+                contact=promise.giver_npc or promise.source,
+                location=promise.location,
+                objective=Objective(
+                    "avenge",
+                    {
+                        "deed_types": [
+                            "killed_imperials",
+                            "killed_combatant",
+                            "killed_civilians",
+                        ],
+                        "count": 1,
+                        "progress": 0,
+                        "from_quest": promise.id,
+                    },
+                ),
+                reward=promise.reward,
+                source=f"mutation:{promise.id}",
+                tags=["quest", "avenge"],
+            )
+            self.state.add_message(
+                f"Too late — {subject} is dead. Grief hardens into vengeance."
+            )
 
     def _maybe_run_daily_tick(self) -> bool:
         """Fire the 05:00 daily tick for each day boundary crossed since it last ran
@@ -1274,6 +1549,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             summary=f"struck the chains from {captive.name}",
             at=(captive.x, captive.y),
             target_tags=["civilian", "captive"],
+            subject_refs=[captive.soul_id] if captive.soul_id else None,
             evidence_tags=["survivor_testimony"],
         )
         self.state.add_message(
@@ -2219,23 +2495,52 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         ]
 
     def is_hostile_to(self, actor: Entity, other: Entity) -> bool:
-        """Whether `actor` is willing to fight `other` -- the general notion of
-        "who's at war with whom," not just "everything hates the player."
+        """Whether `actor` is willing to fight `other` -- a *derived*, relational stance
+        (FACTION_KILL_REPUTATION.md §0), not a stored ally/enemy/neutral flag.
 
-        Baseline: enemies oppose the player and its allies, and vice versa --
-        exactly what every fight in the game already assumed. On top of that,
-        FACTION_HOSTILITIES declares standing conflicts between tagged groups
-        (e.g. {"empire"} vs {"hollowmere_townsfolk"}), so e.g. an Imperial
-        soldier and a Hollowmere local are hostile to each other without either
-        of them needing to be the player or an ally.
+        It is read from three things, in order:
+
+        1. **Role.** A typed non-combatant (a clerk, a child, a bound captive) never takes up
+           arms -- not even for a faction at open war. This is the "a member of a hostile
+           faction who won't fight because they're just a clerk" case.
+        2. **The player-relative tactical baseline** (the stored ``faction`` string -- interim
+           scaffolding until every actor is fully relationship-driven): enemies oppose the
+           player and its allies, and vice versa, exactly as every fight already assumed.
+        3. **The inter-faction relationship graph.** Members of two factions at open war are
+           hostile *even when both are neutral to the player* -- two NPCs of warring realms
+           fight each other in front of you. ``FACTION_HOSTILITIES`` remains a static fallback
+           for tag-pair conflicts not (yet) modeled as factions.
         """
         if actor.id == other.id or other.hp <= 0:
             return False
+        # 1. A role-typed non-combatant does not initiate combat, whatever their allegiance.
+        if (actor.role or "").lower() in NONCOMBATANT_ROLES:
+            return False
+        # 2. Player-relative tactical baseline.
         if actor.faction == "enemy" and other.faction in {"player", "ally"}:
             return True
         if actor.faction in {"player", "ally"} and other.faction == "enemy":
             return True
+        # 3. Derived from the political graph, then the static tag-pair fallback.
+        if self._factions_at_war(actor, other):
+            return True
         return self._declared_conflict(actor, other)
+
+    def _factions_at_war(self, actor: Entity, other: Entity) -> bool:
+        """Whether ``actor`` and ``other`` belong to two distinct factions the ledger holds at
+        open war (derived combat stance §0). Resolves each to a faction by its typed identity
+        (falling back to tags/kind), so it generalizes across the rolled roster. Unaligned
+        creatures and same-faction members are never at war by this path."""
+        ledger = self.state.faction_ledger
+        actor_faction = resolve_faction(
+            actor.tags, actor.kind, ledger, identity=actor.identity
+        )
+        other_faction = resolve_faction(
+            other.tags, other.kind, ledger, identity=other.identity
+        )
+        if not actor_faction or not other_faction or actor_faction == other_faction:
+            return False
+        return ledger.are_hostile(actor_faction, other_faction)
 
     def _declared_conflict(self, actor: Entity, other: Entity) -> bool:
         """Whether `actor` and `other` are bound by a standing FACTION_HOSTILITIES
@@ -2266,11 +2571,11 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         target_x = player.x + dx
         target_y = player.y + dy
         if not self.in_bounds(target_x, target_y):
-            if self.state.scenario in {"frontier", "town"} and self._cross_zone_edge(
-                target_x, target_y
-            ):
-                self.finish_player_turn()
-                return True
+            if scenario_uses_world_map(self.state.scenario):
+                if self._cross_zone_edge(target_x, target_y):
+                    self.finish_player_turn()
+                    return True
+                return False
             self.state.add_message("The dungeon refuses that edge.")
             return False
         target = self.blocking_entity_at(target_x, target_y)
@@ -2343,21 +2648,99 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         self.finish_player_turn()
         return True
 
-    def find_talk_target(self) -> Entity | None:
-        """The NPC the player is positioned to talk to: any talkable NPC in an
-        adjacent (8-directional) tile, picked deterministically if more than one."""
+    def can_converse_with(self, entity: Entity) -> bool:
+        """Whether the player could hold a conversation with this character — *anyone* with a
+        persona, any NPC, and any actor that isn't plainly mindless (EMERGENT_QUESTS §13: NPCs
+        and enemies are one talkable kind). Props, items, and beasts can't parley unless they
+        also read as a person."""
+        if entity.id == self.state.player_id or not entity.alive:
+            return False
+        if self.state.npc_profiles.get(entity.id) is not None:
+            return True
+        if entity.kind == "npc":
+            return True
+        if entity.kind != "actor":
+            return False
+        if _VERBAL_TAGS & entity.tags:
+            return True
+        return not (_NONVERBAL_TAGS & entity.tags)
+
+    def find_talk_target(
+        self, selector: str | None = None, max_range: int = TALK_RANGE
+    ) -> Entity | None:
+        """The character the player is addressing (EMERGENT_QUESTS §13 — talk to anyone, incl.
+        enemies, at a distance). With a ``selector`` (a name fragment), the nearest visible
+        match within range wins. Otherwise an adjacent talkable comes first (the old behaviour,
+        now including an adjacent enemy), then the nearest *visible* talkable within ``max_range``
+        — so you can call out across a courtyard. Deterministic ties by distance then id."""
         player = self.state.player
-        candidates = []
-        for dx in (-1, 0, 1):
-            for dy in (-1, 0, 1):
-                if dx == 0 and dy == 0:
-                    continue
-                entity = self.blocking_entity_at(player.x + dx, player.y + dy)
-                if entity is not None and entity.kind == "npc" and entity.alive:
-                    candidates.append(entity)
-        if not candidates:
-            return None
-        return min(candidates, key=lambda entity: entity.id)
+        talkable = [
+            entity
+            for entity in self.state.entities.values()
+            if self.can_converse_with(entity)
+        ]
+        if selector:
+            needle = selector.strip().lower()
+            matches = [
+                entity
+                for entity in talkable
+                if needle in entity.name.lower()
+                and self._within_talk_reach(entity, max_range)
+            ]
+            return (
+                min(matches, key=lambda e: (self.distance(player, e), e.id))
+                if matches
+                else None
+            )
+        adjacent = [
+            entity
+            for entity in talkable
+            if max(abs(entity.x - player.x), abs(entity.y - player.y)) <= 1
+        ]
+        if adjacent:
+            return min(adjacent, key=lambda entity: entity.id)
+        ranged = [
+            entity for entity in talkable if self._within_talk_reach(entity, max_range)
+        ]
+        return (
+            min(ranged, key=lambda e: (self.distance(player, e), e.id))
+            if ranged
+            else None
+        )
+
+    def _within_talk_reach(self, entity: Entity, max_range: int) -> bool:
+        """Whether a character is close enough and visible to be called out to."""
+        if self.distance(self.state.player, entity) > max_range:
+            return False
+        return self.tile_key(entity.x, entity.y) in self.state.visible
+
+    def ensure_persona(self, entity: Entity) -> NPCProfile:
+        """Return this character's dialogue persona, creating one **lazily** if they have none
+        (EMERGENT_QUESTS §13 blocker #1 — enemies have no NPCProfile). The procedural persona is
+        seeded from what the body already carries (name, role, allegiance, description), so any
+        actor can be talked to with zero model calls; the LLM only enriches the reply."""
+        profile = self.state.npc_profiles.get(entity.id)
+        if profile is not None:
+            return profile
+        if not entity.soul_id:
+            entity.soul_id = f"soul:{entity.id}"
+        role = (
+            entity.role
+            or role_from_tags(entity.tags)
+            or ("soldier" if entity.faction == "enemy" else "stranger")
+        )
+        backstory = entity.description or f"a {role} the player has crossed paths with"
+        profile = NPCProfile(
+            entity_id=entity.id,
+            name=entity.name,
+            role=role,
+            backstory=backstory,
+            appearance=entity.description or "",
+            soul_id=entity.soul_id,
+            traits=list(entity.traits),
+        )
+        self.state.npc_profiles[entity.id] = profile
+        return profile
 
     def add_promises(self, promises: list[WorldPromise]) -> list[WorldPromise]:
         added: list[WorldPromise] = []
@@ -2464,6 +2847,49 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         self.add_promises([promise])
         return promise
 
+    def register_heard_concern(self, npc_id: str) -> WorldPromise | None:
+        """Open an emergent quest from an NPC's voiced **concern** (EMERGENT_QUESTS §4 — the
+        deterministic floor: a plight becomes a quest the moment the player engages it, with
+        zero model calls). The objective type and match spec come straight from the concern;
+        closing it is the deed matcher's job. Idempotent (``add_quest_promise`` dedups by id)."""
+        profile = self.state.npc_profiles.get(npc_id)
+        if profile is None or not profile.concern:
+            return None
+        concern = profile.concern
+        ctype = str(concern.get("type") or "")
+        if ctype not in {"rescue", "defend", "slay", "clear", "avenge"}:
+            return None
+        subject = str(concern.get("subject") or "someone")
+        data: dict[str, Any] = {
+            "count": int(concern.get("count", 1) or 1),
+            "progress": 0,
+        }
+        if concern.get("subject_soul"):
+            data["subject_refs"] = [str(concern["subject_soul"])]
+            data["subject_name"] = subject
+        if concern.get("victim_faction"):
+            data["victim_faction"] = str(concern["victim_faction"])
+        if concern.get("required_tags"):
+            data["required_tags"] = [str(t) for t in concern["required_tags"]]
+        reward = Reward(
+            gold=int(concern.get("reward_gold", 0) or 0),
+            reputation={
+                str(k): int(v) for k, v in (concern.get("reputation") or {}).items()
+            },
+        )
+        return self.add_quest_promise(
+            name=str(concern.get("quest_name") or f"{profile.name}'s plea"),
+            description=str(
+                concern.get("description") or f"{profile.name} pleads about {subject}."
+            ),
+            contact=profile.name,
+            location=self.state.location_label(),
+            objective=Objective(ctype, data),
+            reward=reward,
+            source=f"concern:{profile.name}",
+            tags=["quest", ctype],
+        )
+
     def quest_log_entries(self) -> list[QuestLogEntry]:
         entries: list[QuestLogEntry] = []
         for promise in sorted(
@@ -2483,7 +2909,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                     description=promise.text,
                     contact=promise.giver_npc or promise.source,
                     location=promise.realized_in or promise.location or "unknown",
-                    status="completed" if promise.status == "fulfilled" else "active",
+                    status=_QUEST_LOG_STATUS.get(promise.status, "active"),
                 )
             )
         return entries
@@ -2745,6 +3171,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                 "y": self.state.zone_y,
                 "type": self.state.zone_type,
             },
+            "current_realm": state_view.current_realm_card(self),
             "message": message,
             "reply": reply,
             "npc_profile": self.state.npc_profiles[npc.id].to_dialogue_context(),
@@ -2753,8 +3180,73 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             ),
         }
 
+    def _kill_standing_note(self, npc: Entity) -> str:
+        """A one-line read, for dialogue, of how this NPC's people regard the blood the player
+        has spilled (FACTION_KILL_REPUTATION.md K4): have you butchered their kin (a blood
+        feud?), or struck down those they count as enemies? Reads the kill tally through the
+        NPC's own faction and the relationship graph, so a rebel hails the scourge of the
+        Censor's men while an imperial clerk shrinks from the same record."""
+        tally = self.kills_by_faction()
+        if not tally:
+            return ""
+        ledger = self.state.faction_ledger
+        npc_faction = resolve_faction(npc.tags, npc.kind, ledger, identity=npc.identity)
+        if not npc_faction or npc_faction == "civilian":
+            return (
+                "you are known for spilling innocent blood"
+                if tally.get("civilian", 0) >= 2
+                else ""
+            )
+        own = tally.get(npc_faction, 0)
+        if own >= BLOOD_FEUD_KILLS:
+            return "you have slaughtered our people — a blood feud stands between us"
+        if own > 0:
+            return f"you have killed {own} of our own"
+        enemy_kills = sum(
+            count
+            for fid, count in tally.items()
+            if fid != "civilian"
+            and fid in ledger.factions
+            and ledger.regard(npc_faction, fid) < 0
+        )
+        if enemy_kills >= 2:
+            return "you have struck down those we count as enemies"
+        return ""
+
+    def _dialogue_situation(self, npc: Entity) -> dict[str, Any]:
+        """The situational frame for a conversation (EMERGENT_QUESTS §13 blocker #4): how far the
+        player is, whether the speaker would fight them, and who else is in earshot — so the LLM
+        can have a frightened clerk parley, a zealot spit defiance mid-fight, or someone across a
+        courtyard answer warily, instead of every line sounding like a calm face-to-face chat."""
+        player = self.state.player
+        distance = self.distance(player, npc)
+        adjacent = max(abs(npc.x - player.x), abs(npc.y - player.y)) <= 1
+        others: list[dict[str, str]] = []
+        for entity in self.state.entities.values():
+            if (
+                entity.id in {npc.id, player.id}
+                or entity.kind not in {"npc", "actor"}
+                or not entity.alive
+                or self.distance(npc, entity) > NPC_PERCEPTION_RADIUS
+            ):
+                continue
+            others.append(
+                {
+                    "name": entity.name,
+                    "toward_me": "hostile"
+                    if self.is_hostile_to(entity, npc)
+                    else "not hostile",
+                }
+            )
+        return {
+            "distance_to_player": round(distance, 1),
+            "player_is_adjacent": adjacent,
+            "i_am_hostile_to_the_player": self.is_hostile_to(npc, player),
+            "others_nearby": others[:5],
+        }
+
     def dialogue_context_for_llm(self, npc: Entity, message: str) -> dict[str, Any]:
-        profile = self.state.npc_profiles[npc.id]
+        profile = self.ensure_persona(npc)
         player = self.state.player
         # How the NPC refers to the player: their chosen name if they gave one,
         # otherwise the body they're in (its name, or "a wandering stranger" for the
@@ -2786,6 +3278,11 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         legend = self.legend_words(self.state.player_soul_id)
         if legend:
             player_block["legend"] = legend
+        # How this NPC's people regard the blood you've spilled (K4) — keyed to their faction,
+        # so the same kill record reads as heroism to one and horror to another.
+        blood_note = self._kill_standing_note(npc)
+        if blood_note:
+            player_block["how_you_stand_with_my_people"] = blood_note
         return {
             "npc": profile.to_dialogue_context(),
             "player": player_block,
@@ -2794,7 +3291,9 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                 "depth": self.state.depth,
                 "scenario": self.state.scenario,
                 "region": self.region.name,
+                "current_realm": state_view.current_realm_card(self),
             },
+            "situation": self._dialogue_situation(npc),
             "nearby_objects": self._npc_nearby_objects(npc),
             "relevant_lore": self.promises_for_context(
                 subject=npc.name, tags=npc.tags, limit=5, text_limit=160
@@ -2865,6 +3364,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                 "turn": self.state.turn,
                 "depth": self.state.depth,
                 "scenario": self.state.scenario,
+                "current_realm": state_view.current_realm_card(self),
             },
             "exchange": {"player_said": message, "npc_replied": reply},
         }
@@ -2944,6 +3444,9 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             from .npc_quests import register_heard_quest_item
 
             register_heard_quest_item(self, npc.id)
+        # A voiced plight becomes a quest the moment the player engages it (EMERGENT_QUESTS §4).
+        if profile.concern:
+            self.register_heard_concern(npc.id)
 
         if trade_data is not None and trade_data.get("trade_proposed"):
             trade_error = self._validate_trade_payload(npc, trade_data)

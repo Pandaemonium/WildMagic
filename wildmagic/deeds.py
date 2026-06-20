@@ -28,6 +28,7 @@ from typing import Any
 #: DEED_RULES below; the LLM interpreter (A.2) handles deeds it can't classify by rule.
 DEED_TYPES: tuple[str, ...] = (
     "killed_imperials",
+    "killed_combatant",
     "killed_civilians",
     "spared_enemy",
     "freed_captive",
@@ -57,7 +58,18 @@ PUBLIC_VISIBILITY: frozenset[str] = frozenset({"witnessed", "public", "mythic"})
 #: Deed types that record killing a faction's member — the basis of per-faction kill
 #: accounting (`FACTION_KILL_REPUTATION.md` K2). Each carries a ``victim_faction``. New
 #: kill types (e.g. a generic combatant kill, rolled-faction kills) are added here.
-KILL_DEEDS: frozenset[str] = frozenset({"killed_imperials", "killed_civilians"})
+KILL_DEEDS: frozenset[str] = frozenset(
+    {"killed_imperials", "killed_combatant", "killed_civilians"}
+)
+
+#: Kill deeds whose standing consequences are **relational** (K3): computed at record time
+#: from each faction's stance toward the victim's faction, *overriding* any role-based rule.
+#: Killing a faction's combatant pleases that faction's enemies and angers its friends —
+#: generalizing the hardcoded empire↔resistance reaction to the whole rolled roster. Civilian
+#: killings stay rule-based (the qualitatively different butchery reaction), so they are out.
+RELATIONAL_KILL_DEEDS: frozenset[str] = frozenset(
+    {"killed_imperials", "killed_combatant"}
+)
 
 
 @dataclass
@@ -86,6 +98,10 @@ class Deed:
     #: member died, for per-faction kill accounting (`FACTION_KILL_REPUTATION.md` K1). ``""``
     #: means not a kill, or an unaligned creature (beasts are tally-exempt).
     victim_faction: str = ""
+    #: The **souls** this deed touched (EMERGENT_QUESTS Q0/§5): the freed captive, the slain
+    #: target, the defended townsperson — by stable soul ref, so a specific-person quest
+    #: objective matches the right person across disguise/resurrection, not merely "a civilian".
+    subject_refs: list[str] = field(default_factory=list)
     # Knowledge model (strategy §5.1):
     visibility: str = "secret"
     witnesses: list[str] = field(default_factory=list)  # entity ids that perceived it
@@ -117,6 +133,7 @@ class Deed:
             "place_key": self.place_key,
             "target_tags": list(self.target_tags),
             "victim_faction": self.victim_faction,
+            "subject_refs": list(self.subject_refs),
             "visibility": self.visibility,
             "witnesses": list(self.witnesses),
             "evidence_tags": list(self.evidence_tags),
@@ -144,6 +161,7 @@ class Deed:
             place_key=str(raw.get("place_key", "")),
             target_tags=[str(t) for t in raw.get("target_tags", [])],
             victim_faction=str(raw.get("victim_faction", "")),
+            subject_refs=[str(s) for s in raw.get("subject_refs", [])],
             visibility=str(raw.get("visibility", "secret")),
             witnesses=[str(w) for w in raw.get("witnesses", [])],
             evidence_tags=[str(t) for t in raw.get("evidence_tags", [])],
@@ -324,6 +342,7 @@ class StoryBeat:
 #: How a cluster of same-type deeds reads once compressed into a beat.
 _BEAT_SUMMARIES: dict[str, str] = {
     "killed_imperials": "a campaign of strikes against the Empire",
+    "killed_combatant": "a tally of fighters cut down",
     "killed_civilians": "a trail of slaughter among the helpless",
     "spared_enemy": "a pattern of mercy to the beaten",
     "freed_captive": "a run of jailbreaks and freed captives",

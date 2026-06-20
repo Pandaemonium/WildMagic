@@ -209,6 +209,24 @@ class PromiseReservation:
         )
 
 
+#: The bounded objective vocabulary (EMERGENT_QUESTS §3.1). Each type names the deed(s) that
+#: can satisfy it (see ``quests.OBJECTIVE_DEEDS``); ``fetch`` keeps its trade-based path. New
+#: types are added deliberately, like DEED_TYPES — the matcher must be able to close each one.
+OBJECTIVE_TYPES: frozenset[str] = frozenset(
+    {
+        "fetch",
+        "rescue",
+        "defend",
+        "slay",
+        "clear",
+        "avenge",
+        "visit",
+        "talk",
+        "kill",
+    }
+)
+
+
 @dataclass(frozen=True)
 class Objective:
     type: str
@@ -222,7 +240,7 @@ class Objective:
         if not isinstance(data, dict):
             return None
         objective_type = normalize_id(str(data.get("type") or ""))
-        if objective_type not in {"fetch", "kill", "visit", "talk"}:
+        if objective_type not in OBJECTIVE_TYPES:
             return None
         payload = data.get("data") if isinstance(data.get("data"), dict) else {}
         return cls(type=objective_type, data=dict(payload))
