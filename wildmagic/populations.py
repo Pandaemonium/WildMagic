@@ -213,6 +213,37 @@ CONCERN_TEMPLATES: tuple[ConcernTemplate, ...] = (
 )
 
 
+#: How the role-neutral locals (townsfolk/merchants) lean, by realm role — the *spread* that
+#: makes the opening's witnessed cast land as MIXED reactions (CONTENT_FLESHING_ROADMAP). Words
+#: are from the bonds affinity/aversion vocab: oppressed/downtrodden/rebel warm to a sorcerer who
+#: strikes the Empire; fearful/loyalist recoil. The role-leaning denizens (partisan→rebel,
+#: priest→pious, clerk→loyalist) keep their natural disposition and aren't distributed here.
+_DISPOSITION_SPREAD: dict[str, tuple[tuple[str, ...], tuple[int, ...]]] = {
+    "conquered": (
+        ("oppressed", "downtrodden", "rebel", "fearful", "loyalist"),
+        (4, 3, 2, 3, 1),
+    ),
+    "rival": (("rebel", "oppressed", "fearful"), (4, 2, 1)),
+    "proxy": (("fearful", "loyalist", "downtrodden"), (3, 2, 2)),
+    "founding": (("loyalist", "fearful", "downtrodden"), (3, 2, 1)),
+}
+
+_ROLE_LEANING_ROLES = frozenset({"partisan", "priest", "clerk"})
+
+
+def realm_disposition(realm_role: str, role: str, rng: random.Random) -> str | None:
+    """Distribute a disposition onto a **role-neutral** local (townsfolk/merchant) so a realm's
+    common folk react variedly to a witnessed sorcerer; roles with a natural lean keep it. Drawn
+    from ``_DISPOSITION_SPREAD`` for the realm role; None when nothing distributes."""
+    if role in _ROLE_LEANING_ROLES:
+        return None
+    spread = _DISPOSITION_SPREAD.get(realm_role)
+    if spread is None:
+        return None
+    words, weights = spread
+    return rng.choices(words, weights=weights)[0]
+
+
 def roll_concern(
     role: str, realm_role: str, rng: random.Random, chance: float = 0.5
 ) -> dict[str, object] | None:

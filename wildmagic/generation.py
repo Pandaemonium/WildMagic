@@ -54,7 +54,13 @@ from .props import (
 )
 from .regions import region_for_zone
 from .worldgen import imperial_density_for_role, realm_card_for_zone
-from .populations import Denizen, denizen_name, denizen_plan, roll_concern
+from .populations import (
+    Denizen,
+    denizen_name,
+    denizen_plan,
+    realm_disposition,
+    roll_concern,
+)
 
 
 @dataclass(frozen=True)
@@ -2642,7 +2648,8 @@ class _GenerationMixin:
             spot = self._random_open_ground_tile(zone_rng, occupied)
             if spot is None:
                 break
-            entity = self._spawn_denizen(zone_rng, denizen, identity, spot)
+            disposition = realm_disposition(placement.role, denizen.role, zone_rng)
+            entity = self._spawn_denizen(zone_rng, denizen, identity, spot, disposition)
             occupied.add(spot)
             # Locals carry plights that become quests when engaged (Tier 1B).
             if not denizen.combatant and "imperial" not in identity:
@@ -2667,10 +2674,12 @@ class _GenerationMixin:
         denizen: Denizen,
         identity: list[str],
         spot: tuple[int, int],
+        disposition: str | None = None,
     ) -> Entity:
         """Spawn one realm denizen, **neutral** with a typed ``identity``/``role`` — combatants
         through ``spawn_actor`` (combat AI, talkable lazily), non-combatants through ``spawn_npc``
-        (a persona that flees). Hostility toward the player is derived later, never set here."""
+        (a persona that flees). A distributed ``disposition`` rides in as a flavor trait so a
+        realm's common folk react variedly to the player. Hostility is derived later, not set."""
         name = denizen_name(denizen, zone_rng)
         x, y = spot
         home = "the Empire" if "imperial" in identity else "these realms"
@@ -2696,6 +2705,7 @@ class _GenerationMixin:
             y,
             role=denizen.role,
             backstory=f"a {denizen.role} of {home}",
+            traits=[disposition] if disposition else None,
             tags=set(denizen.tags),
             faction="neutral",
             identity=list(identity),

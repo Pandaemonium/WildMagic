@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import random
 
+from wildmagic.bonds import _TRAIT_AFFINITY, _TRAIT_AVERSION
 from wildmagic.engine import GameEngine
-from wildmagic.populations import denizen_plan
+from wildmagic.populations import denizen_plan, realm_disposition
 
 
 def test_denizen_plan_conquered_mixes_occupiers_and_locals() -> None:
@@ -54,3 +55,20 @@ def test_conquered_zone_populates_neutral_occupiers_and_locals() -> None:
     # Soldiers are combatant actors; townsfolk/merchants are talkable personas.
     assert any(e.kind == "actor" and e.role in {"soldier", "officer"} for e in people)
     assert any(e.kind == "npc" and e.role in {"townsfolk", "merchant"} for e in people)
+
+
+def test_disposition_spread_gives_occupied_locals_mixed_leanings() -> None:
+    rng = random.Random(0)
+    leanings = [realm_disposition("conquered", "townsfolk", rng) for _ in range(200)]
+    affinity = sum(1 for d in leanings if d in _TRAIT_AFFINITY)
+    aversion = sum(1 for d in leanings if d in _TRAIT_AVERSION)
+    # Mixed reactions: some warm to a sorcerer who strikes the Empire, some recoil...
+    assert affinity > 0 and aversion > 0
+    # ...but the occupied mostly sympathize.
+    assert affinity > aversion
+
+
+def test_role_leaning_locals_keep_their_natural_disposition() -> None:
+    # Partisans (rebel) and priests (pious) aren't distributed — they keep their lean.
+    assert realm_disposition("conquered", "partisan", random.Random(1)) is None
+    assert realm_disposition("conquered", "priest", random.Random(1)) is None
