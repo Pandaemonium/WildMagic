@@ -344,6 +344,8 @@ _QUEST_LOG_STATUS: dict[str, str] = {
     "changed": "transformed",
     "failed": "failed",
     "cold": "cold",
+    "lead": "lead",
+    "declined": "declined",
 }
 
 
@@ -1457,6 +1459,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             # run_world_tick, so an ad-hoc reckoning can't double-spend its defenses).
             self._simulate_empire_pressure()
             self._simulate_backlash()
+            self._simulate_faction_relations(self.state.ticked_through_day)
             self._simulate_bonds()
             fired = True
         return fired
@@ -1739,6 +1742,8 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
                 self._spawn_backlash_crackdown()
             elif kind == "resistance":
                 self._spawn_backlash_resistance()
+            elif kind == "feud_hunter":
+                self._spawn_backlash_feud_hunter(str(event.get("faction", "")))
 
     def _spawn_backlash_crackdown(self) -> None:
         tile = self._find_open_prop_tile(min_radius=3, max_radius=8)
@@ -1784,6 +1789,88 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         self.state.add_message(
             "A sympathizer, hearing of your deeds, takes up arms at your side."
         )
+
+    def _spawn_backlash_feud_hunter(self, faction_id: str) -> None:
+        """Realize a blood-feud hunter (Tier 2A): a faction you've slaughtered enough of sends
+        a sworn killer after you — attributed to *that* faction, so the right people come."""
+        tile = self._find_open_prop_tile(min_radius=3, max_radius=8)
+        if tile is None:
+            return
+        faction = self.state.faction_ledger.get(faction_id)
+        name = f"{faction.name} hunter" if faction else "a sworn hunter"
+        self.spawn_actor(
+            name,
+            "h",
+            tile[0],
+            tile[1],
+            14,
+            5,
+            1,
+            "enemy",
+            "melee",
+            tags={"human", "soldier", "backlash"},
+            role="soldier",
+            identity=[faction_id] if faction_id else None,
+        )
+        whom = faction.name if faction else "a faction you have wronged"
+        self.state.add_message(
+            f"A hunter sent by {whom} has tracked you down — there is a blood feud between you."
+        )
+
+    def _simulate_faction_relations(self, day: int | None = None) -> None:
+        """The world moves between your visits (Tier 2A): a faction you hold a **blood feud**
+        with spends to hunt you, and factions at **open war** strike each other off-screen,
+        surfaced as rumors — so 'who you kill reshapes the board' is felt, not just a number."""
+        state = self.state
+        day = day if day is not None else state.ticked_through_day
+        rng = random.Random(stable_seed(state.rng_seed, "faction_relations", day))
+        for fid in sorted(self.feuding_factions()):
+            if len(state.pending_backlash) >= MAX_PENDING_BACKLASH:
+                break
+            if any(
+                ev.get("kind") == "feud_hunter" and ev.get("faction") == fid
+                for ev in state.pending_backlash
+            ):
+                continue
+            state.pending_backlash.append({"kind": "feud_hunter", "faction": fid})
+        pairs = self._warring_faction_pairs()
+        if pairs and rng.random() < 0.6:
+            a, b = pairs[rng.randrange(len(pairs))]
+            self._record_faction_war_rumor(a, b)
+
+    def _warring_faction_pairs(self) -> list[tuple[str, str]]:
+        ledger = self.state.faction_ledger
+        ids = sorted(ledger.factions)
+        return [
+            (a, b)
+            for i, a in enumerate(ids)
+            for b in ids[i + 1 :]
+            if ledger.are_hostile(a, b)
+        ]
+
+    def _record_faction_war_rumor(self, a: str, b: str) -> None:
+        ledger = self.state.faction_ledger
+        name_a = ledger.get(a).name if ledger.get(a) else a
+        name_b = ledger.get(b).name if ledger.get(b) else b
+        text = (
+            f"Word on the road: {name_a} and {name_b} have come to blows again — "
+            "a raid, a skirmish, a burned outpost."
+        )
+        self.state.promises.append(
+            WorldPromise(
+                id=f"warrumor_{a}_{b}_{self.state.ticked_through_day}",
+                kind="rumor",
+                subject=f"{a} vs {b}",
+                text=text,
+                tags=["rumor", "war"],
+                source="simulator",
+                source_turn=self.state.turn,
+                origin_zone=(self.state.zone_x, self.state.zone_y),
+                salience=2,
+                confidence=0.6,
+            )
+        )
+        self.state.add_message(text)
 
     def _render_deed_consequences(self) -> None:
         """Phase E — the world shows it remembers. For each kind of public deed you did in
@@ -1894,6 +1981,23 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         threat = state.faction_ledger.get("empire")
         threat_level = threat.standing_of("imperial_threat") if threat else 0.0
         bounty = max(1, int(round(threat_level * 500)))
+        # Escalation tiers + a legend-flavored charge (Tier 3B legibility): the poster reads
+        # differently as you become more notorious and for *what* you are known.
+        if threat_level >= 3:
+            headline = "WANTED DEAD OR ALIVE, by order of the Emperor"
+        elif threat_level >= 1:
+            headline = "WANTED"
+        else:
+            headline = "PERSON OF INTEREST"
+        legend = self.legend_words(state.player_soul_id, 1)
+        charge = {
+            "defiant": "for sedition against the Grand Empire",
+            "butcher": "for the murder of the Emperor's subjects",
+            "uncanny": "for forbidden and unnatural sorcery",
+            "destroyer": "for wanton destruction of imperial property",
+            "liberator": "for inciting the unfree to revolt",
+            "protector": "for armed interference with lawful patrols",
+        }.get(legend[0] if legend else "", "for the working of unlicensed wild magic")
         entity = Entity(
             id=self.next_entity_id("prop"),
             name="Imperial wanted poster",
@@ -1904,9 +2008,9 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             blocks=False,
             tags={"wanted_poster", "empire", "paper", "flammable"},
             description=(
-                "A hastily nailed Imperial notice. A crude likeness glares above the "
-                f"word WANTED, and a bounty of {bounty} crowns that climbs with every "
-                "patrol you cut down."
+                f"A nailed Imperial notice: a crude likeness glares above the words "
+                f"{headline}, {charge}. A bounty of {bounty} crowns climbs with every "
+                "patrol you cut down. — the Office of the Censorate."
             ),
             hp=4,
             max_hp=4,
@@ -2513,9 +2617,31 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         """
         if actor.id == other.id or other.hp <= 0:
             return False
+        # A spared combatant has yielded to the player. This is deliberately player-relative:
+        # it ends the immediate grudge without rewriting broader faction wars.
+        if (
+            "spared" in actor.tags
+            and other.id == self.state.player_id
+            and actor.faction != "enemy"
+        ):
+            return False
         # 1. A role-typed non-combatant does not initiate combat, whatever their allegiance.
         if (actor.role or "").lower() in NONCOMBATANT_ROLES:
             return False
+        # 1b. Derived hostility toward the *player* (the exposure model,
+        # CONTENT_FLESHING_ROADMAP) — politically situated people spawn neutral and turn on the
+        # player only through what they witness or what you've done, never a spawn flag.
+        if other.id == self.state.player_id:
+            # Once the Empire has seen you work wild magic, its soldiers hunt you on sight
+            # (its clerks, non-combatants, were already excluded above — they fear and report).
+            if (
+                self.state.flags.get("wild_magic_exposed")
+                and self._faction_of(actor) == "empire"
+            ):
+                return True
+            # A faction you've slaughtered enough of swears a blood feud and comes for you (K5).
+            if self._faction_of(actor) in self.feuding_factions():
+                return True
         # 2. Player-relative tactical baseline.
         if actor.faction == "enemy" and other.faction in {"player", "ally"}:
             return True
@@ -2525,6 +2651,105 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         if self._factions_at_war(actor, other):
             return True
         return self._declared_conflict(actor, other)
+
+    def _can_spare(self, entity: Entity) -> bool:
+        """Whether the player has enough leverage to spare this enemy instead of killing them."""
+        if (
+            entity.id == self.state.player_id
+            or entity.kind not in {"actor", "npc"}
+            or not entity.alive
+            or character_is_noncombatant(entity)
+            or "spared" in entity.tags
+        ):
+            return False
+        if not self.is_hostile_to(entity, self.state.player):
+            return False
+        beaten = entity.hp <= max(1, entity.max_hp // 3)
+        disabled = bool(
+            {"frozen", "stunned", "rooted", "webbed", "frightened"}
+            & set(entity.statuses)
+        )
+        return beaten or disabled
+
+    def _spare_target(self, selector: str = "") -> Entity | None:
+        """Pick the mercy target: named visible target, marked target, then adjacent foe."""
+        player = self.state.player
+        selector = selector.strip().lower()
+        candidates = [
+            entity
+            for entity in self.state.entities.values()
+            if self._can_spare(entity) and self.is_visible(entity.x, entity.y)
+        ]
+        if selector:
+            matches = [
+                entity
+                for entity in candidates
+                if selector in entity.name.lower() or selector == entity.id.lower()
+            ]
+            return (
+                min(
+                    matches,
+                    key=lambda entity: (self.distance(player, entity), entity.id),
+                )
+                if matches
+                else None
+            )
+        marked = self.selected_target_entity()
+        if marked is not None and marked in candidates:
+            return marked
+        adjacent = [
+            entity
+            for entity in candidates
+            if max(abs(entity.x - player.x), abs(entity.y - player.y)) <= 1
+        ]
+        return (
+            min(adjacent, key=lambda entity: (self.distance(player, entity), entity.id))
+            if adjacent
+            else None
+        )
+
+    def spare_enemy(self, selector: str = "") -> bool:
+        """Spare a beaten hostile combatant, making mercy a first-class deed.
+
+        This is not a charm or surrender spell: the target must already be hostile and either
+        badly hurt or disabled. Sparing records the existing `spared_enemy` deed, removes the
+        player-relative tactical grudge, and costs a turn.
+        """
+        if self.state.game_over:
+            return False
+        target = self._spare_target(selector)
+        if target is None:
+            self.state.add_message(
+                "No beaten hostile is ready to yield. Wear one down, disable them, or mark a target."
+            )
+            return False
+        target.tags.add("spared")
+        target.tags.discard("blood_feud_hunter")
+        target.faction = "neutral"
+        for status in ("berserk", "frightened"):
+            target.statuses.pop(status, None)
+            target.status_display.pop(status, None)
+            target.status_expiry_text.pop(status, None)
+        target_faction = self._faction_of(target)
+        tags = ["combatant"]
+        if target_faction and target_faction != "civilian":
+            tags.append(target_faction)
+        self.record_deed(
+            "spared_enemy",
+            magnitude=0.2,
+            summary=f"spared {target.name} when they were beaten",
+            at=(target.x, target.y),
+            target_tags=tags,
+            victim_faction=target_faction,
+            subject_refs=[target.soul_id] if target.soul_id else None,
+            evidence_tags=["survivor_testimony"],
+        )
+        profile = self.state.npc_profiles.get(target.id)
+        if profile is not None:
+            profile.remember("You had me beaten and let me live.")
+        self.state.add_message(f"You lower your hand and spare {target.name}.")
+        self.finish_player_turn()
+        return True
 
     def _factions_at_war(self, actor: Entity, other: Entity) -> bool:
         """Whether ``actor`` and ``other`` belong to two distinct factions the ledger holds at
@@ -2541,6 +2766,58 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         if not actor_faction or not other_faction or actor_faction == other_faction:
             return False
         return ledger.are_hostile(actor_faction, other_faction)
+
+    def _faction_of(self, entity: Entity) -> str:
+        """The faction id this character belongs to (typed identity first, then tags/kind)."""
+        return resolve_faction(
+            entity.tags,
+            entity.kind,
+            self.state.faction_ledger,
+            identity=entity.identity,
+        )
+
+    def _provoke(self, entity: Entity, source: Entity | None) -> None:
+        """A neutral **combatant** struck by the player (or their agents) turns hostile and
+        fights back — the exposure model's provocation path. Non-combatants are left to flee
+        (they never draw), and anyone already aligned is unchanged."""
+        if entity.faction != "neutral" or entity.id == self.state.player_id:
+            return
+        if not self._deed_attributed_to_player(source):
+            return
+        if character_is_noncombatant(entity):
+            return
+        entity.faction = "enemy"
+
+    def _expose_wild_magic_to_witnesses(self) -> None:
+        """Working wild magic in view of imperials reveals you as an unlicensed sorcerer — the
+        exposure model (CONTENT_FLESHING_ROADMAP). Being *seen casting* is the trigger: the
+        Empire opens your file (a one-time ``witnessed_forbidden_magic`` deed → imperial_threat)
+        and, via the ``wild_magic_exposed`` flag, its soldiers thereafter hunt you on sight
+        (``is_hostile_to``). Imperial **non-combatants** (clerks) only fear and carry word — they
+        never draw. Non-imperial witnesses don't care that you cast (the asymmetry §decided)."""
+        player = self.state.player
+        witnesses = self._deed_witnesses(
+            player.x, player.y, exclude={self.state.player_id}
+        )
+        imperial = [w for w in witnesses if self._faction_of(w) == "empire"]
+        if not imperial:
+            return
+        first_time = not self.state.flags.get("wild_magic_exposed")
+        self.state.flags["wild_magic_exposed"] = True
+        for witness in imperial:
+            if character_is_noncombatant(witness) and "afraid" not in witness.traits:
+                witness.traits.append("afraid")  # they recoil and report, not fight
+        if first_time:
+            self.record_deed(
+                "witnessed_forbidden_magic",
+                magnitude=0.3,
+                summary="was seen working forbidden wild magic",
+                target_tags=["empire"],
+                evidence_tags=["witness_report"],
+            )
+            self.state.add_message(
+                "Imperial eyes are on you — they have seen what you are."
+            )
 
     def _declared_conflict(self, actor: Entity, other: Entity) -> bool:
         """Whether `actor` and `other` are bound by a standing FACTION_HOSTILITIES
@@ -2819,6 +3096,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         reward: Reward | None = None,
         source: str | None = None,
         tags: list[str] | None = None,
+        status: str = "unverified",
     ) -> WorldPromise:
         promise_id = f"quest_{normalize_id(contact)}_{normalize_id(name)}"
         existing = next(
@@ -2841,7 +3119,7 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             objective=objective,
             reward=reward,
             giver_npc=contact,
-            status="unverified",
+            status=status,
             location=location,
         )
         self.add_promises([promise])
@@ -2888,7 +3166,45 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             reward=reward,
             source=f"concern:{profile.name}",
             tags=["quest", ctype],
+            # A heard plight is a quiet *lead* (EMERGENT_QUESTS §7), not yet a committed quest —
+            # the player can `accept` it into the active log or `decline` it. Still deed-closable:
+            # solving it without accepting lets the giver react later.
+            status="lead",
         )
+
+    def accept_quest(self, selector: str | int) -> WorldPromise | None:
+        """Promote a quiet lead to a committed, active quest (EMERGENT_QUESTS §7)."""
+        promise = self._find_quest_promise(selector)
+        if promise is not None and promise.status in {"lead", "unverified"}:
+            promise.status = "active"
+            self.state.add_message(f"You take up the task: {promise.subject}.")
+            return promise
+        return None
+
+    def decline_quest(self, selector: str | int) -> WorldPromise | None:
+        """Decline a lead — a real stance, not a delete: it leaves the active log, but the world
+        fact stands and the deed matcher can still notice if you solve it anyway."""
+        promise = self._find_quest_promise(selector)
+        if promise is not None and promise.status in {"lead", "unverified", "active"}:
+            promise.status = "declined"
+            self.state.add_message(f"You turn away from: {promise.subject}.")
+            return promise
+        return None
+
+    def _find_quest_promise(self, selector: str | int) -> WorldPromise | None:
+        """Resolve a quest by 1-based index into the quest log, or by a name fragment."""
+        quests = [p for p in self.state.promises if p.kind == "quest"]
+        if isinstance(selector, int) or (
+            isinstance(selector, str) and selector.strip().isdigit()
+        ):
+            index = int(selector) - 1
+            entries = self.quest_log_entries()
+            if 0 <= index < len(entries):
+                target_id = entries[index].id
+                return next((p for p in quests if p.id == target_id), None)
+            return None
+        needle = str(selector).strip().lower()
+        return next((p for p in quests if needle in p.subject.lower()), None)
 
     def quest_log_entries(self) -> list[QuestLogEntry]:
         entries: list[QuestLogEntry] = []
@@ -3245,6 +3561,24 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             "others_nearby": others[:5],
         }
 
+    def _faction_standing_note(self, npc: Entity) -> str:
+        """How this NPC's *faction* regards the player right now (Tier 2C — relationship-aware
+        dialogue): grateful, fearful, or marking you a threat, read from the faction's standing
+        toward you. Pairs with ``_kill_standing_note`` (who you've killed) so an NPC speaks to
+        your whole record with their people, not a blank slate."""
+        faction = self.state.faction_ledger.get(self._faction_of(npc))
+        if faction is None:
+            return ""
+        standing = faction.standing
+        if standing.get("gratitude", 0.0) >= 1.0:
+            return f"{faction.name} are grateful for what you've done"
+        if (
+            standing.get("imperial_threat", 0.0) >= 1.0
+            or standing.get("fear", 0.0) >= 1.0
+        ):
+            return f"{faction.name} count you a dangerous threat"
+        return ""
+
     def dialogue_context_for_llm(self, npc: Entity, message: str) -> dict[str, Any]:
         profile = self.ensure_persona(npc)
         player = self.state.player
@@ -3283,6 +3617,10 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         blood_note = self._kill_standing_note(npc)
         if blood_note:
             player_block["how_you_stand_with_my_people"] = blood_note
+        # How this NPC's faction regards you overall (Tier 2C) — grateful, fearful, threatened.
+        standing_note = self._faction_standing_note(npc)
+        if standing_note:
+            player_block["my_people_regard_you_as"] = standing_note
         return {
             "npc": profile.to_dialogue_context(),
             "player": player_block,

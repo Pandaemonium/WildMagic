@@ -152,6 +152,115 @@ REALM_TEMPLATES: dict[str, RealmTemplate] = {
     )
 }
 
+#: Per-realm voice line (Tier 3A — texture), from the WORLDBUILDING.md "Naming & Voice"
+#: handles. Injected into dialogue + resolver context so a Brall scene reads ale-loud and a
+#: Stalnaz one elegant, without per-realm Region archetypes.
+REALM_VOICES: dict[str, str] = {
+    "vigovia": "clipped, courteous, passive-voice, file-numbered — beards and ledgers.",
+    "stalnaz": "elegant, allusive, musical — speaks in resonance, light, and patient refinement.",
+    "brall": "warm, boastful-about-others, escalating — ale-loud and story-drunk.",
+    "ryolan": "formal, honor-weighted, blunt — oaths and first-blood.",
+    "vint": "quick, sly, rumor-threaded — everything is who-said-what.",
+    "threen": "literary, mannered, performative-polite over a swallowed truth.",
+}
+
+
+def realm_voice_line(realm_id: str) -> str:
+    """The voice handle for a realm's people (Tier 3A); empty for the unaffiliated."""
+    return REALM_VOICES.get(realm_id, "")
+
+
+# --- The smaller realms & peoples (Tier 4A — periphery pass) -----------------------------
+# Not conquered and not the rival: independent peoples living in the Empire's gravity (they ban
+# wild magic and let imperial soldiers cross). Each is a faction with its own tradition, voice,
+# and people, placed in the unowned periphery of the map — lighter than the core kingdoms.
+MINOR_REALM_TEMPLATES: tuple[RealmTemplate, ...] = (
+    RealmTemplate(
+        "monteary",
+        "Monteary",
+        "M",
+        "The horse-realm — breeds the finest horses anywhere; quiet horse-singers.",
+        "horse-song",
+        ("horses", "geldings", "horse-singing"),
+        frozenset({"independent"}),
+        "monteary",
+    ),
+    RealmTemplate(
+        "ontria",
+        "Ontria",
+        "Y",
+        "Tribes of living yoghurt-cultures; eating a clan's culture grants powers.",
+        "yoghurt-rite",
+        ("yoghurt", "tribes", "ancestors"),
+        frozenset({"independent"}),
+        "ontria",
+    ),
+    RealmTemplate(
+        "gontark",
+        "Gontark",
+        "G",
+        "The goatfolk — horns and goat's eyes, feared for vicious curses.",
+        "curse",
+        ("goatfolk", "curses", "feared"),
+        frozenset({"independent"}),
+        "gontark",
+    ),
+    RealmTemplate(
+        "parn",
+        "the Parn",
+        "P",
+        "Nomadic desert caravans, tattooed, devoted to music — the living sound-magic.",
+        "ink-and-song",
+        ("nomads", "tattoo", "music", "desert"),
+        frozenset({"independent"}),
+        "parn",
+    ),
+    RealmTemplate(
+        "birdfolk",
+        "the Birdfolk",
+        "D",
+        "Avian people in a riot of plumage; good-natured, story-hungry, sincere.",
+        "song",
+        ("avian", "stories", "high-places"),
+        frozenset({"independent"}),
+        "birdfolk",
+    ),
+    RealmTemplate(
+        "merfolk",
+        "the Merfolk",
+        "F",
+        "An ocean people, xenophobic, who hold themselves above land-folk.",
+        "tide-rite",
+        ("ocean", "xenophobic", "proud"),
+        frozenset({"independent"}),
+        "merfolk",
+    ),
+    RealmTemplate(
+        "rentacosta",
+        "Rentacosta",
+        "C",
+        "A coastal free city of sail and seaborne commerce; worldly, multilingual.",
+        "maritime",
+        ("coastal", "traders", "multilingual", "neutral-ground"),
+        frozenset({"independent"}),
+        "rentacosta",
+    ),
+)
+MINOR_REALM_IDS: tuple[str, ...] = tuple(t.id for t in MINOR_REALM_TEMPLATES)
+REALM_TEMPLATES.update({t.id: t for t in MINOR_REALM_TEMPLATES})
+REALM_VOICES.update(
+    {
+        "monteary": "plain, horse-proud, close-mouthed with outsiders.",
+        "ontria": "ancestral, communal, ceremonious — the clan speaks through the one.",
+        "gontark": "wary, blunt, not-to-be-provoked — a curse held behind the teeth.",
+        "parn": "sung, rhythmic, road-worn — ink and music.",
+        "birdfolk": "bright, generous, story-hungry — sincere, not sly.",
+        "merfolk": "cold, superior, sparing.",
+        "rentacosta": "code-switching, easygoing, salt-worn.",
+    }
+)
+
+
 #: The four old kingdoms, in canonical order (one becomes the rival, three conquered).
 OLD_KINGDOM_IDS: tuple[str, ...] = ("stalnaz", "brall", "ryolan", "vint")
 
@@ -169,6 +278,13 @@ RULER_TITLES: dict[str, str] = {
     "ryolan": "the King of Ryolan",
     "vint": "the Vintan Assembly",
     "threen": "the Doge of Threen",
+    "monteary": "the Horse-Lords of Monteary",
+    "ontria": "the Shamans of Ontria",
+    "gontark": "the Elders of Gontark",
+    "parn": "the Caravan-Mothers of the Parn",
+    "birdfolk": "the Roost-Speakers",
+    "merfolk": "the Deep Court",
+    "rentacosta": "the Sea-Council of Rentacosta",
 }
 
 _RULER_DISPOSITIONS: tuple[str, ...] = (
@@ -186,6 +302,7 @@ ROLE_TO_KIND: dict[str, str] = {
     "conquered": "conquered",
     "proxy": "proxy",
     "rival": "rival",
+    "independent": "independent",
 }
 
 _ROLE_MOOD: dict[str, str] = {
@@ -193,6 +310,7 @@ _ROLE_MOOD: dict[str, str] = {
     "conquered": "occupied",
     "proxy": "deferent",
     "rival": "defiant",
+    "independent": "deferent",
 }
 
 #: role → how strongly the Grand Empire holds a zone (feeds zone_type + the imperial spawn
@@ -202,6 +320,7 @@ _ROLE_DENSITY: dict[str, float] = {
     "conquered": 0.7,
     "proxy": 0.55,
     "rival": 0.1,
+    "independent": 0.3,
 }
 
 
@@ -406,7 +525,7 @@ def realm_card_for_zone(world: WorldMap, zx: int, zy: int) -> dict[str, Any]:
         "role": placement.role,
         "faction_id": placement.faction_id,
         "tradition": template.tradition if template else "",
-        "voice": template.voice if template else "",
+        "voice": realm_voice_line(placement.realm_id),
         "tags": list(template.character_tags) if template else [],
         "ruler": placement.ruler.to_dict(),
     }
@@ -466,6 +585,34 @@ def roll_world(seed: int | None) -> WorldMap:
     capital_zone = _offset_cell(_block_cells(_CAPITAL_POS)[0], transform)
     bounds = _WORLD_BOUNDS
 
+    # The smaller realms/peoples (Tier 4A): one peripheral zone each, in the unowned cells
+    # farthest from the capital (the edges of the known world), so the bloc stays central.
+    min_x, min_y, max_x, max_y = bounds
+    unowned = [
+        (x, y)
+        for x in range(min_x, max_x + 1)
+        for y in range(min_y, max_y + 1)
+        if (x, y) not in cell_to_realm and (x, y) != capital_zone
+    ]
+    unowned.sort(
+        key=lambda c: (
+            -(abs(c[0] - capital_zone[0]) + abs(c[1] - capital_zone[1])),
+            c,
+        )
+    )
+    minors = list(MINOR_REALM_IDS)
+    rng.shuffle(minors)
+    for realm_id, cell in zip(minors, unowned):
+        placements[realm_id] = RealmPlacement(
+            realm_id=realm_id,
+            role="independent",
+            faction_id=realm_id,
+            cells=frozenset({cell}),
+            is_capital_seat=False,
+            ruler=_roll_ruler(realm_id, rng),
+        )
+        cell_to_realm[cell] = realm_id
+
     return WorldMap(
         rival_realm_id=rival_id,
         capital_zone=capital_zone,
@@ -497,10 +644,19 @@ def scenario_uses_world_map(scenario: str) -> bool:
 def start_zone_for_scenario(world: WorldMap, scenario: str) -> Cell:
     """Deterministic overworld start coordinate for a scenario.
 
-    The four current start hubs are placed in distinct old kingdoms; ``frontier`` starts
-    in an unowned central wild zone on the survey board, not at (0,0).
+    The four current start hubs are placed in distinct old kingdoms; ``frontier`` opens the run
+    in **occupied territory** — a conquered realm's marches, where the opening occupation fork
+    is staged (CONTENT_FLESHING_ROADMAP, decided) — not in empty wilds.
     """
     if scenario == "frontier":
+        for placement in sorted(
+            (pl for pl in world.placements.values() if pl.role == "conquered"),
+            key=lambda pl: pl.realm_id,
+        ):
+            for cell in sorted(placement.cells):
+                if cell != world.capital_zone and cell != (0, 0):
+                    return cell
+        # Fallback (no conquered realm rolled): an unowned central wild zone.
         for candidate in ((0, -1), (-1, 0), (1, 0), (0, 1)):
             if world.contains(*candidate) and world.realm_at(*candidate) is None:
                 return candidate
@@ -561,6 +717,12 @@ def _seed_world_relationships(ledger: FactionLedger, world: WorldMap) -> None:
         ledger.set_relationship(empire, rid, "hostile", mutual=True)
         ledger.set_relationship(rebellion, rid, "friendly", mutual=True)
     ledger.set_relationship(empire, rebellion, "hostile", mutual=True)
+    # The smaller realms live in the Empire's gravity (Tier 4A): they ban wild magic and let
+    # imperial soldiers cross, so the Empire is content (friendly) while they stay warily
+    # deferent — not occupied, not free. Peer feeling among them is left emergent.
+    for iid in by_role.get("independent", []):
+        ledger.set_relationship(empire, iid, "friendly")
+        ledger.set_relationship(iid, empire, "wary")
 
 
 def seed_factions_from_world(world: WorldMap) -> FactionLedger:

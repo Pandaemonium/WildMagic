@@ -358,6 +358,14 @@ def test_core_prompt_keeps_universals_and_drops_specialists() -> None:
     assert "{supported_statuses}" not in core
 
 
+def test_core_prompt_steers_curse_costs_away_from_generic_wild_debt() -> None:
+    core = cap.CORE_PROMPT
+    assert "Do not default to Wild Debt" in core
+    assert "Use Wild Debt only when debt is the point" in core
+    assert "Ember Tongue" in core
+    assert "Fire Debt" not in core
+
+
 # --- Full assembly ----------------------------------------------------------------------
 
 

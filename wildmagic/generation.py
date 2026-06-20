@@ -54,6 +54,15 @@ from .props import (
 )
 from .regions import region_for_zone
 from .worldgen import imperial_density_for_role, realm_card_for_zone
+from .populations import (
+    Denizen,
+    denizen_name,
+    denizen_plan,
+    realm_good,
+    realm_wares,
+    realm_disposition,
+    roll_concern,
+)
 
 
 @dataclass(frozen=True)
@@ -1952,6 +1961,19 @@ class _GenerationMixin:
         state.add_message(
             "Walk to the edge of the land to cross into the next stretch of it."
         )
+        # Stage the opening occupation fork in the start zone itself, now that the player
+        # exists (the in-zone populate pass ran before the body was placed).
+        placement = (
+            state.world_map.placement_at(state.zone_x, state.zone_y)
+            if state.world_map is not None
+            else None
+        )
+        if placement is not None and placement.role == "conquered":
+            occupied = {(e.x, e.y) for e in state.entities.values()}
+            scene_rng = random.Random(
+                stable_seed(state.rng_seed, "opening_scene", state.zone_x, state.zone_y)
+            )
+            self._stage_opening_occupation_scene(scene_rng, occupied, placement)
         self.update_fov()
 
     def _imperial_density(self, zx: int, zy: int) -> float:
@@ -2538,6 +2560,45 @@ class _GenerationMixin:
             else set()
         )
 
+        # When the run has a rolled political map and this zone belongs to a realm, populate it
+        # with that realm's *people* — politically situated, neutral by default, hostility
+        # derived (CONTENT_FLESHING_ROADMAP Tier 1A). Unowned wilds / non-world scenarios keep
+        # the legacy hostile-on-sight inhabitants.
+        placement = (
+            state.world_map.placement_at(state.zone_x, state.zone_y)
+            if getattr(state, "world_map", None) is not None
+            else None
+        )
+        if placement is not None:
+            self._populate_realm_denizens(zone_rng, buildings, occupied, placement)
+        else:
+            self._populate_wild_inhabitants(
+                zone_rng, buildings, occupied, imperial_density
+            )
+
+        for _ in range(zone_rng.randint(0, 2)):
+            spot = self._random_open_ground_tile(zone_rng, occupied)
+            if spot is None:
+                break
+            name, char, item_type = zone_rng.choice(
+                [
+                    ("mana crystal", "!", "mana crystal"),
+                    ("blood moss", ",", "blood moss"),
+                    ("bone charm", "?", "bone charm"),
+                ]
+            )
+            self.spawn_item(name, char, spot[0], spot[1], item_type)
+            occupied.add(spot)
+
+    def _populate_wild_inhabitants(
+        self,
+        zone_rng: random.Random,
+        buildings: list[dict[str, Any]],
+        occupied: set[tuple[int, int]],
+        imperial_density: float,
+    ) -> None:
+        """The legacy inhabitant pass for unowned wilds and non-world scenarios: hostile legion
+        + region creatures spawned enemy-on-sight."""
         for building in buildings:
             room: Room = building["room"]
             if building["kind"] == "imperial":
@@ -2573,19 +2634,237 @@ class _GenerationMixin:
             self._spawn_from_template(zone_rng.choice(roster), spot[0], spot[1])
             occupied.add(spot)
 
-        for _ in range(zone_rng.randint(0, 2)):
+    def _populate_realm_denizens(
+        self,
+        zone_rng: random.Random,
+        buildings: list[dict[str, Any]],
+        occupied: set[tuple[int, int]],
+        placement: Any,
+    ) -> None:
+        """Populate a realm-owned zone with its people (Tier 1A): a light wild presence from
+        non-imperial structures, then the realm's denizens (neutral, identity-typed), then a
+        touch of wild pressure. Settled country is calmer than the open wilds."""
+        # The opening fork (CONTENT_FLESHING_ROADMAP, decided): the first time the player steps
+        # into occupied territory, imperial soldiers are menacing a local — defend them and
+        # reveal yourself, or keep your head down.
+        if placement.role == "conquered":
+            self._stage_opening_occupation_scene(zone_rng, occupied, placement)
+        for building in buildings:
+            if building["kind"] in {"imperial", "promise"}:
+                continue
+            if zone_rng.random() < 0.35:
+                spot = self._random_open_tile_in_room(building["room"])
+                if spot not in occupied:
+                    self._spawn_from_template(
+                        zone_rng.choice(list(self.region.enemy_templates)),
+                        spot[0],
+                        spot[1],
+                    )
+                    occupied.add(spot)
+
+        for denizen, identity in denizen_plan(
+            placement.role, placement.realm_id, zone_rng
+        ):
             spot = self._random_open_ground_tile(zone_rng, occupied)
             if spot is None:
                 break
-            name, char, item_type = zone_rng.choice(
-                [
-                    ("mana crystal", "!", "mana crystal"),
-                    ("blood moss", ",", "blood moss"),
-                    ("bone charm", "?", "bone charm"),
-                ]
-            )
-            self.spawn_item(name, char, spot[0], spot[1], item_type)
+            disposition = realm_disposition(placement.role, denizen.role, zone_rng)
+            entity = self._spawn_denizen(zone_rng, denizen, identity, spot, disposition)
             occupied.add(spot)
+            # Locals carry plights that become quests when engaged (Tier 1B).
+            if not denizen.combatant and "imperial" not in identity:
+                concern = roll_concern(denizen.role, placement.role, zone_rng)
+                if concern is not None:
+                    profile = self.state.npc_profiles.get(entity.id)
+                    if profile is not None:
+                        # A rescue needs a real captive to free — realize the kin as a bound
+                        # local in the zone and bind the concern to their soul (Tier 1B).
+                        if concern["type"] == "rescue":
+                            captive = self._place_rescue_captive(
+                                zone_rng, occupied, identity
+                            )
+                            if captive is None:
+                                concern = None
+                            else:
+                                concern["subject_soul"] = captive.soul_id
+                                concern["subject"] = (
+                                    f"{captive.name}, {concern['subject']}"
+                                )
+                        profile.concern = concern
+
+        if zone_rng.random() < 0.35:
+            good = realm_good(placement.realm_id, zone_rng)
+            spot = self._random_open_ground_tile(zone_rng, occupied)
+            if good is not None and spot is not None:
+                glyph = ")" if any(k in good for k in ("bow", "sash")) else "!"
+                self.spawn_item(good, glyph, spot[0], spot[1], good)
+                occupied.add(spot)
+
+        for _ in range(zone_rng.randint(0, 1)):
+            spot = self._random_open_ground_tile(zone_rng, occupied)
+            if spot is None:
+                break
+            self._spawn_from_template(
+                zone_rng.choice(list(self.region.enemy_templates)), spot[0], spot[1]
+            )
+            occupied.add(spot)
+
+    def _spawn_denizen(
+        self,
+        zone_rng: random.Random,
+        denizen: Denizen,
+        identity: list[str],
+        spot: tuple[int, int],
+        disposition: str | None = None,
+    ) -> Entity:
+        """Spawn one realm denizen, **neutral** with a typed ``identity``/``role`` — combatants
+        through ``spawn_actor`` (combat AI, talkable lazily), non-combatants through ``spawn_npc``
+        (a persona that flees). A distributed ``disposition`` rides in as a flavor trait so a
+        realm's common folk react variedly to the player. Hostility is derived later, not set."""
+        name = denizen_name(denizen, zone_rng, identity)
+        x, y = spot
+        home = "the Empire" if "imperial" in identity else "these realms"
+        if denizen.combatant:
+            return self.spawn_actor(
+                name,
+                denizen.char,
+                x,
+                y,
+                denizen.hp,
+                denizen.attack,
+                denizen.defense,
+                "neutral",
+                denizen.ai,
+                tags=set(denizen.tags),
+                role=denizen.role,
+                identity=list(identity),
+            )
+        return self.spawn_npc(
+            name,
+            denizen.char,
+            x,
+            y,
+            role=denizen.role,
+            backstory=f"a {denizen.role} of {home}",
+            traits=[disposition] if disposition else None,
+            tags=set(denizen.tags),
+            wares=(
+                realm_wares(identity[0], zone_rng)
+                if denizen.role == "merchant"
+                and "imperial" not in identity
+                and identity
+                else None
+            ),
+            faction="neutral",
+            identity=list(identity),
+        )
+
+    def _place_rescue_captive(
+        self,
+        zone_rng: random.Random,
+        occupied: set[tuple[int, int]],
+        identity: list[str],
+    ) -> Entity | None:
+        """Realize a rescue concern's kin as a **bound captive** in the zone (Tier 1B), so the
+        rescue closes by actually freeing them (``free`` → ``freed_captive`` with their soul).
+        Returns the captive, or None if there's no room."""
+        spot = self._random_open_ground_tile(zone_rng, occupied)
+        if spot is None:
+            return None
+        captive = self.spawn_npc(
+            zone_rng.choice(["kin", "daughter", "brother", "elder"]),
+            "p",
+            spot[0],
+            spot[1],
+            role="captive",
+            backstory="a local the garrison dragged off and bound",
+            traits=["oppressed"],
+            tags={"human", "townsfolk", "bound"},
+            faction="neutral",
+            identity=list(identity),
+        )
+        occupied.add(spot)
+        return captive
+
+    def _stage_opening_occupation_scene(
+        self,
+        zone_rng: random.Random,
+        occupied: set[tuple[int, int]],
+        placement: Any,
+    ) -> None:
+        """Stage the run's opening moral fork once: imperial soldiers (neutral to the player
+        until provoked) standing over a wounded local. Stepping in to cut them down defends the
+        local (``defended_townsfolk``) and — if you use wild magic — reveals you to the Empire
+        (the exposure model); walking on keeps you unfiled. Skipped if the player isn't placed
+        yet (the very first zone) or there's no room near them."""
+        state = self.state
+        if state.flags.get("opening_scene_staged"):
+            return
+        player = state.entities.get(state.player_id)
+        if player is None:
+            return
+        victim_spot = self._opening_spot_near(player.x, player.y, occupied)
+        if victim_spot is None:
+            return
+        state.flags["opening_scene_staged"] = True
+        vx, vy = victim_spot
+        victim = self.spawn_npc(
+            "cornered local",
+            "p",
+            vx,
+            vy,
+            role="townsfolk",
+            backstory="a local the soldiers have dragged into the road",
+            traits=["oppressed"],
+            tags={"human", "townsfolk"},
+            faction="neutral",
+            identity=[placement.realm_id],
+        )
+        victim.hp = max(1, victim.max_hp // 3)  # already roughed up
+        occupied.add(victim_spot)
+        placed = 0
+        for dx, dy in ((1, 0), (-1, 0), (0, 1), (0, -1)):
+            spot = (vx + dx, vy + dy)
+            if spot in occupied or not self.can_occupy(*spot):
+                continue
+            self.spawn_actor(
+                zone_rng.choice(["legionary", "spearman"]),
+                "i",
+                spot[0],
+                spot[1],
+                10,
+                3,
+                1,
+                "neutral",
+                "legion",
+                tags={"human", "soldier"},
+                role="soldier",
+                identity=["imperial"],
+            )
+            occupied.add(spot)
+            placed += 1
+            if placed >= 2:
+                break
+        if placed:
+            state.add_message("Ahead, imperial soldiers have a local at swordpoint.")
+            state.add_message(
+                "Step in to defend them — and show the Empire what you are — "
+                "or keep your head down and walk on."
+            )
+
+    def _opening_spot_near(
+        self, cx: int, cy: int, occupied: set[tuple[int, int]]
+    ) -> tuple[int, int] | None:
+        """An open tile a few steps from (cx, cy) with room around it for the scene."""
+        for radius in (3, 4, 2, 5):
+            for dx in range(-radius, radius + 1):
+                for dy in range(-radius, radius + 1):
+                    if max(abs(dx), abs(dy)) != radius:
+                        continue
+                    spot = (cx + dx, cy + dy)
+                    if spot not in occupied and self.can_occupy(*spot):
+                        return spot
+        return None
 
     def _spawn_from_template(
         self,
@@ -2863,6 +3142,11 @@ class _GenerationMixin:
             state.add_message("Beyond this edge, the known world simply ends.")
             return False
 
+        old_realm = (
+            state.world_map.realm_at(state.zone_x, state.zone_y)
+            if state.world_map is not None
+            else None
+        )
         self._save_current_zone()
         self.clear_target()
         state.zone_x, state.zone_y = new_zx, new_zy
@@ -2870,7 +3154,10 @@ class _GenerationMixin:
         region_changed = new_region_id != state.region_id
         state.region_id = new_region_id
         self._load_or_generate_zone(new_zx, new_zy, entry_x, entry_y)
-        if region_changed:
+        crossing = self._realm_crossing_message(old_realm, new_zx, new_zy)
+        if crossing:
+            state.add_message(crossing)
+        elif region_changed:
             state.add_message(
                 f"You cross into {self.region.name}. The air is different here."
             )
@@ -2880,6 +3167,30 @@ class _GenerationMixin:
             )
         self._on_enter_location()
         return True
+
+    def _realm_crossing_message(self, old_realm: str | None, zx: int, zy: int) -> str:
+        """A border-crossing line naming the realm and its political role (Tier 3C — the played
+        overworld), so stepping from occupied land into the free rival, or into the imperial
+        heartland, *reads* as the political shift it is. Empty within a single realm."""
+        if self.state.world_map is None:
+            return ""
+        new_realm = self.state.world_map.realm_at(zx, zy)
+        if new_realm == old_realm:
+            return ""
+        if new_realm is None:
+            return "You pass beyond any banner, into uncharted wilds."
+        from .worldgen import REALM_TEMPLATES
+
+        placement = self.state.world_map.placements.get(new_realm)
+        template = REALM_TEMPLATES.get(new_realm)
+        name = template.name if template else new_realm
+        role = placement.role if placement else ""
+        return {
+            "founding": f"You cross into {name}, the Empire's own heartland — thick with charter and ledger.",
+            "conquered": f"You cross into occupied {name} — imperial banners over an older, quieter people.",
+            "proxy": f"You cross into {name}, a client kingdom that bends the knee in all but name.",
+            "rival": f"You cross into free {name} — beyond the Empire's reach, where wild magic still breathes.",
+        }.get(role, f"You cross into {name}.")
 
     def _save_current_zone(self) -> None:
         state = self.state

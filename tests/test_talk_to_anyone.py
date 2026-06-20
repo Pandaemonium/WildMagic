@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from wildmagic.actions import GameSession
 from wildmagic.engine import GameEngine
 
 
@@ -114,6 +115,32 @@ def test_selector_targets_by_name() -> None:
     for entity in (guard,):
         engine.state.visible.add(engine.tile_key(entity.x, entity.y))
     assert engine.find_talk_target(selector="guard") is guard
+
+
+def test_wares_can_target_visible_trader_by_id() -> None:
+    session = GameSession(seed=1, scenario="test_chamber", provider_name="mock")
+    try:
+        engine = session.engine
+        trader = engine.spawn_npc(
+            "sash seller",
+            "$",
+            34,
+            6,
+            role="merchant",
+            backstory="keeps a bright pack of clothing for road folk",
+            wares={"fresh linen shirt": 1, "gold": 8},
+        )
+        engine.state.visible.add(engine.tile_key(trader.x, trader.y))
+
+        result = session.execute_command(f"wares {trader.id}")
+
+        assert result.success
+        assert not result.consumed_turn
+        assert result.messages == [
+            "sash seller has for trade: fresh linen shirt x1, gold x8"
+        ]
+    finally:
+        session.close()
 
 
 def test_beast_cannot_converse() -> None:

@@ -41,7 +41,11 @@ from .normalize import (
     tile_from_name,
 )
 from .promises import Objective, WorldPromise, parse_spatial_hint
-from .spell_contract import STATUS_FLAVOR_ALIASES, validate_resolution
+from .spell_contract import (
+    STATUS_FLAVOR_ALIASES,
+    validate_resolution,
+    validate_resolution_mechanics,
+)
 from .templates import creature_template, item_template
 
 
@@ -133,6 +137,12 @@ class _EffectsMixin:
             self.state.add_message(message)
             return WildMagicOutcome(False, True, [message])
 
+        mechanics_error = validate_resolution_mechanics(resolution)
+        if mechanics_error:
+            message = f"Wild magic failed validation: {mechanics_error}"
+            self.state.add_message(message)
+            return WildMagicOutcome(False, True, [message])
+
         ref_error = self._resolution_ref_error(resolution)
         if ref_error:
             message = f"Wild magic failed validation: {ref_error}"
@@ -162,6 +172,11 @@ class _EffectsMixin:
             self.state.stats.spells_failed += 1
             self.finish_player_turn()
             return WildMagicOutcome(True, False, [curse_error])
+
+        # The Empire learns what you are the moment its people see you raise wild magic (the
+        # exposure model). Fired as the spell is cast — being *seen casting* is the trigger,
+        # whatever the spell then does.
+        self._expose_wild_magic_to_witnesses()
 
         snapshot = copy.deepcopy(self.state)
         # Capture operation deltas while the spell's effects + costs apply (Stage 6). Turned

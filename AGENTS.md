@@ -68,6 +68,7 @@ Examples to avoid:
 - `wildmagic/engine.py`: authoritative game rules and state mutation.
 - `wildmagic/models.py`: shared data classes (`Entity`, `NPCProfile`, etc.) used by engine and state.
 - `wildmagic/actions.py`: shared action/session layer used by UI, CLI, tests, and replays.
+- `wildmagic/persistence.py`: versioned save/load snapshot serializers. Durable state belongs here, not in prompt or inspection views.
 - `wildmagic/config.py`: `.env` loading, defaults, typed settings, provider/model fallback chains, and persisted configuration updates.
 - `wildmagic/wild_magic.py`: LLM prompt, provider calls, JSON parsing, normalization, validation, audit logging.
 - `wildmagic/fallbacks.py`: quarantined replacement-resolution fallbacks. Keep this isolated and optional.
@@ -176,6 +177,7 @@ Keep changes scoped and testable:
 - Put core behavior in the engine or action layer, not only in the UI.
 - Add or adjust CLI/scripted coverage when changing important gameplay behavior or cross-module contracts. For small copy, prompt, documentation, tuning, or purely presentational changes, use judgment: run the relevant checks, but do not create brittle tests just to prove the edit happened.
 - Preserve replayability where possible.
+- Preserve save/load readiness: put durable state in `GameState` or dataclasses reachable from it, serialize it through `wildmagic/persistence.py`, and keep prompt/inspection views lossy.
 - Keep wild-magic effects transactional: validate, normalize, apply effects, apply costs, advance turn, log.
 - Make costs visible after casting, not before, except for severe warning behavior explicitly supported by the design.
 - Do not let technical LLM failures consume a turn.

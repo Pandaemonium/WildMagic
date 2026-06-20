@@ -54,6 +54,24 @@ def _wild_prompt_messages(spell: str, context: dict[str, Any]) -> list[dict[str,
 
     The system prompt is assembled from the always-on core plus only the capability cards
     this spell routes to (wildmagic/capabilities.py) — hence the explicit spell argument."""
+    repair = context.get("repair_invalid_resolution")
+    if isinstance(repair, dict):
+        system_content = (
+            "You repair Wild Magic JSON. Return only one complete JSON object. "
+            "Keep the same spell intent, outcome tone, severity, and costs unless the error "
+            "requires a minimal change. Fix only invalid fields. Do not make the spell stronger."
+        )
+        payload = {
+            "spell": spell,
+            "error": repair.get("error"),
+            "valid_options": repair.get("valid_options"),
+            "previous_json": repair.get("previous_json"),
+        }
+        return [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": json.dumps(payload, ensure_ascii=True)},
+        ]
+
     region_style = context.get("region_style")
     caster_profile = context.get("caster_profile")
     spell_foci = context.get("spell_foci")
@@ -74,7 +92,7 @@ def _wild_prompt_messages(spell: str, context: dict[str, Any]) -> list[dict[str,
     ]
 
 
-from .spell_contract import validate_resolution
+from .spell_contract import validate_resolution, validate_resolution_mechanics
 
 
 @dataclass
@@ -723,6 +741,8 @@ def resolve_spell(
         try:
             parsed_data = parse_resolution_json(raw)
             error = validate_resolution(parsed_data)
+            if error is None:
+                error = validate_resolution_mechanics(parsed_data)
             resolved_provider_name = _provider_name(provider)
             if error:
                 technical_failure = True

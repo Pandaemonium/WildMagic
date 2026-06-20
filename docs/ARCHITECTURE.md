@@ -22,7 +22,13 @@ input, and routes commands to `GameSession`. Also shows the LLM thinking panel, 
 selector overlay, and a visual AI watch controller that lets the autoplay command chooser
 drive the same command path while the renderer stays responsive. Equipment and inventory
 screens consume `GameSession.equipment_inventory_view()` rather than importing equipment
-rules or reconstructing wearability from item names.
+rules or reconstructing wearability from item names. The side panel uses compact shared
+standing summaries; the full standing readout is opened as a modal scene.
+
+### `wildmagic/scenes/`
+Self-contained Pygame full-screen scenes driven by `GameUI`: character creation,
+character editing, and the scrollable standing readout. Scene modules own their
+input/rendering state and call back into the host for fonts, drawing, and shared services.
 
 ### `wildmagic/cli.py`
 Terminal front-end. Parses `--seed`, `--scenario`, `--provider`, `--script`, `--record` flags,
@@ -58,6 +64,13 @@ Save/load/run replay JSON files. `run_replay(path)` re-feeds a recorded session'
 through a fresh `GameSession` and optionally checks the final state snapshot against a saved
 expectation. Replays carry materialized canon apply points so `examine` and future background
 content replay without calling the provider. Used for regression testing.
+
+### `wildmagic/persistence.py`
+Versioned internal save/load snapshots. This is the complete durable-state boundary for
+future player saves: it serializes `GameState`, reachable dataclasses, zone snapshots,
+runtime cursors such as RNG/entity numbering, and the `GameSession` wrapper after draining
+completed background results. It deliberately stays separate from `state_view.py`, whose
+resolver/replay/inspection views are compact and lossy.
 
 ---
 
@@ -685,6 +698,10 @@ main.py / cli.py
             └── deed_interpreter.py (ambiguous-spell-outcome → deed; LLM + fallback)
                     ├── deeds.py (DEED_RULES, vocab)
                     ├── llm_client.py / llm_resolver.py / prompts.py
+
+persistence.py (versioned save snapshots)
+    imports engine.py / models.py / durable ledgers directly; imports actions.py lazily
+    only when restoring a full GameSession.
 
 Emergent-world leaves (imported by engine; import only stdlib + each other):
     bonds.py
