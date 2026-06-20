@@ -58,6 +58,8 @@ from .populations import (
     Denizen,
     denizen_name,
     denizen_plan,
+    realm_good,
+    realm_wares,
     realm_disposition,
     roll_concern,
 )
@@ -2690,6 +2692,14 @@ class _GenerationMixin:
                                 )
                         profile.concern = concern
 
+        if zone_rng.random() < 0.35:
+            good = realm_good(placement.realm_id, zone_rng)
+            spot = self._random_open_ground_tile(zone_rng, occupied)
+            if good is not None and spot is not None:
+                glyph = ")" if any(k in good for k in ("bow", "sash")) else "!"
+                self.spawn_item(good, glyph, spot[0], spot[1], good)
+                occupied.add(spot)
+
         for _ in range(zone_rng.randint(0, 1)):
             spot = self._random_open_ground_tile(zone_rng, occupied)
             if spot is None:
@@ -2711,7 +2721,7 @@ class _GenerationMixin:
         through ``spawn_actor`` (combat AI, talkable lazily), non-combatants through ``spawn_npc``
         (a persona that flees). A distributed ``disposition`` rides in as a flavor trait so a
         realm's common folk react variedly to the player. Hostility is derived later, not set."""
-        name = denizen_name(denizen, zone_rng)
+        name = denizen_name(denizen, zone_rng, identity)
         x, y = spot
         home = "the Empire" if "imperial" in identity else "these realms"
         if denizen.combatant:
@@ -2738,6 +2748,13 @@ class _GenerationMixin:
             backstory=f"a {denizen.role} of {home}",
             traits=[disposition] if disposition else None,
             tags=set(denizen.tags),
+            wares=(
+                realm_wares(identity[0], zone_rng)
+                if denizen.role == "merchant"
+                and "imperial" not in identity
+                and identity
+                else None
+            ),
             faction="neutral",
             identity=list(identity),
         )

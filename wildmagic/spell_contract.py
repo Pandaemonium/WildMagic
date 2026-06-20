@@ -5,6 +5,8 @@ import copy
 from pathlib import Path
 from typing import Any
 
+from .models import MECHANICAL_STATUSES
+
 
 OPERATION_REFERENCE_START = "<!-- BEGIN GENERATED OPERATION REFERENCE -->"
 OPERATION_REFERENCE_END = "<!-- END GENERATED OPERATION REFERENCE -->"
@@ -277,6 +279,79 @@ STATUS_FLAVOR_ALIASES: dict[str, str] = {
     "illuminated": "revealed",
     "highlighted": "revealed",
 }
+
+_REPAIR_STATUS_HINTS = {
+    "heat": "For heat/fire protection, use add_resistance with damage_type:'fire', or use status:'warded' if a status aura is intended.",
+    "fire": "For fire protection, use add_resistance with damage_type:'fire', or use status:'warded' if a status aura is intended.",
+    "cool": "For cooling protection, use add_resistance with damage_type:'fire', or use status:'warded' if a status aura is intended.",
+    "protect": "Protection is usually status:'warded' or an add_resistance effect.",
+    "ward": "Wards are usually status:'warded' or an add_resistance effect.",
+}
+
+
+def _status_options_text() -> str:
+    return ", ".join(sorted(MECHANICAL_STATUSES))
+
+
+def _aura_repair_hint(effect: dict[str, Any]) -> str:
+    haystack = " ".join(
+        str(effect.get(key) or "")
+        for key in ("status", "display_name", "label", "name", "damage_type", "element")
+    ).lower()
+    for needle, hint in _REPAIR_STATUS_HINTS.items():
+        if needle in haystack:
+            return " " + hint
+    return ""
+
+
+def validate_resolution_mechanics(data: dict[str, Any]) -> str | None:
+    """Catch accepted effects that are schema-shaped but would mechanically do nothing.
+
+    This is intentionally pure and state-free so the resolver can use it before the engine
+    applies flavor, costs, or turn advancement. It complements ``validate_resolution``: the
+    schema says "aura is a supported effect"; this says "a status aura must name a real
+    mechanical status."
+    """
+    if data.get("accepted", True) is False:
+        return None
+    for index, effect in enumerate(data.get("effects") or []):
+        if not isinstance(effect, dict):
+            continue
+        if str(effect.get("type") or "").lower() != "aura":
+            continue
+        aura_specs = effect.get("aura") or effect.get("auras") or effect
+        if isinstance(aura_specs, dict):
+            specs = [aura_specs]
+        elif isinstance(aura_specs, list):
+            specs = [a for a in aura_specs if isinstance(a, dict)]
+        else:
+            specs = []
+        if not specs:
+            return (
+                f"effect {index} aura has no mechanical aura spec. "
+                "Valid aura kinds are 'damage' or 'status'."
+            )
+        for aura_index, aura in enumerate(specs):
+            kind = str(aura.get("kind") or aura.get("mode") or "").strip().lower()
+            if kind == "status" or (not kind and aura.get("display_name")):
+                raw_status = (
+                    str(aura.get("status") or "").strip().lower().replace(" ", "_")
+                )
+                status = (
+                    raw_status
+                    if raw_status in MECHANICAL_STATUSES
+                    else STATUS_FLAVOR_ALIASES.get(raw_status, "")
+                )
+                if not status:
+                    return (
+                        f"effect {index} aura {aura_index} kind:'status' is missing a valid "
+                        f"'status'. Valid status values: {_status_options_text()}. "
+                        "Use display_name only for flavor after choosing a valid status."
+                        f"{_aura_repair_hint(aura)}"
+                    )
+            elif kind not in {"damage", "status", ""}:
+                return f"effect {index} aura {aura_index} kind must be 'damage' or 'status'."
+    return None
 
 
 SPELL_RESPONSE_JSON_SCHEMA: dict[str, Any] = {

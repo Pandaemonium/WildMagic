@@ -105,16 +105,78 @@ _RIVAL_WARRIOR = Denizen(
     True,
 )
 
-#: A small name pool per role — the *identity* (imperial vs realm) carries allegiance, not the
-#: name, so a "legionary" reads imperial and a "weaver" reads local. LLM enrich gives real names.
-_ROLE_NAMES: dict[str, tuple[str, ...]] = {
-    "soldier": ("legionary", "spearman", "drill initiate", "sentry"),
-    "officer": ("decanus", "watch-captain", "optio"),
-    "clerk": ("tax-clerk", "records-keeper", "notary"),
+#: A small name pool per role. Tier 4C's split starts here: imperial occupations read as cold
+#: Latinate officialese, while local folk read as earthy realm compounds. LLM enrich can still
+#: add personal names later; these are the deterministic floor.
+_IMPERIAL_ROLE_NAMES: dict[str, tuple[str, ...]] = {
+    "soldier": ("legionary", "cohort sentry", "edict guard", "containment lance"),
+    "officer": ("decanus", "optio", "tribune's deputy"),
+    "clerk": ("tax-clerk", "records-keeper", "notary", "censorial adjunct"),
     "townsfolk": ("weaver", "farmhand", "potter", "cooper", "laborer"),
     "merchant": ("trader", "peddler", "stall-keeper"),
     "partisan": ("malcontent", "quiet partisan", "ember"),
     "priest": ("acolyte", "shrine-keeper"),
+}
+
+_ROLE_NAMES: dict[str, tuple[str, ...]] = {
+    "soldier": ("watch-spear", "gatehand", "road-guard", "oathblade"),
+    "officer": ("captain", "banner-hand", "field elder"),
+    "clerk": ("tally-keeper", "inkhand", "ledger-keeper"),
+    "townsfolk": ("weaver", "farmhand", "potter", "cooper", "laborer"),
+    "merchant": ("trader", "peddler", "stall-keeper"),
+    "partisan": ("malcontent", "quiet partisan", "ember"),
+    "priest": ("acolyte", "shrine-keeper"),
+}
+
+_REALM_ROLE_NAMES: dict[str, dict[str, tuple[str, ...]]] = {
+    "stalnaz": {
+        "townsfolk": ("glass-tuner", "song-cutter", "lightkeeper"),
+        "merchant": ("crystal-factor", "resonance seller"),
+        "priest": ("choir-keeper",),
+    },
+    "brall": {
+        "townsfolk": ("alehand", "bone-carver", "hold-keeper"),
+        "merchant": ("scrimshaw peddler", "cask-trader"),
+        "soldier": ("hold-spear", "jarlsworn"),
+    },
+    "ryolan": {
+        "townsfolk": ("oathhand", "blood-groom", "chariot-mender"),
+        "merchant": ("duel-factor", "sash-seller"),
+        "soldier": ("duel-guard", "red-spear"),
+    },
+    "vint": {
+        "townsfolk": ("threadhand", "tapestry voter", "rumor-weaver"),
+        "merchant": ("charm-knotter", "scarveseller"),
+        "partisan": ("backroom vote", "red-thread partisan"),
+    },
+    "threen": {
+        "townsfolk": ("canal-reader", "lampwright", "polite porter"),
+        "merchant": ("book-broker", "lockside seller"),
+        "clerk": ("petition-copyist", "permit reader"),
+    },
+    "monteary": {"townsfolk": ("horsehand", "saddle-stitcher", "plain rider")},
+    "ontria": {"townsfolk": ("culture-keeper", "clan-spoon", "milkhand")},
+    "gontark": {"townsfolk": ("goat-eyed elder", "horn-carver", "curse-minder")},
+    "parn": {"townsfolk": ("road-singer", "inked cousin", "tent-mender")},
+    "birdfolk": {"townsfolk": ("plume-keeper", "nest-mender", "story-beak")},
+    "merfolk": {"townsfolk": ("tide-speaker", "pearl-guard", "reef-proud")},
+    "rentacosta": {"townsfolk": ("saltbroker", "dockhand", "tongue-switcher")},
+}
+
+REALM_GOODS: dict[str, tuple[str, ...]] = {
+    "vigovia": ("sealed ration chit", "censorate seal"),
+    "stalnaz": ("charged stalnaz crystal", "resonance shard"),
+    "brall": ("brall scrimshaw charm", "bone tally"),
+    "ryolan": ("ryolan dueling sash", "blood-red whetstone"),
+    "vint": ("vint woven charm", "petition scarf"),
+    "threen": ("threen canal locket", "serialized novella"),
+    "monteary": ("monteary horsehair bow", "braided gelding cord"),
+    "ontria": ("ontrian culture gourd", "clan spoon"),
+    "gontark": ("gontark curse-knot", "goat-horn bead"),
+    "parn": ("parn song-ink scarf", "desert ink vial"),
+    "birdfolk": ("birdfolk plume charm", "story feather"),
+    "merfolk": ("merfolk tide pearl", "shell writ"),
+    "rentacosta": ("rentacostan salt coin", "dockside phrasebook"),
 }
 
 _IMPERIAL = ["imperial"]
@@ -159,11 +221,40 @@ def denizen_plan(
             plan.append((_RIVAL_WARRIOR, [realm_id]))
         for _ in range(rng.randint(1, 2)):
             plan.append((rng.choice([_TOWNSFOLK, _PARTISAN]), [realm_id]))
+    elif role == "independent":
+        # A smaller realm's own people — not occupied, not garrisoned; the odd imperial
+        # passes through (they let soldiers cross their land).
+        for _ in range(rng.randint(2, 3)):
+            plan.append(
+                (rng.choice([_TOWNSFOLK, _TOWNSFOLK, _MERCHANT, _PRIEST]), [realm_id])
+            )
+        if rng.random() < 0.25:
+            plan.append((_SOLDIER, list(_IMPERIAL)))
     return plan
 
 
-def denizen_name(denizen: Denizen, rng: random.Random) -> str:
-    return rng.choice(_ROLE_NAMES.get(denizen.role, (denizen.role,)))
+def denizen_name(
+    denizen: Denizen, rng: random.Random, identity: list[str] | None = None
+) -> str:
+    identity = list(identity or [])
+    if "imperial" in identity:
+        return rng.choice(_IMPERIAL_ROLE_NAMES.get(denizen.role, (denizen.role,)))
+    realm_id = identity[0] if identity else ""
+    realm_names = _REALM_ROLE_NAMES.get(realm_id, {})
+    names = realm_names.get(denizen.role) or _ROLE_NAMES.get(
+        denizen.role, (denizen.role,)
+    )
+    return rng.choice(names)
+
+
+def realm_good(realm_id: str, rng: random.Random) -> str | None:
+    goods = REALM_GOODS.get(realm_id)
+    return rng.choice(goods) if goods else None
+
+
+def realm_wares(realm_id: str, rng: random.Random) -> dict[str, int]:
+    good = realm_good(realm_id, rng)
+    return {good: 1, "gold": rng.randint(6, 18)} if good else {}
 
 
 # --- Concerns (CONTENT_FLESHING_ROADMAP Tier 1B) ----------------------------------------

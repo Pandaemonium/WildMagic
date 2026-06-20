@@ -394,6 +394,20 @@ EQUIPMENT_SPECS: dict[str, dict[str, Any]] = {
     "whispering orb": {"slot": "charm", "defense": 1},
     "emberglass wand": {"slot": "weapon", "attack": 2},
     "saint's knucklebone": {"slot": "charm", "attack": 1},
+    # Realm-flavored gear/trade goods (CONTENT_FLESHING_ROADMAP Tier 4B). Small numbers keep
+    # them ordinary equipment; their main value is geographic texture and focus flavor.
+    "charged stalnaz crystal": {"slot": "charm", "defense": 1},
+    "brall scrimshaw charm": {"slot": "charm", "attack": 1},
+    "ryolan dueling sash": {"slot": "chest", "attack": 1},
+    "vint woven charm": {"slot": "charm", "defense": 1},
+    "threen canal locket": {"slot": "charm", "defense": 1},
+    "monteary horsehair bow": {"slot": "weapon", "attack": 3},
+    "ontrian culture gourd": {"slot": "charm", "defense": 1},
+    "gontark curse-knot": {"slot": "charm", "attack": 1},
+    "parn song-ink scarf": {"slot": "chest", "defense": 1},
+    "birdfolk plume charm": {"slot": "charm", "defense": 1},
+    "merfolk tide pearl": {"slot": "charm", "defense": 1},
+    "rentacostan salt coin": {"slot": "charm", "defense": 1},
 }
 for _gear_name in EQUIPMENT_SPECS:
     ITEM_USE_SPECS[_gear_name.replace(" ", "_")] = {
@@ -429,6 +443,66 @@ FOCUS_SPECS: dict[str, dict[str, Any]] = {
             "A finger-bone polished by a thousand prayers and strung on grey cord; "
             "it feels heavier than it should."
         ),
+    },
+    "charged stalnaz crystal": {
+        "power": 2,
+        "themes": ["crystal", "song", "stored magic"],
+        "description": "A clear Stalnazan crystal holding a cool note of stored light.",
+    },
+    "brall scrimshaw charm": {
+        "power": 1,
+        "themes": ["bone", "scrimshaw", "boasts"],
+        "description": "A bone charm crowded with Brallish boast-marks and ale-hall saints.",
+    },
+    "ryolan dueling sash": {
+        "power": 1,
+        "themes": ["blood", "honor", "duel"],
+        "description": "A red Ryolan sash tied for first blood and public honor.",
+    },
+    "vint woven charm": {
+        "power": 1,
+        "themes": ["woven", "rumor", "threads"],
+        "description": "A Vintan knot-charm whose threads seem to know who touched them last.",
+    },
+    "threen canal locket": {
+        "power": 1,
+        "themes": ["canal", "literature", "deference"],
+        "description": "A polite Threenian locket engraved with a canal map and a hidden sigh.",
+    },
+    "monteary horsehair bow": {
+        "power": 1,
+        "themes": ["horse-song", "plains", "speed"],
+        "description": "A plain Monteary bow strung with pale horsehair and a held note.",
+    },
+    "ontrian culture gourd": {
+        "power": 1,
+        "themes": ["clan", "ancestor", "yoghurt-rite"],
+        "description": "A sealed Ontrian gourd of clan culture, warm as if remembering a hearth.",
+    },
+    "gontark curse-knot": {
+        "power": 1,
+        "themes": ["curse", "horn", "warning"],
+        "description": "A goat-hair knot from Gontark, tied around a curse no one has spent yet.",
+    },
+    "parn song-ink scarf": {
+        "power": 1,
+        "themes": ["song", "ink", "road"],
+        "description": "A road-worn Parn scarf inked with a tune that changes under the thumb.",
+    },
+    "birdfolk plume charm": {
+        "power": 1,
+        "themes": ["song", "plume", "story"],
+        "description": "A bright plume charm that keeps trying to become the start of a story.",
+    },
+    "merfolk tide pearl": {
+        "power": 1,
+        "themes": ["tide", "pearl", "pride"],
+        "description": "A cold pearl with a tide-line trapped just under its skin.",
+    },
+    "rentacostan salt coin": {
+        "power": 1,
+        "themes": ["salt", "trade", "languages"],
+        "description": "A salt-pitted trade coin from Rentacosta, stamped in three languages.",
     },
 }
 

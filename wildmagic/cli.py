@@ -5,7 +5,7 @@ from pathlib import Path
 import random
 import sys
 
-from .actions import GameSession
+from .actions import GameSession, standing_summary_text
 from .character import CREATION_POINTS, ORIGINS, STAT_CAP, STATS, build_profile
 from .models import CharacterProfile
 from .replay import save_replay
@@ -270,32 +270,11 @@ def render_screen(session: GameSession) -> str:
         f"Equipment: {equipment}",
         f"Inventory: {inventory}",
         f"Curses: {curses}",
-        f"Standing: {standing_summary(state)}",
+        f"Standing: {standing_summary_text(state)}",
         "Recent log:",
         *[f"  {message}" for message in state.messages[-6:]],
     ]
     return "\n".join(lines + footer)
-
-
-def standing_summary(state) -> str:
-    """A compact one-line standing readout for the CLI footer: each power's non-zero
-    standing axes (the GUI shows the same in draw_standing; full detail via 'standing')."""
-    factions = [
-        faction
-        for faction in state.faction_ledger.factions.values()
-        if any(faction.standing.values())
-    ]
-    if not factions:
-        return "unknown to the powers"
-    parts = []
-    for faction in sorted(factions, key=lambda f: f.id):
-        axes = ", ".join(
-            f"{axis} {value:+.1f}"
-            for axis, value in sorted(faction.standing.items())
-            if value
-        )
-        parts.append(f"{faction.name} ({axes})")
-    return " | ".join(parts)
 
 
 def render_map(session: GameSession) -> list[str]:

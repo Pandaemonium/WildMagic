@@ -41,7 +41,11 @@ from .normalize import (
     tile_from_name,
 )
 from .promises import Objective, WorldPromise, parse_spatial_hint
-from .spell_contract import STATUS_FLAVOR_ALIASES, validate_resolution
+from .spell_contract import (
+    STATUS_FLAVOR_ALIASES,
+    validate_resolution,
+    validate_resolution_mechanics,
+)
 from .templates import creature_template, item_template
 
 
@@ -130,6 +134,12 @@ class _EffectsMixin:
         validation_error = validate_resolution(resolution)
         if validation_error:
             message = f"Wild magic failed validation: {validation_error}"
+            self.state.add_message(message)
+            return WildMagicOutcome(False, True, [message])
+
+        mechanics_error = validate_resolution_mechanics(resolution)
+        if mechanics_error:
+            message = f"Wild magic failed validation: {mechanics_error}"
             self.state.add_message(message)
             return WildMagicOutcome(False, True, [message])
 

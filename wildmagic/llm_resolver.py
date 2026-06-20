@@ -28,10 +28,24 @@ def should_retry_resolution(
 def retry_context(
     context: dict[str, Any], raw_response: str | None, error: str
 ) -> dict[str, Any]:
-    updated = dict(context)
-    updated["retry_after_invalid_resolution"] = {
-        "error": error,
-        "instruction": "The previous response could not be parsed or validated. Return only one complete JSON object.",
-        "previous_response_prefix": (raw_response or "")[:600],
+    """A compact repair payload for spell-resolution retries.
+
+    Wild-magic repair should be fast: the model already chose an intent, so the retry only needs
+    the spell, the invalid JSON, and the contract error/options. Do not resend the whole game
+    context unless a future repair kind truly needs it.
+    """
+    valid_options = {}
+    if "Valid status values:" in error:
+        valid_options["status"] = error.split("Valid status values:", 1)[1].strip()
+    updated = {
+        "repair_invalid_resolution": {
+            "error": error,
+            "instruction": (
+                "The previous response could not be parsed or validated. Return only one "
+                "complete JSON object, fixing only the invalid fields."
+            ),
+            "valid_options": valid_options,
+            "previous_json": (raw_response or "")[:1200],
+        },
     }
     return updated

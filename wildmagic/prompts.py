@@ -232,6 +232,13 @@ If "trade_proposed" is true:
   presenting the deal as just agreed or about to be sealed
 - "initiator" is "player" if the player proposed the swap, "npc" if the NPC volunteered it
 
+Be responsive to ordinary merchant talk. If the player directly asks to buy, sell, browse wares,
+or asks whether the NPC has a category of goods, and the NPC replies like a seller rather than
+refusing, that is enough to structure a proposal. Choose an exact item from "wares_for_sale" that
+best matches the request (or the closest sensible stocked item) and ask for a reasonable amount of
+gold if no price was stated. If the NPC mentions an item that is not in "wares_for_sale", do not
+invent it; either use the closest matching stocked item or return false if nothing stocked fits.
+
 Use rough judgment, not a price list, when sizing up a fair gold value: common raw materials and
 curios are worth a handful of gold; useful potions, scrolls, and charms notably more; rare or
 powerful effects more still. For items you don't recognize, size up a fair-ish value from the

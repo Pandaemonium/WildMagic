@@ -145,8 +145,8 @@ Coverage goals:
 - Test world-interaction systems. Use inspect/status to understand state; journal to review
   persistent rumors/promises; examine/study/observe to materialize room lore; investigate/search
   rooms, props, clues, or secrets; read books or readable objects once; talk/speak/say to NPCs;
-  wares/browse/shop near merchants; accept or reject real trade offers; use/equip/unequip/drop
-  items when inventory suggests it.
+  wares/browse/shop near merchants; accept or reject real trade offers; spare beaten enemies;
+  use/equip/unequip/drop items when inventory suggests it.
 - Do not treat movement as the default answer. If the last few commands were mostly movement,
   choose a different useful system command such as inspect, examine, investigate, talk, read,
   pickup, a standard spell, or a wild spell. If the last few commands were mostly spells and
@@ -283,6 +283,8 @@ EXACT_VERBS = {
     "liberate",
     "unbind",
     "untie",
+    "spare",
+    "mercy",
     # Emergent-world readouts + the daily-tick controls (all free actions, no turn cost).
     "standing",
     "reputation",

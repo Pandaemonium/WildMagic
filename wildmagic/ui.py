@@ -16,7 +16,13 @@ warnings.filterwarnings("ignore", message=r"pkg_resources is deprecated as an AP
 
 import pygame
 
-from .actions import ActionResult, GameSession, describe_state, describe_world
+from .actions import (
+    ActionResult,
+    GameSession,
+    describe_state,
+    describe_world,
+    standing_summary_text,
+)
 from .autoplay import (
     AgentObservation,
     OllamaAgent,
@@ -36,6 +42,7 @@ from .normalize import normalize_id
 from .portraits import PortraitClient
 from .scenes.character_creation_scene import CharacterCreationScene
 from .scenes.character_view_scene import CharacterViewScene
+from .scenes.standing_scene import StandingScene
 from .ui_theme import (
     ACCENT,
     BACKGROUND,
@@ -338,6 +345,7 @@ class VisualAutoplayController:
         self.last_note = note
         self.command_history.append(command)
         self.ui.input_text = command
+        self.ui.input_cursor = len(command)
         self.ui.input_active = False
         # Autoplay drives the loop itself and needs the result synchronously, so it
         # uses the blocking path rather than the responsive worker-thread one.
@@ -567,6 +575,7 @@ class GameUI:
         self.session = GameSession(scenario="town")
         self.engine = self.session.engine
         self.input_text = ""
+        self.input_cursor = 0
         self.input_active = True
         self.input_mode = "spell"
         self.mode_label_rects: list[tuple[pygame.Rect, str]] = []
@@ -587,6 +596,7 @@ class GameUI:
             PANEL_WIDTH - 40,
             54,
         )
+        self.input_line_rects: list[tuple[pygame.Rect, int, int, str, int]] = []
 
         self.llm_debug_entries: list[dict[str, Any]] = []
         self.llm_debug_started_at = datetime.now(timezone.utc)
@@ -670,6 +680,7 @@ class GameUI:
         # In-game character sheet, opened with `c` (or Ctrl+c). A modal scene like
         # creation; both are checked via _active_scene().
         self.character_view_scene = CharacterViewScene(self)
+        self.standing_scene = StandingScene(self)
         if not autoplay:
             self.creation_scene.start()
 
@@ -797,16 +808,49 @@ class GameUI:
 
     def _active_scene(self):
         """The modal full-screen scene currently capturing input, or None."""
-        for scene in (self.creation_scene, self.character_view_scene):
+        for scene in (
+            self.creation_scene,
+            self.character_view_scene,
+            self.standing_scene,
+        ):
             if scene.active:
                 return scene
         return None
 
-    def _backspace_input(self) -> None:
-        """Erase the last character of the spell/talk text box."""
-        self.input_text = self.input_text[:-1]
+    def _clamp_input_cursor(self) -> None:
+        self.input_cursor = max(0, min(self.input_cursor, len(self.input_text)))
 
-    def _focused_text_deleter(self):
+    def _backspace_input(self) -> None:
+        """Erase the character before the spell/talk insertion cursor."""
+        self._clamp_input_cursor()
+        if self.input_cursor <= 0:
+            return
+        self.input_text = (
+            self.input_text[: self.input_cursor - 1]
+            + self.input_text[self.input_cursor :]
+        )
+        self.input_cursor -= 1
+
+    def _delete_input(self) -> None:
+        """Erase the character after the spell/talk insertion cursor."""
+        self._clamp_input_cursor()
+        if self.input_cursor >= len(self.input_text):
+            return
+        self.input_text = (
+            self.input_text[: self.input_cursor]
+            + self.input_text[self.input_cursor + 1 :]
+        )
+
+    def _insert_input_text(self, text: str) -> None:
+        self._clamp_input_cursor()
+        self.input_text = (
+            self.input_text[: self.input_cursor]
+            + text
+            + self.input_text[self.input_cursor :]
+        )
+        self.input_cursor += len(text)
+
+    def _focused_text_deleter(self, *, forward: bool = False):
         """The callable that erases one character from whatever text field currently has
         keyboard focus, or None when no field is accepting text. Shared by the
         Backspace/Delete KEYDOWN handlers and the held-key repeat pump so a single tap and
@@ -824,7 +868,7 @@ class GameUI:
             and self.engine.state.pending_trade is None
             and not self.engine.state.game_over
         ):
-            return self._backspace_input
+            return self._delete_input if forward else self._backspace_input
         return None
 
     def _pump_text_delete_repeat(self) -> None:
@@ -833,8 +877,9 @@ class GameUI:
         the KEYDOWN erases one char, then after a short delay a steady cadence kicks in for
         as long as the key stays down and a text field keeps focus."""
         pressed = pygame.key.get_pressed()
+        forward = bool(pressed[pygame.K_DELETE] and not pressed[pygame.K_BACKSPACE])
         held = pressed[pygame.K_BACKSPACE] or pressed[pygame.K_DELETE]
-        deleter = self._focused_text_deleter() if held else None
+        deleter = self._focused_text_deleter(forward=forward) if held else None
         if deleter is None:
             self._delete_repeat_at = None
             return
@@ -911,7 +956,7 @@ class GameUI:
             self.menu_page = "world"
             self.menu_cursor = 0
         elif key == pygame.K_t:
-            self.execute_command("standing")
+            self.standing_scene.start()
         elif key == pygame.K_n:
             self.execute_command("followers")
         elif key == pygame.K_h:
@@ -1065,6 +1110,7 @@ class GameUI:
                 return
             if self.input_text:
                 self.input_text = ""
+                self.input_cursor = 0
                 self.input_active = True
                 return
             self._open_menu()
@@ -1079,11 +1125,14 @@ class GameUI:
             if event.key == pygame.K_RETURN:
                 self.submit_input()
                 return
-            if event.key in (pygame.K_BACKSPACE, pygame.K_DELETE):
+            if event.key == pygame.K_BACKSPACE:
                 self._backspace_input()
                 return
+            if event.key == pygame.K_DELETE:
+                self._delete_input()
+                return
             if event.unicode and event.unicode.isprintable():
-                self.input_text += event.unicode
+                self._insert_input_text(event.unicode)
                 return
 
         if self.input_mode != "control" and event.key in {
@@ -1104,6 +1153,42 @@ class GameUI:
             self.execute_command("untarget")
         else:
             self.execute_command(f"target {tx} {ty}")
+
+    def _input_cursor_at_pos(self, pos: tuple[int, int]) -> int:
+        if not self.input_line_rects:
+            return len(self.input_text)
+        x, y = pos
+        chosen = self.input_line_rects[-1]
+        for entry in self.input_line_rects:
+            rect, _start, _end, _text, _prefix_width = entry
+            expanded = rect.inflate(0, 6)
+            if expanded.collidepoint(x, y):
+                chosen = entry
+                break
+        else:
+            if y < self.input_line_rects[0][0].top:
+                chosen = self.input_line_rects[0]
+            elif y > self.input_line_rects[-1][0].bottom:
+                chosen = self.input_line_rects[-1]
+        rect, start, end, text, prefix_width = chosen
+        if end <= start:
+            return start
+        text_x = rect.x + prefix_width
+        if x <= text_x:
+            return start
+        if x >= text_x + self.ui_font.size(text)[0]:
+            return end
+        for offset in range(len(text) + 1):
+            left = self.ui_font.size(text[:offset])[0]
+            right = self.ui_font.size(text[: offset + 1])[0]
+            midpoint = text_x + (left + right) // 2
+            if x < midpoint:
+                return min(end, start + offset)
+        return end
+
+    def _move_input_cursor_to_mouse(self, pos: tuple[int, int]) -> None:
+        self.input_cursor = self._input_cursor_at_pos(pos)
+        self._clamp_input_cursor()
 
     def handle_mouse(self, event: pygame.event.Event) -> None:
         scene = self._active_scene()
@@ -1225,6 +1310,8 @@ class GameUI:
                     return
             if self.spell_box_rect.collidepoint(event.pos):
                 self.input_active = True
+                if self.input_mode not in {"control", "confirm_trade"}:
+                    self._move_input_cursor_to_mouse(event.pos)
                 self.dragging_log_selection = False
                 self.log_selection_anchor = None
                 self.log_selection_focus = None
@@ -1604,6 +1691,7 @@ class GameUI:
         )
         self.engine = self.session.engine
         self.input_text = ""
+        self.input_cursor = 0
         self.log_scroll_offset = 0
         self.input_active = True
         self.input_mode = "spell"
@@ -1627,6 +1715,7 @@ class GameUI:
         self.llm_selection_anchor = None
         self.llm_selection_focus = None
         self.dragging_llm_selection = False
+        self.standing_scene.active = False
         self.autoplay.reset_session_state()
 
     def log_line_index_at(self, pos: tuple[int, int]) -> int | None:
@@ -1840,6 +1929,7 @@ class GameUI:
         if self._awaiting_command():
             return  # discard the submit while an urgent command resolves; keep the text
         self.input_text = ""
+        self.input_cursor = 0
         self.input_active = True
         self.log_scroll_offset = 0
         command = f"talk {text}" if self.input_mode == "talk" else f"cast {text}"
@@ -2052,6 +2142,11 @@ class GameUI:
                 if entity.kind == "npc" and "bound" in entity.tags and distance <= 1:
                     buttons.append((len(lines), "free"))
                     lines.append(("  [ Free ]", (130, 185, 225)))
+                if entity.kind == "npc":
+                    profile = state.npc_profiles.get(entity.id)
+                    if profile is not None and profile.wares:
+                        buttons.append((len(lines), f"wares {entity.id}"))
+                        lines.append(("  [ Wares ]", (130, 185, 225)))
                 if entity.kind == "prop" and "book" in entity.tags and distance <= 1:
                     buttons.append((len(lines), f"read {entity.name}"))
                     lines.append(("  [ Read ]", (130, 185, 225)))
@@ -3277,28 +3372,20 @@ class GameUI:
             cy += line_h
 
     def draw_standing(self, x: int, y: int) -> int:
-        """The emergent-world standing readout (Phase 0): each power that has taken
-        notice of the player, with its non-zero standing axes. Mirrors the CLI's
-        'standing' command / footer (T6)."""
+        """Compact standing summary; the full readout lives behind the T key."""
+        summary = standing_summary_text(self.engine.state)
+        has_standing = summary != "unknown to the powers"
         ledger = self.engine.state.faction_ledger
-        factions = [
-            faction
-            for faction in ledger.factions.values()
-            if any(faction.standing.values())
-        ]
         y = self.draw_text(
-            "Standing", x, y, self.small_font, ACCENT if factions else MUTED
+            "Standing", x, y, self.small_font, ACCENT if has_standing else MUTED
         )
-        if not factions:
-            return self.draw_text("unknown to the powers", x, y, self.small_font, MUTED)
-        for faction in sorted(factions, key=lambda f: f.id):
-            axes = ", ".join(
-                f"{axis} {value:+.1f}"
-                for axis, value in sorted(faction.standing.items())
-                if value
+        for line in wrap_text(summary, 42):
+            y = self.draw_text(
+                line, x, y, self.small_font, TEXT if has_standing else MUTED
             )
-            for line in wrap_text(f"{faction.name} ({faction.mood}): {axes}", 42):
-                y = self.draw_text(line, x, y, self.small_font, TEXT)
+        y = self.draw_text(
+            "(press T to view full standings)", x, y, self.small_font, MUTED
+        )
         legend = self.engine.legend_words(self.engine.state.player_soul_id, n=4)
         if legend:
             for line in wrap_text("Legend: " + ", ".join(legend), 42):
@@ -3394,6 +3481,27 @@ class GameUI:
             for index in range(max(0, start), min(visible_line_count - 1, end) + 1)
         }
 
+    def _input_line_slices(self, wrap_chars: int = 42) -> list[tuple[str, int, int]]:
+        text = self.input_text
+        if not text:
+            return [(" ", 0, 0)]
+        slices: list[tuple[str, int, int]] = []
+        start = 0
+        n = len(text)
+        while start < n:
+            limit = min(n, start + wrap_chars)
+            next_start = limit
+            end = limit
+            if limit < n:
+                break_at = text.rfind(" ", start + 1, limit + 1)
+                if break_at > start:
+                    end = break_at
+                    next_start = break_at + 1
+            line = text[start:end] or " "
+            slices.append((line, start, end))
+            start = max(next_start, start + 1)
+        return slices
+
     def spell_box_height(self) -> int:
         if self.input_mode == "control":
             visible_lines = len(wrap_text(CONTROLS_HINT, CONTROLS_HINT_WRAP))
@@ -3402,7 +3510,7 @@ class GameUI:
             # Fixed at 3 lines — the flavor text stays in the message log above.
             visible_lines = 3
         else:
-            visible_lines = min(max(2, len(wrap_text(self.input_text or " ", 42))), 6)
+            visible_lines = min(max(2, len(self._input_line_slices())), 6)
         return 18 + visible_lines * 18
 
     def draw_mode_box(
@@ -3532,6 +3640,7 @@ class GameUI:
 
         rect = pygame.Rect(x, y, width, height)
         self.spell_box_rect = rect
+        self.input_line_rects = []
         pygame.draw.rect(self.screen, (17, 19, 24), rect, border_radius=6)
         pygame.draw.rect(
             self.screen, MODE_COLORS[self.input_mode], rect, width=1, border_radius=6
@@ -3584,16 +3693,41 @@ class GameUI:
                 MUTED,
             )
             return
-        shown = self.input_text
-        if self.input_active and pygame.time.get_ticks() % 1000 < 500:
-            shown += "_"
-        lines = wrap_text(shown or " ", 42)
+        self._clamp_input_cursor()
+        lines = self._input_line_slices()
         max_visible_lines = max(1, (height - 18) // 18)
-        visible_lines = lines[-max_visible_lines:]
-        if len(lines) > max_visible_lines and visible_lines:
-            visible_lines[0] = "..." + visible_lines[0][-39:]
-        for index, line in enumerate(visible_lines):
-            self.draw_text(line, x + 10, y + 9 + index * 18, self.ui_font, TEXT)
+        cursor_line = len(lines) - 1
+        for index, (_line, start, end) in enumerate(lines):
+            if start <= self.input_cursor <= end:
+                cursor_line = index
+                break
+        first_line = 0
+        if len(lines) > max_visible_lines:
+            first_line = min(
+                max(0, cursor_line - max_visible_lines + 1),
+                len(lines) - max_visible_lines,
+            )
+        visible_lines = lines[first_line : first_line + max_visible_lines]
+        blink = self.input_active and pygame.time.get_ticks() % 1000 < 500
+        for index, (line, start, end) in enumerate(visible_lines):
+            prefix = "..." if first_line > 0 and index == 0 else ""
+            line_y = y + 9 + index * 18
+            text_x = x + 10
+            display = prefix + line
+            self.draw_text(display, text_x, line_y, self.ui_font, TEXT)
+            prefix_width = self.ui_font.size(prefix)[0]
+            line_rect = pygame.Rect(text_x, line_y, width - 20, 18)
+            self.input_line_rects.append((line_rect, start, end, line, prefix_width))
+            if blink and start <= self.input_cursor <= end:
+                offset = max(0, min(len(line), self.input_cursor - start))
+                caret_x = text_x + prefix_width + self.ui_font.size(line[:offset])[0]
+                pygame.draw.line(
+                    self.screen,
+                    TEXT,
+                    (caret_x, line_y + 2),
+                    (caret_x, line_y + self.ui_font.get_height()),
+                    1,
+                )
 
     def draw_llm_panel(self) -> None:
         x = 0
@@ -3958,7 +4092,11 @@ class GameUI:
         return lines
 
     def handle_mouse_wheel(self, event: pygame.event.Event) -> None:
-        if self._active_scene() is not None:
+        scene = self._active_scene()
+        if scene is not None:
+            handler = getattr(scene, "handle_mouse_wheel", None)
+            if handler is not None:
+                handler(event)
             return
         if self.queue_debug_active:
             self.queue_debug_scroll = max(

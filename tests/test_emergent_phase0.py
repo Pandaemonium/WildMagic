@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from wildmagic.actions import GameSession
+from wildmagic.actions import GameSession, standing_summary_text
 from wildmagic.deeds import Deed, DeedLedger
 from wildmagic.engine import GameEngine
 from wildmagic.factions import FactionLedger, seed_phase0_factions
@@ -278,3 +278,21 @@ def test_cli_scripted_run_shows_standing_readout(capsys) -> None:
     out = capsys.readouterr().out
     assert "Standing - how the powers regard you" in out
     assert "the Grand Empire" in out
+
+
+def test_standing_summary_prioritizes_strongest_factions() -> None:
+    engine = GameEngine(seed=7, scenario="test_chamber")
+    empire = engine.state.faction_ledger.primary("empire")
+    rebellion = engine.state.faction_ledger.primary("resistance")
+    assert empire is not None
+    assert rebellion is not None
+    empire.standing["imperial_threat"] = 2.5
+    empire.standing["fear"] = 0.5
+    rebellion.standing["gratitude"] = 1.0
+
+    summary = standing_summary_text(engine.state, faction_limit=1)
+
+    assert "the Grand Empire" in summary
+    assert "imperial threat +2.5" in summary
+    assert "+1 more" in summary
+    assert "\n" not in summary

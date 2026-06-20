@@ -770,6 +770,40 @@ def test_book_pipeline_readies_closest_book_first(monkeypatch) -> None:
         session.close()
 
 
+def test_far_book_pages_eventually_prewarm_at_lower_priority(monkeypatch) -> None:
+    monkeypatch.setenv("WILDMAGIC_BOOK_TITLES", "1")
+    monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_ENABLED", "0")
+    monkeypatch.setenv("WILDMAGIC_CANON_PREWARM_LIMIT", "1")
+    session = GameSession(
+        seed=7,
+        scenario="test_chamber",
+        provider_name="mock",
+        canon_provider_name="mock",
+    )
+    try:
+        far = session.engine.spawn_prop("book", 34, 6)
+        assert far is not None
+        far.name = "smoke-cured border ledger"
+        far.details["book_seed"] = {
+            "subjects": ["border custom"],
+            "title_shape": "ledger",
+            "genre": "ledger",
+        }
+        far.tags.add("book")
+        assert not session.engine.is_visible(far.x, far.y)
+        player = session.engine.state.player
+        assert max(abs(far.x - player.x), abs(far.y - player.y)) > 8
+
+        full_id = f"canon_book_{far.id}"
+        for _ in range(6):
+            session._enqueue_canon_prewarm()
+            session.drain_canon_prewarm(block=True)
+
+        assert session.engine.state.canon_records[full_id].kind == "book"
+    finally:
+        session.close()
+
+
 def test_read_reuses_prewarmed_pages_without_regenerating(monkeypatch) -> None:
     class CountingMockCanonProvider:
         name = "counting-mock"

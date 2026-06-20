@@ -450,6 +450,13 @@ class GameSession:
                 # bond it seeds, and any secret they share all flow from general systems.
                 action = "free"
                 success = self.engine.free_captive()
+            elif verb in {"spare", "mercy"}:
+                # Spare a beaten hostile combatant instead of finishing them; the engine
+                # records the mercy deed and makes the yielded target stand down.
+                action = "spare"
+                success = self.engine.spare_enemy(
+                    command_argument(original_command, tokens)
+                )
             elif verb in {"tick", "simulate", "daytick"}:
                 # Debug trigger for the daily world tick (Phase 0). A free action; the
                 # real 05:00 cadence lands in Phase 0.5. Applies unapplied deeds once.
@@ -517,7 +524,9 @@ class GameSession:
             ):
                 action = "wares"
                 success = True
-                explicit_messages = self._browse_wares()
+                explicit_messages = self._browse_wares(
+                    command_argument(original_command, tokens)
+                )
             elif self.engine.state.pending_trade is not None and verb in {
                 "accept",
                 "yes",
@@ -2460,11 +2469,10 @@ class GameSession:
             title_id = f"canon_book_title_{normalize_id(entity.id)}"
             full_id = f"canon_book_{normalize_id(entity.id)}"
             distance = max(abs(entity.x - player.x), abs(entity.y - player.y))
-            nearby = distance <= 8 and self.engine.is_visible(entity.x, entity.y)
             if full_id in state.canon_records:
                 pages = "done"
-            elif not nearby:
-                pages = "far"  # pages prewarm only for nearby visible books
+            elif title_id not in state.canon_records:
+                pages = "waiting_title"
             else:
                 pages = stage_status(full_id)
             books.append(
@@ -2546,15 +2554,15 @@ class GameSession:
         return candidates
 
     def _canon_book_jobs(self) -> list[CanonSaturationJob]:
-        """The book pipeline, ordered strictly by proximity so the closest books are
-        readied first. Each book is taken to full readiness before the next: its
-        title materializes (whole zone, so every shelf is readable by name), then —
-        for nearby visible books — its full pages, so `read` opens instantly. The
-        sort key (distance, stage) interleaves as title→pages per book in distance
-        order, and the list is rebuilt each enqueue, so it tracks the player."""
+        """Keep visible nearby books snappy while eventually warming every shelf.
+
+        Titles are offered across the whole zone. Once a title exists, nearby
+        visible pages remain high priority; far or unseen pages are eligible at a
+        lower priority after local titles/pages.
+        """
         state = self.engine.state
         player = state.player
-        pending: list[tuple[tuple[int, int], str, str, Any, str | None]] = []
+        pending: list[tuple[tuple[int, int, int], str, str, Any, str | None]] = []
         for entity in state.entities.values():
             if entity.kind != "prop" or "book" not in entity.tags:
                 continue
@@ -2566,14 +2574,17 @@ class GameSession:
             if title_id not in state.canon_records:
                 if title_id in self._queued_canon_ids:
                     continue
-                pending.append(((distance, 0), title_id, "book_title", entity, full_id))
-            elif (
-                full_id not in self._queued_canon_ids
-                and distance <= 8
-                and self.engine.is_visible(entity.x, entity.y)
-            ):
-                # Title is known; prewarm the full pages for nearby visible books.
-                pending.append(((distance, 1), full_id, "book", entity, None))
+                pending.append(
+                    ((0, distance, 0), title_id, "book_title", entity, full_id)
+                )
+            elif full_id not in self._queued_canon_ids:
+                nearby_visible = distance <= 8 and self.engine.is_visible(
+                    entity.x, entity.y
+                )
+                priority_band = 0 if nearby_visible else 1
+                pending.append(
+                    ((priority_band, distance, 1), full_id, "book", entity, None)
+                )
         pending.sort(key=lambda item: (item[0], item[1]))
         jobs: list[CanonSaturationJob] = []
         for _key, record_id, kind, book, superseded_by in pending:
@@ -2812,10 +2823,39 @@ class GameSession:
         applied, self._promise_apply_buffer = self._promise_apply_buffer, []
         return applied
 
-    def _browse_wares(self) -> list[str]:
-        npc = self.engine.find_talk_target()
+    def _find_wares_target(self, target: str = "") -> Any | None:
+        target = target.strip()
+        if not target:
+            return self.engine.find_talk_target()
+        wanted = normalize_id(target)
+        player = self.engine.state.player
+        candidates: list[tuple[int, str, Any]] = []
+        for entity in self.engine.state.entities.values():
+            if entity.kind != "npc" or not entity.alive:
+                continue
+            if entity.id not in self.engine.state.npc_profiles:
+                continue
+            if not self.engine.is_visible(entity.x, entity.y):
+                continue
+            if normalize_id(entity.id) == wanted:
+                return entity
+            if wanted in normalize_id(entity.name):
+                candidates.append(
+                    (self.engine.distance(player, entity), entity.id, entity)
+                )
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: item[:2])
+        return candidates[0][2]
+
+    def _browse_wares(self, target: str = "") -> list[str]:
+        npc = self._find_wares_target(target)
         if npc is None:
-            return ["There's no one nearby to trade with."]
+            return (
+                [f"No visible trader matches '{target}'."]
+                if target.strip()
+                else ["There's no one nearby to trade with."]
+            )
         profile = self.engine.state.npc_profiles.get(npc.id)
         if profile is None or not profile.wares:
             return [f"{npc.name} has nothing to trade."]
@@ -2920,7 +2960,7 @@ def _parse_rest_arg(arg: str) -> tuple[float | None, float | None, str | None]:
 
 def command_help() -> list[str]:
     return [
-        "Commands: move north/south/east/west, open, descend, ascend, wait (recover 1 MP), rest [hours | until <time>] (camp 8h by default), cast <spell>, target <x> <y>, talk <message>, possess [name], examine, read [book], use <item>, equip <item>, unequip <slot>, focus <item> (set spell focus), unfocus, drop <item>, pickup, inspect (or inventory), curses, journal (or rumors), world (or atlas), standing, wares (or browse), quit.",
+        "Commands: move north/south/east/west, open, descend, ascend, wait (recover 1 MP), rest [hours | until <time>] (camp 8h by default), cast <spell>, target <x> <y>, talk <message>, spare [enemy], possess [name], examine, read [book], use <item>, equip <item>, unequip <slot>, focus <item> (set spell focus), unfocus, drop <item>, pickup, inspect (or inventory), curses, journal (or rumors), world (or atlas), standing, wares [trader] (or browse), quit.",
         "Targeting: click a square (or 'target <x> <y>') to mark it - a free action, no turn. Then 'cast fireball at target', 'teleport to target', etc. aim there, and the standard spark/frost spells hit your marked foe. Click it again, 'untarget', or Esc to clear.",
         "Possessing: 'possess' (or 'swap'/'inhabit') leaps your soul into the nearest body - or 'possess <name>' for a specific one. You become that body entirely: its stats, its hit points, its inventory. The body you leave drops as an inert husk. Costs a turn.",
         "Reading: stand on or next to a book and 'read' (or 'read <name>' to pick one). The first reading takes a turn and fixes the book's title and pages forever; rereading is free. What books claim about the world is hearsay - but the world has a way of honoring what gets written down.",
@@ -2931,8 +2971,9 @@ def command_help() -> list[str]:
         "Standing: 'standing' (or 'reputation'/'factions') shows how the world's powers regard you - the mark your deeds have left on the Empire and those who oppose it. Free, costs no turn.",
         "Followers: 'followers' (or 'retinue') lists those who have come to follow you and the organizations you've founded; 'found <name>' raises a banner of your own. Free, costs no turn.",
         "Freeing captives: stand next to someone held in a cell and 'free' (or 'release') to strike their chains. What they do then is their own - some take up arms and come to follow you, some simply thank you and go, and a few repay you with what they know.",
+        "Mercy: when a hostile combatant is beaten down or disabled, 'spare' (or 'spare <name>') lets them yield instead of dying. It costs a turn and the world remembers.",
         "Talking: stand next to an NPC and 'talk <what you want to say>' (or 'speak'/'say') to start a conversation - it costs a turn, just like any other action.",
-        "Trading: some NPCs deal in goods and gold - 'wares' (or 'browse') lists what they have for trade, a free look. Haggle naturally through 'talk' - if a real offer comes together, you'll get a confirmation prompt to 'accept' (or 'yes') or 'reject' (or 'no') before anything changes hands.",
+        "Trading: some NPCs deal in goods and gold - 'wares' (or 'wares <trader>') lists what they have for trade, a free look. Haggle naturally through 'talk' - if a real offer comes together, you'll get a confirmation prompt to 'accept' (or 'yes') or 'reject' (or 'no') before anything changes hands.",
         "Equipment: weapons, armor, clothing, and charms go in their own slots and add to your attack/defense while worn. Equip with 'equip <item>' (or 'wear'/'wield'); take gear off with 'unequip <slot_or_item>' (or 'remove <item>').",
         "Spell focus: mark any one equipped item as your spell focus and the wild-magic resolver weighs it heavily when flavoring your casts. Set it with 'focus <item_or_slot>' (or 'attune'); clear it with 'unfocus'. It stays on your normal gear, so it keeps its usual stats.",
         "Standard spells (deterministic, no wild magic risk): spark, frost, heal, ward, reveal. Type the name directly, e.g. 'frost' -- 'cast frost' instead asks wild magic to improvise one.",
@@ -3026,6 +3067,48 @@ def describe_world(engine: GameEngine) -> list[str]:
             f"Current realm: {template.name} ({placement.role}; {template.tradition})."
         )
     return lines
+
+
+def standing_summary_text(state: Any, *, faction_limit: int = 2) -> str:
+    """Compact standing readout for tight UI/log spaces.
+
+    The full standing screen is intentionally verbose; this keeps the always-visible
+    panel to the factions whose current standing has the strongest mechanical signal.
+    """
+    factions = [
+        faction
+        for faction in state.faction_ledger.factions.values()
+        if any(faction.standing.values())
+    ]
+    if not factions:
+        return "unknown to the powers"
+    ranked = sorted(
+        factions,
+        key=lambda faction: (
+            -max(abs(value) for value in faction.standing.values()),
+            faction.name,
+        ),
+    )
+    parts: list[str] = []
+    for faction in ranked[:faction_limit]:
+        axes = sorted(
+            ((axis, value) for axis, value in faction.standing.items() if value),
+            key=lambda item: (-abs(item[1]), item[0]),
+        )
+        axis_text = ", ".join(
+            f"{axis.replace('_', ' ')} {value:+.1f}" for axis, value in axes[:2]
+        )
+        parts.append(f"{faction.name}: {axis_text}")
+    extra = len(ranked) - len(parts)
+    if extra > 0:
+        parts.append(f"+{extra} more")
+    return "; ".join(parts)
+
+
+def describe_standing_summary(
+    engine: GameEngine, *, view_hint: str = "press T to view full standings"
+) -> list[str]:
+    return [f"Standing: {standing_summary_text(engine.state)}", f"({view_hint})"]
 
 
 def describe_standing(engine: GameEngine) -> list[str]:

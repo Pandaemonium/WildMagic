@@ -2617,6 +2617,14 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         """
         if actor.id == other.id or other.hp <= 0:
             return False
+        # A spared combatant has yielded to the player. This is deliberately player-relative:
+        # it ends the immediate grudge without rewriting broader faction wars.
+        if (
+            "spared" in actor.tags
+            and other.id == self.state.player_id
+            and actor.faction != "enemy"
+        ):
+            return False
         # 1. A role-typed non-combatant does not initiate combat, whatever their allegiance.
         if (actor.role or "").lower() in NONCOMBATANT_ROLES:
             return False
@@ -2643,6 +2651,105 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         if self._factions_at_war(actor, other):
             return True
         return self._declared_conflict(actor, other)
+
+    def _can_spare(self, entity: Entity) -> bool:
+        """Whether the player has enough leverage to spare this enemy instead of killing them."""
+        if (
+            entity.id == self.state.player_id
+            or entity.kind not in {"actor", "npc"}
+            or not entity.alive
+            or character_is_noncombatant(entity)
+            or "spared" in entity.tags
+        ):
+            return False
+        if not self.is_hostile_to(entity, self.state.player):
+            return False
+        beaten = entity.hp <= max(1, entity.max_hp // 3)
+        disabled = bool(
+            {"frozen", "stunned", "rooted", "webbed", "frightened"}
+            & set(entity.statuses)
+        )
+        return beaten or disabled
+
+    def _spare_target(self, selector: str = "") -> Entity | None:
+        """Pick the mercy target: named visible target, marked target, then adjacent foe."""
+        player = self.state.player
+        selector = selector.strip().lower()
+        candidates = [
+            entity
+            for entity in self.state.entities.values()
+            if self._can_spare(entity) and self.is_visible(entity.x, entity.y)
+        ]
+        if selector:
+            matches = [
+                entity
+                for entity in candidates
+                if selector in entity.name.lower() or selector == entity.id.lower()
+            ]
+            return (
+                min(
+                    matches,
+                    key=lambda entity: (self.distance(player, entity), entity.id),
+                )
+                if matches
+                else None
+            )
+        marked = self.selected_target_entity()
+        if marked is not None and marked in candidates:
+            return marked
+        adjacent = [
+            entity
+            for entity in candidates
+            if max(abs(entity.x - player.x), abs(entity.y - player.y)) <= 1
+        ]
+        return (
+            min(adjacent, key=lambda entity: (self.distance(player, entity), entity.id))
+            if adjacent
+            else None
+        )
+
+    def spare_enemy(self, selector: str = "") -> bool:
+        """Spare a beaten hostile combatant, making mercy a first-class deed.
+
+        This is not a charm or surrender spell: the target must already be hostile and either
+        badly hurt or disabled. Sparing records the existing `spared_enemy` deed, removes the
+        player-relative tactical grudge, and costs a turn.
+        """
+        if self.state.game_over:
+            return False
+        target = self._spare_target(selector)
+        if target is None:
+            self.state.add_message(
+                "No beaten hostile is ready to yield. Wear one down, disable them, or mark a target."
+            )
+            return False
+        target.tags.add("spared")
+        target.tags.discard("blood_feud_hunter")
+        target.faction = "neutral"
+        for status in ("berserk", "frightened"):
+            target.statuses.pop(status, None)
+            target.status_display.pop(status, None)
+            target.status_expiry_text.pop(status, None)
+        target_faction = self._faction_of(target)
+        tags = ["combatant"]
+        if target_faction and target_faction != "civilian":
+            tags.append(target_faction)
+        self.record_deed(
+            "spared_enemy",
+            magnitude=0.2,
+            summary=f"spared {target.name} when they were beaten",
+            at=(target.x, target.y),
+            target_tags=tags,
+            victim_faction=target_faction,
+            subject_refs=[target.soul_id] if target.soul_id else None,
+            evidence_tags=["survivor_testimony"],
+        )
+        profile = self.state.npc_profiles.get(target.id)
+        if profile is not None:
+            profile.remember("You had me beaten and let me live.")
+        self.state.add_message(f"You lower your hand and spare {target.name}.")
+        self.finish_player_turn()
+        return True
 
     def _factions_at_war(self, actor: Entity, other: Entity) -> bool:
         """Whether ``actor`` and ``other`` belong to two distinct factions the ledger holds at

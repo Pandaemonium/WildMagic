@@ -60,7 +60,16 @@ def test_roll_world_is_deterministic_and_serializable() -> None:
 
 def test_world_roll_places_core_realms_with_hard_invariants() -> None:
     world = roll_world(11)
-    assert set(world.placements) == {"vigovia", "threen", *OLD_KINGDOM_IDS}
+    # The core cast is always placed (the smaller realms are added as a periphery pass).
+    assert {"vigovia", "threen", *OLD_KINGDOM_IDS} <= set(world.placements)
+    assert world.placements["vigovia"].role == "founding"
+    # Everything beyond the core is an independent smaller realm.
+    core = {"vigovia", "threen", *OLD_KINGDOM_IDS}
+    assert all(
+        pl.role == "independent"
+        for rid, pl in world.placements.items()
+        if rid not in core
+    )
     assert world.rival_realm_id in OLD_KINGDOM_IDS
     assert world.placements["vigovia"].role == "founding"
     assert world.placements["threen"].role == "proxy"
