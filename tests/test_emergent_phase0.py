@@ -145,7 +145,12 @@ def test_public_deed_yields_rumor_and_poster_on_entry() -> None:
 
     posters = [e for e in engine.state.entities.values() if "wanted_poster" in e.tags]
     assert len(posters) == 1
-    assert "WANTED" in posters[0].description
+    # The poster is now tiered (PERSON OF INTEREST -> WANTED -> WANTED DEAD OR ALIVE); one kill
+    # reads as the lowest tier. It always names the issuing authority.
+    assert any(
+        tier in posters[0].description for tier in ("PERSON OF INTEREST", "WANTED")
+    )
+    assert "Censorate" in posters[0].description
     new_messages = engine.state.messages[messages_before:]
     assert any("Word on the road" in str(m) for m in new_messages)
     # The deed is only rumored once.

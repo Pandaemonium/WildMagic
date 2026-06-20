@@ -1981,6 +1981,23 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         threat = state.faction_ledger.get("empire")
         threat_level = threat.standing_of("imperial_threat") if threat else 0.0
         bounty = max(1, int(round(threat_level * 500)))
+        # Escalation tiers + a legend-flavored charge (Tier 3B legibility): the poster reads
+        # differently as you become more notorious and for *what* you are known.
+        if threat_level >= 3:
+            headline = "WANTED DEAD OR ALIVE, by order of the Emperor"
+        elif threat_level >= 1:
+            headline = "WANTED"
+        else:
+            headline = "PERSON OF INTEREST"
+        legend = self.legend_words(state.player_soul_id, 1)
+        charge = {
+            "defiant": "for sedition against the Grand Empire",
+            "butcher": "for the murder of the Emperor's subjects",
+            "uncanny": "for forbidden and unnatural sorcery",
+            "destroyer": "for wanton destruction of imperial property",
+            "liberator": "for inciting the unfree to revolt",
+            "protector": "for armed interference with lawful patrols",
+        }.get(legend[0] if legend else "", "for the working of unlicensed wild magic")
         entity = Entity(
             id=self.next_entity_id("prop"),
             name="Imperial wanted poster",
@@ -1991,9 +2008,9 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             blocks=False,
             tags={"wanted_poster", "empire", "paper", "flammable"},
             description=(
-                "A hastily nailed Imperial notice. A crude likeness glares above the "
-                f"word WANTED, and a bounty of {bounty} crowns that climbs with every "
-                "patrol you cut down."
+                f"A nailed Imperial notice: a crude likeness glares above the words "
+                f"{headline}, {charge}. A bounty of {bounty} crowns climbs with every "
+                "patrol you cut down. — the Office of the Censorate."
             ),
             hp=4,
             max_hp=4,

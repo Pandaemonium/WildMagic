@@ -3125,6 +3125,11 @@ class _GenerationMixin:
             state.add_message("Beyond this edge, the known world simply ends.")
             return False
 
+        old_realm = (
+            state.world_map.realm_at(state.zone_x, state.zone_y)
+            if state.world_map is not None
+            else None
+        )
         self._save_current_zone()
         self.clear_target()
         state.zone_x, state.zone_y = new_zx, new_zy
@@ -3132,7 +3137,10 @@ class _GenerationMixin:
         region_changed = new_region_id != state.region_id
         state.region_id = new_region_id
         self._load_or_generate_zone(new_zx, new_zy, entry_x, entry_y)
-        if region_changed:
+        crossing = self._realm_crossing_message(old_realm, new_zx, new_zy)
+        if crossing:
+            state.add_message(crossing)
+        elif region_changed:
             state.add_message(
                 f"You cross into {self.region.name}. The air is different here."
             )
@@ -3142,6 +3150,30 @@ class _GenerationMixin:
             )
         self._on_enter_location()
         return True
+
+    def _realm_crossing_message(self, old_realm: str | None, zx: int, zy: int) -> str:
+        """A border-crossing line naming the realm and its political role (Tier 3C — the played
+        overworld), so stepping from occupied land into the free rival, or into the imperial
+        heartland, *reads* as the political shift it is. Empty within a single realm."""
+        if self.state.world_map is None:
+            return ""
+        new_realm = self.state.world_map.realm_at(zx, zy)
+        if new_realm == old_realm:
+            return ""
+        if new_realm is None:
+            return "You pass beyond any banner, into uncharted wilds."
+        from .worldgen import REALM_TEMPLATES
+
+        placement = self.state.world_map.placements.get(new_realm)
+        template = REALM_TEMPLATES.get(new_realm)
+        name = template.name if template else new_realm
+        role = placement.role if placement else ""
+        return {
+            "founding": f"You cross into {name}, the Empire's own heartland — thick with charter and ledger.",
+            "conquered": f"You cross into occupied {name} — imperial banners over an older, quieter people.",
+            "proxy": f"You cross into {name}, a client kingdom that bends the knee in all but name.",
+            "rival": f"You cross into free {name} — beyond the Empire's reach, where wild magic still breathes.",
+        }.get(role, f"You cross into {name}.")
 
     def _save_current_zone(self) -> None:
         state = self.state

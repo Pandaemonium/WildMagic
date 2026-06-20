@@ -152,6 +152,24 @@ REALM_TEMPLATES: dict[str, RealmTemplate] = {
     )
 }
 
+#: Per-realm voice line (Tier 3A — texture), from the WORLDBUILDING.md "Naming & Voice"
+#: handles. Injected into dialogue + resolver context so a Brall scene reads ale-loud and a
+#: Stalnaz one elegant, without per-realm Region archetypes.
+REALM_VOICES: dict[str, str] = {
+    "vigovia": "clipped, courteous, passive-voice, file-numbered — beards and ledgers.",
+    "stalnaz": "elegant, allusive, musical — speaks in resonance, light, and patient refinement.",
+    "brall": "warm, boastful-about-others, escalating — ale-loud and story-drunk.",
+    "ryolan": "formal, honor-weighted, blunt — oaths and first-blood.",
+    "vint": "quick, sly, rumor-threaded — everything is who-said-what.",
+    "threen": "literary, mannered, performative-polite over a swallowed truth.",
+}
+
+
+def realm_voice_line(realm_id: str) -> str:
+    """The voice handle for a realm's people (Tier 3A); empty for the unaffiliated."""
+    return REALM_VOICES.get(realm_id, "")
+
+
 #: The four old kingdoms, in canonical order (one becomes the rival, three conquered).
 OLD_KINGDOM_IDS: tuple[str, ...] = ("stalnaz", "brall", "ryolan", "vint")
 
@@ -406,7 +424,7 @@ def realm_card_for_zone(world: WorldMap, zx: int, zy: int) -> dict[str, Any]:
         "role": placement.role,
         "faction_id": placement.faction_id,
         "tradition": template.tradition if template else "",
-        "voice": template.voice if template else "",
+        "voice": realm_voice_line(placement.realm_id),
         "tags": list(template.character_tags) if template else [],
         "ruler": placement.ruler.to_dict(),
     }
