@@ -37,8 +37,11 @@ message log, and spell/input box.
 
 ### `wildmagic/scenes/`
 Self-contained Pygame full-screen scenes driven by `GameUI`: character creation,
-character editing, and the scrollable standing readout. Scene modules own their
-input/rendering state and call back into the host for fonts, drawing, and shared services.
+character editing, the host-backed menu scene, and the scrollable standing readout.
+Scene modules own their input/rendering state and call back into the host for fonts,
+drawing, and shared services. `menu_scene.py` owns menu item construction, keyboard
+controller behavior, and drawing for the main/config/model/world/inventory/quest/journal
+menus while preserving `GameUI` as the host for shared game state.
 
 ### `wildmagic/cli.py`
 Terminal front-end. Parses `--seed`, `--scenario`, `--provider`, `--script`, `--record` flags,
