@@ -33,7 +33,9 @@ and converts mouse input from scaled physical window coordinates back into logic
 coordinates. `map_view.py` renders the explored dungeon tiles, visible/revealed entities,
 map glyph placement, and target reticle. `hud_panel.py` renders the right-side HUD,
 including bars, statuses, visible enemies, floor items, inventory, curses, standing,
-message log, and spell/input box.
+message log, and spell/input box. `llm_panel.py` renders the left-side LLM/debug panel,
+reads audit JSONL records, formats prompt/response blocks, and owns debug-panel
+scroll/selection helpers.
 
 ### `wildmagic/scenes/`
 Self-contained Pygame full-screen scenes driven by `GameUI`: character creation,
