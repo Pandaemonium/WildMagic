@@ -23,7 +23,14 @@ selector overlay, and a visual AI watch controller that lets the autoplay comman
 drive the same command path while the renderer stays responsive. Equipment and inventory
 screens consume `GameSession.equipment_inventory_view()` rather than importing equipment
 rules or reconstructing wearability from item names. The side panel uses compact shared
-standing summaries; the full standing readout is opened as a modal scene.
+standing summaries; the full standing readout is opened as a modal scene. Base window
+geometry and physical-to-logical UI scaling live in `wildmagic/rendering/layout.py`.
+
+### `wildmagic/rendering/`
+Pygame rendering support modules shared by UI components. `layout.py` owns the base tile,
+panel, and window dimensions, chooses the default integer UI scale from the desktop size,
+and converts mouse input from scaled physical window coordinates back into logical UI
+coordinates.
 
 ### `wildmagic/scenes/`
 Self-contained Pygame full-screen scenes driven by `GameUI`: character creation,
