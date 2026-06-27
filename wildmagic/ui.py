@@ -32,6 +32,7 @@ from .game_data import _TOWN_GEN_TIMEOUT
 from .normalize import normalize_id
 from .rendering import llm_panel
 from .portraits import PortraitClient
+from .rendering.fonts import GameFonts
 from .rendering.layout import (
     LLM_PANEL_WIDTH,
     MAP_OFFSET_X,
@@ -41,14 +42,12 @@ from .rendering.layout import (
     TILE_SIZE,
     WINDOW_HEIGHT,
     WINDOW_WIDTH,
-    auto_ui_scale,
-    logical_mouse_event,
-    logical_mouse_pos,
-    toggled_ui_scale,
 )
+from .rendering.window import GameWindow
 from .rendering import hud_panel
 from .rendering.hud_panel import is_player_damage_message
 from .rendering.map_view import draw_map
+from .rendering.overlays import draw_autoplay_overlay, draw_resolving_indicator
 from .scenes.character_creation_scene import CharacterCreationScene
 from .scenes.character_view_scene import CharacterViewScene
 from .scenes.menu_scene import MenuScene
@@ -377,33 +376,21 @@ class VisualAutoplayController:
 
 class GameUI:
     def __init__(self, autoplay: bool = False) -> None:
-        pygame.init()
-        # No key auto-repeat: this is a turn-based game, so one physical key press must
-        # equal exactly one step. pygame's repeat (formerly set_repeat(350, 35)) synthesized
-        # extra KEYDOWNs once a key was held past the 350ms delay — and phantom repeats for
-        # keys whose KEYUP was buffered behind a slow (generation) frame — which double-stepped
-        # the player on a single intended move. set_repeat() with no args disables it.
-        pygame.key.set_repeat()
-        pygame.display.set_caption("Wild Magic")
-        self.ui_scale = auto_ui_scale()
-        self.display = pygame.display.set_mode(
-            (WINDOW_WIDTH * self.ui_scale, WINDOW_HEIGHT * self.ui_scale)
-        )
-        self.screen = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT))
-        self.clock = pygame.time.Clock()
-        self.tile_font = pygame.font.SysFont("consolas", 20, bold=True)
-        self.ui_font = pygame.font.SysFont("consolas", 17)
-        self.small_font = pygame.font.SysFont("consolas", 14)
-        # Book popup: a serif face for printed matter (falls back if absent).
-        self.book_title_font = pygame.font.SysFont(
-            "georgia,palatino linotype,times new roman", 22, bold=True
-        )
-        self.book_font = pygame.font.SysFont(
-            "georgia,palatino linotype,times new roman", 16
-        )
-        self.book_small_font = pygame.font.SysFont(
-            "georgia,palatino linotype,times new roman", 13, italic=True
-        )
+        self.window = GameWindow.create("Wild Magic")
+        # GameWindow disables pygame key auto-repeat: this is a turn-based game, so one
+        # physical key press must equal exactly one step. pygame repeat previously caused
+        # double-steps when KEYUP was buffered behind a slow generation frame.
+        self.ui_scale = self.window.ui_scale
+        self.display = self.window.display
+        self.screen = self.window.screen
+        self.clock = self.window.clock
+        self.fonts = GameFonts.create()
+        self.tile_font = self.fonts.tile
+        self.ui_font = self.fonts.ui
+        self.small_font = self.fonts.small
+        self.book_title_font = self.fonts.book_title
+        self.book_font = self.fonts.book_body
+        self.book_small_font = self.fonts.book_small
         self.session = GameSession(scenario="town")
         self.engine = self.session.engine
         self.input_text = ""
@@ -579,29 +566,24 @@ class GameUI:
                     # only while one is actually in flight — otherwise it's a real bug.
                     if self._command_future is None:
                         raise
-                pygame.transform.scale(
-                    self.screen, self.display.get_size(), self.display
-                )
-                pygame.display.flip()
-                self.clock.tick(30)
+                self.window.present()
         finally:
             self.autoplay.close()
             self._command_executor.shutdown(wait=False, cancel_futures=True)
             self.portraits.close()
             self.session.close()
-            pygame.quit()
+            self.window.close()
 
     def _logical_mouse_event(self, event: pygame.event.Event) -> pygame.event.Event:
-        return logical_mouse_event(event, self.ui_scale)
+        return self.window.logical_mouse_event(event)
 
     def _logical_mouse_pos(self) -> tuple[int, int]:
-        return logical_mouse_pos(self.ui_scale)
+        return self.window.logical_mouse_pos()
 
     def _toggle_ui_scale(self) -> None:
-        self.ui_scale = toggled_ui_scale(self.ui_scale)
-        self.display = pygame.display.set_mode(
-            (WINDOW_WIDTH * self.ui_scale, WINDOW_HEIGHT * self.ui_scale)
-        )
+        self.window.toggle_scale()
+        self.ui_scale = self.window.ui_scale
+        self.display = self.window.display
 
     def _awaiting_command(self) -> bool:
         """True while a player-issued LLM command is still resolving on the worker."""
@@ -1486,49 +1468,12 @@ class GameUI:
     def draw_resolving_indicator(self) -> None:
         """A small banner over the map while an urgent command resolves, so the player
         knows the wild magic is listening (and that new actions are being ignored)."""
-        label = self._command_label or "the wild magic"
-        if len(label) > 48:
-            label = label[:45] + "..."
-        text = f"Resolving: {label}"
-        surface = self.small_font.render(text, True, TEXT)
-        pad = 10
-        width = surface.get_width() + pad * 2
-        height = surface.get_height() + pad * 2
-        x = MAP_OFFSET_X + (MAP_PIXEL_WIDTH - width) // 2
-        y = 14
-        box = pygame.Surface((width, height), pygame.SRCALPHA)
-        box.fill((20, 22, 28, 235))
-        self.screen.blit(box, (x, y))
-        pygame.draw.rect(
-            self.screen, ACCENT, (x, y, width, height), width=1, border_radius=6
-        )
-        self.screen.blit(surface, (x + pad, y + pad))
+        draw_resolving_indicator(self.screen, self.small_font, self._command_label)
 
     def draw_autoplay_overlay(self) -> None:
-        lines = self.autoplay.overlay_lines()
-        if not lines:
-            return
-        wrapped: list[tuple[str, tuple[int, int, int]]] = []
-        for text, color in lines:
-            for line in wrap_text(text, 62):
-                wrapped.append((line, color))
-        line_height = self.small_font.get_linesize() + 2
-        width = MAP_PIXEL_WIDTH - 24
-        height = 16 + len(wrapped) * line_height
-        x = MAP_OFFSET_X + 12
-        y = MAP_PIXEL_HEIGHT + 10
-        if y + height > WINDOW_HEIGHT - 10:
-            y = WINDOW_HEIGHT - height - 10
-        overlay = pygame.Surface((width, height), pygame.SRCALPHA)
-        overlay.fill((17, 19, 24, 222))
-        self.screen.blit(overlay, (x, y))
-        pygame.draw.rect(
-            self.screen, PANEL_EDGE, (x, y, width, height), width=1, border_radius=6
+        draw_autoplay_overlay(
+            self.screen, self.small_font, self.autoplay.overlay_lines()
         )
-        cursor_y = y + 8
-        for text, color in wrapped:
-            self.draw_text(text, x + 10, cursor_y, self.small_font, color)
-            cursor_y += line_height
 
     def draw_inspect_tooltip(self) -> None:
         tx, ty = self.inspect_tile  # type: ignore[misc]

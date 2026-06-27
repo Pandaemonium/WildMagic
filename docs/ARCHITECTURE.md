@@ -35,7 +35,12 @@ map glyph placement, and target reticle. `hud_panel.py` renders the right-side H
 including bars, statuses, visible enemies, floor items, inventory, curses, standing,
 message log, and spell/input box. `llm_panel.py` renders the left-side LLM/debug panel,
 reads audit JSONL records, formats prompt/response blocks, and owns debug-panel
-scroll/selection helpers.
+scroll/selection helpers. `window.py` owns the Pygame display surface, logical render
+surface, frame presentation, runtime UI scale toggling, key-repeat setup, and Pygame
+init/quit lifecycle.
+`fonts.py` owns construction of the Pygame font bundle used by the host, scenes, and
+rendering helpers. `overlays.py` renders small map-area overlays such as the resolving
+banner and AI watch status panel.
 
 ### `wildmagic/scenes/`
 Self-contained Pygame full-screen scenes driven by `GameUI`: character creation,
