@@ -28,6 +28,7 @@ def test_game_window_create_sets_caption_and_scaled_display(monkeypatch) -> None
     layout = WindowLayout(width=100, height=50, max_ui_scale=2)
     calls: dict[str, object] = {}
 
+    monkeypatch.setattr(pygame, "init", lambda: calls.setdefault("init", True))
     monkeypatch.setattr(pygame.display, "get_desktop_sizes", lambda: [(240, 240)])
     monkeypatch.setattr(
         pygame.display,
@@ -44,6 +45,7 @@ def test_game_window_create_sets_caption_and_scaled_display(monkeypatch) -> None
 
     window = GameWindow.create("Wild Magic", layout)
 
+    assert calls["init"] is True
     assert calls["caption"] == "Wild Magic"
     assert calls["display_size"] == (200, 100)
     assert window.ui_scale == 2
@@ -95,6 +97,21 @@ def test_game_window_present_scales_flips_and_ticks(monkeypatch) -> None:
 
     assert calls == [("scale", (200, 100)), ("flip", None)]
     assert clock.ticks == [42]
+
+
+def test_game_window_close_quits_pygame(monkeypatch) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(pygame, "quit", lambda: calls.append("quit"))
+    window = GameWindow(
+        display=DisplaySurface((200, 100)),
+        screen=SimpleNamespace(),
+        clock=Clock(),
+        ui_scale=2,
+    )
+
+    window.close()
+
+    assert calls == ["quit"]
 
 
 def test_game_window_converts_mouse_events() -> None:

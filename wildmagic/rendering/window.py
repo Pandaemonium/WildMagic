@@ -6,8 +6,6 @@ import pygame
 
 from wildmagic.rendering.layout import (
     DEFAULT_WINDOW_LAYOUT,
-    WINDOW_HEIGHT,
-    WINDOW_WIDTH,
     WindowLayout,
     auto_ui_scale,
     logical_mouse_event,
@@ -28,6 +26,7 @@ class GameWindow:
     def create(
         cls, caption: str, layout: WindowLayout = DEFAULT_WINDOW_LAYOUT
     ) -> "GameWindow":
+        pygame.init()
         pygame.display.set_caption(caption)
         ui_scale = auto_ui_scale(layout)
         display = pygame.display.set_mode(layout.scaled_size(ui_scale))
@@ -50,6 +49,5 @@ class GameWindow:
         pygame.display.flip()
         self.clock.tick(fps)
 
-
-def default_logical_surface() -> pygame.Surface:
-    return pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT))
+    def close(self) -> None:
+        pygame.quit()

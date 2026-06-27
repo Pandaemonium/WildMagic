@@ -36,7 +36,9 @@ including bars, statuses, visible enemies, floor items, inventory, curses, stand
 message log, and spell/input box. `llm_panel.py` renders the left-side LLM/debug panel,
 reads audit JSONL records, formats prompt/response blocks, and owns debug-panel
 scroll/selection helpers. `window.py` owns the Pygame display surface, logical render
-surface, frame presentation, and runtime UI scale toggling.
+surface, frame presentation, runtime UI scale toggling, and Pygame init/quit lifecycle.
+`fonts.py` owns construction of the Pygame font bundle used by the host, scenes, and
+rendering helpers.
 
 ### `wildmagic/scenes/`
 Self-contained Pygame full-screen scenes driven by `GameUI`: character creation,

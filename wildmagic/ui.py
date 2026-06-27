@@ -32,6 +32,7 @@ from .game_data import _TOWN_GEN_TIMEOUT
 from .normalize import normalize_id
 from .rendering import llm_panel
 from .portraits import PortraitClient
+from .rendering.fonts import GameFonts
 from .rendering.layout import (
     LLM_PANEL_WIDTH,
     MAP_OFFSET_X,
@@ -374,31 +375,24 @@ class VisualAutoplayController:
 
 class GameUI:
     def __init__(self, autoplay: bool = False) -> None:
-        pygame.init()
+        self.window = GameWindow.create("Wild Magic")
         # No key auto-repeat: this is a turn-based game, so one physical key press must
         # equal exactly one step. pygame's repeat (formerly set_repeat(350, 35)) synthesized
         # extra KEYDOWNs once a key was held past the 350ms delay — and phantom repeats for
         # keys whose KEYUP was buffered behind a slow (generation) frame — which double-stepped
         # the player on a single intended move. set_repeat() with no args disables it.
         pygame.key.set_repeat()
-        self.window = GameWindow.create("Wild Magic")
         self.ui_scale = self.window.ui_scale
         self.display = self.window.display
         self.screen = self.window.screen
         self.clock = self.window.clock
-        self.tile_font = pygame.font.SysFont("consolas", 20, bold=True)
-        self.ui_font = pygame.font.SysFont("consolas", 17)
-        self.small_font = pygame.font.SysFont("consolas", 14)
-        # Book popup: a serif face for printed matter (falls back if absent).
-        self.book_title_font = pygame.font.SysFont(
-            "georgia,palatino linotype,times new roman", 22, bold=True
-        )
-        self.book_font = pygame.font.SysFont(
-            "georgia,palatino linotype,times new roman", 16
-        )
-        self.book_small_font = pygame.font.SysFont(
-            "georgia,palatino linotype,times new roman", 13, italic=True
-        )
+        self.fonts = GameFonts.create()
+        self.tile_font = self.fonts.tile
+        self.ui_font = self.fonts.ui
+        self.small_font = self.fonts.small
+        self.book_title_font = self.fonts.book_title
+        self.book_font = self.fonts.book_body
+        self.book_small_font = self.fonts.book_small
         self.session = GameSession(scenario="town")
         self.engine = self.session.engine
         self.input_text = ""
@@ -580,7 +574,7 @@ class GameUI:
             self._command_executor.shutdown(wait=False, cancel_futures=True)
             self.portraits.close()
             self.session.close()
-            pygame.quit()
+            self.window.close()
 
     def _logical_mouse_event(self, event: pygame.event.Event) -> pygame.event.Event:
         return self.window.logical_mouse_event(event)
