@@ -41,11 +41,8 @@ from .rendering.layout import (
     TILE_SIZE,
     WINDOW_HEIGHT,
     WINDOW_WIDTH,
-    auto_ui_scale,
-    logical_mouse_event,
-    logical_mouse_pos,
-    toggled_ui_scale,
 )
+from .rendering.window import GameWindow
 from .rendering import hud_panel
 from .rendering.hud_panel import is_player_damage_message
 from .rendering.map_view import draw_map
@@ -384,13 +381,11 @@ class GameUI:
         # keys whose KEYUP was buffered behind a slow (generation) frame — which double-stepped
         # the player on a single intended move. set_repeat() with no args disables it.
         pygame.key.set_repeat()
-        pygame.display.set_caption("Wild Magic")
-        self.ui_scale = auto_ui_scale()
-        self.display = pygame.display.set_mode(
-            (WINDOW_WIDTH * self.ui_scale, WINDOW_HEIGHT * self.ui_scale)
-        )
-        self.screen = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT))
-        self.clock = pygame.time.Clock()
+        self.window = GameWindow.create("Wild Magic")
+        self.ui_scale = self.window.ui_scale
+        self.display = self.window.display
+        self.screen = self.window.screen
+        self.clock = self.window.clock
         self.tile_font = pygame.font.SysFont("consolas", 20, bold=True)
         self.ui_font = pygame.font.SysFont("consolas", 17)
         self.small_font = pygame.font.SysFont("consolas", 14)
@@ -579,11 +574,7 @@ class GameUI:
                     # only while one is actually in flight — otherwise it's a real bug.
                     if self._command_future is None:
                         raise
-                pygame.transform.scale(
-                    self.screen, self.display.get_size(), self.display
-                )
-                pygame.display.flip()
-                self.clock.tick(30)
+                self.window.present()
         finally:
             self.autoplay.close()
             self._command_executor.shutdown(wait=False, cancel_futures=True)
@@ -592,16 +583,15 @@ class GameUI:
             pygame.quit()
 
     def _logical_mouse_event(self, event: pygame.event.Event) -> pygame.event.Event:
-        return logical_mouse_event(event, self.ui_scale)
+        return self.window.logical_mouse_event(event)
 
     def _logical_mouse_pos(self) -> tuple[int, int]:
-        return logical_mouse_pos(self.ui_scale)
+        return self.window.logical_mouse_pos()
 
     def _toggle_ui_scale(self) -> None:
-        self.ui_scale = toggled_ui_scale(self.ui_scale)
-        self.display = pygame.display.set_mode(
-            (WINDOW_WIDTH * self.ui_scale, WINDOW_HEIGHT * self.ui_scale)
-        )
+        self.window.toggle_scale()
+        self.ui_scale = self.window.ui_scale
+        self.display = self.window.display
 
     def _awaiting_command(self) -> bool:
         """True while a player-issued LLM command is still resolving on the worker."""
