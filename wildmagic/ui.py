@@ -1645,44 +1645,8 @@ class GameUI:
     def draw(self) -> None:
         rendering.draw_game_frame(self)
 
-    def draw_resolving_indicator(self) -> None:
-        """A small banner over the map while an urgent command resolves, so the player
-        knows the wild magic is listening (and that new actions are being ignored)."""
-        rendering.draw_resolving_indicator(
-            self.screen, self.small_font, self._command_label
-        )
-
-    def draw_autoplay_overlay(self) -> None:
-        rendering.draw_autoplay_overlay(
-            self.screen, self.small_font, self.autoplay.overlay_lines()
-        )
-
-    def draw_inspect_tooltip(self) -> None:
-        rendering.draw_inspect_tooltip(self)
-
-    def draw_book_popup(self) -> None:
-        """A parchment page for reading books, modal over everything else.
-        Long texts paginate; arrows/space/clicks turn pages."""
-        rendering.draw_book_popup(self)
-
-    def draw_queue_debug(self) -> None:
-        """F7 overlay: the background generation (canon prewarm) queue. Shows what the
-        single worker is doing now and queued next, then the whole zone's books with
-        their title/pages state in proximity order. Rebuilt live each frame, so it
-        updates as the queue drains; the book list scrolls."""
-        rendering.draw_queue_debug(self)
-
     def draw_menu(self) -> None:
         self.menu_scene.draw()
-
-    def draw_map(self) -> None:
-        rendering.draw_map(self.screen, self.tile_font, self.engine)
-
-    def draw_panel(self) -> None:
-        rendering.draw_hud_panel(self)
-
-    def draw_curse_tooltip(self) -> None:
-        rendering.draw_curse_tooltip(self)
 
     def _visible_hostiles_to_player(self) -> list[Entity]:
         engine = self.engine
@@ -1713,10 +1677,6 @@ class GameUI:
             and max(abs(entity.x - player.x), abs(entity.y - player.y)) <= 1
         ]
         return min(adjacent, key=lambda entity: entity.id) if adjacent else None
-
-    def draw_llm_panel(self) -> None:
-        if self._llm_debug_embedded():
-            rendering.draw_llm_panel(self)
 
     def draw_llm_call_buttons(self, x: int, y: int, width: int) -> int:
         return rendering.draw_llm_call_buttons(self, x, y, width)
