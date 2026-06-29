@@ -70,11 +70,14 @@ cross-state consistency checks; agent notes are kept as unverified leads.
 ### `wildmagic/actions.py`
 `GameSession` — the single object callers interact with. Wraps `GameEngine` and the LLM
 providers. Exposes `process_command(text)` which routes movement, wait, open/close, stairs,
-cast, talk, trade, inventory, and `examine` commands. Returns an `ActionResult`. Also owns the background
+cast, talk, trade, item identification, inventory, and `examine` commands. Returns an
+`ActionResult`. Also owns the background
 lore-extraction executor used after dialogue; completed promises are added to `GameState` and
 recorded into replay data. On-demand canon materialization for `examine` also lives here:
 valid new room-flavor records cost a turn, technical failures do not, and re-reading existing
-canon is free. `close()` cancels pending lore work and shuts down the executor.
+canon is free. NPC item identification pays gold, calls the item-identification provider,
+then applies only validated item lore/use/equipment specs through the engine. `close()`
+cancels pending lore work and shuts down the executor.
 Also holds `summarize_state()` (used by the replay system) and `to_replay()` / `from_replay()`
 serialization. `equipment_inventory_view()` exposes the shared read-only equipment and
 inventory presentation model used by both front ends.
@@ -83,7 +86,8 @@ inventory presentation model used by both front ends.
 Save/load/run replay JSON files. `run_replay(path)` re-feeds a recorded session's commands back
 through a fresh `GameSession` and optionally checks the final state snapshot against a saved
 expectation. Replays carry materialized canon apply points so `examine` and future background
-content replay without calling the provider. Used for regression testing.
+content replay without calling the provider. Item-identification actions carry the validated
+identification payload so replay does not call the provider. Used for regression testing.
 
 ### `wildmagic/persistence.py`
 Versioned internal save/load snapshots. This is the complete durable-state boundary for
@@ -151,14 +155,17 @@ The read-only state surface over `GameState`. `GameState` stays the single sourc
 this module turns it into the compact, stable packets each consumer needs without mutating
 anything. It holds one builder per public-dict shape — `entity_card`, `item_card`,
 `tile_card`, `room_card`, `selected_target_card`, `scene_notes_card`,
-`nearby_tile_details`, `equipment_inventory_view` — and composes them into the two
-top-level views: `spell_context_view` (the resolver packet returned by
-`engine.context_for_llm`) and `state_summary` (exposed as `replay_summary_view` for
+`nearby_tile_details`, `inventory_item_card`, `equipment_inventory_view`, `reagent_cards`
+— and composes them into the two top-level views: `spell_context_view` (the resolver packet
+returned by `engine.context_for_llm`) and `state_summary` (exposed as `replay_summary_view` for
 `actions.summarize_state`/replay records and `inspection_view` for CLI/GUI inspection).
 `resolve_foci` turns the caster's marked focus slots into the resolver's `spell_foci` flavor
-list. `current_realm_card` exposes the zone's owning realm, role, tradition, and ruler from
-the world map for resolver, replay, dialogue, and inspection consumers. Everything here is
-pure reads; `tile_counts` lives here too. See
+list. `reagent_cards` exposes unprotected inventory and gold as value/tag/material cards
+for the wild-magic resolver, while protected stacks are surfaced separately. Inventory cards
+also surface identified item status, charges, and dynamic equipment slots for both front
+ends. `current_realm_card`
+exposes the zone's owning realm, role, tradition, and ruler from the world map for resolver,
+replay, dialogue, and inspection consumers. Everything here is pure reads; `tile_counts` lives here too. See
 `docs/WILD_MAGIC_STATE_SURFACE_PLAN.md` (Stage 2). Imports only leaf modules
 (`models`, `capabilities`, `equipment`, `spell_contract`, `templates`), never `engine`, so it sits below
 the engine in the import order despite reading from it at call time. Active `tile_flows`
@@ -214,7 +221,8 @@ does not move handler logic; `effects._apply_effect` still owns application. Imp
 Everything that changes HP or resolves physical contact:
 `equipment_bonus`, `effective_attack`, `effective_defense`, `attack`, `_is_canonical`,
 `damage_entity`, `_conduct_lightning_through_water`, `_modified_damage`, `heal_entity`,
-`_split_slime`, `_drop_loot`, `_on_entity_death`.
+`_split_slime`, `_drop_loot`, `_on_entity_death`. `_drop_loot` sometimes swaps the
+ordinary tag-based drop for a generated semantic curio from `item_generation.py`.
 
 ### `wildmagic/curses.py`
 Curse catalogue and curse-facing helpers. Defines known mixed/mechanical curse templates
@@ -227,12 +235,16 @@ mechanical curse limits.
 ### `wildmagic/items.py` — `_ItemsMixin`
 Inventory management and item use:
 `spawn_item`, `use_item`, `drop_item`, `find_inventory_item`, `find_item_in`,
-`consume_inventory_item`, `add_inventory_item`, `_apply_item_use_spec`, `_apply_item_effect`,
-`_roll_item_amount`, `equip_item`, `unequip_item`, `pick_up_items_at_player`.
+`protected_inventory_key`, `is_item_protected`, `protect_item`, `unprotect_item`,
+`reagent_cards`, `consume_inventory_item`, `add_inventory_item`, `_apply_item_use_spec`,
+`_apply_item_effect`, `_roll_item_amount`, `equip_item`, `unequip_item`,
+`identify_inventory_item`, `equipment_slot_for_inventory_item`, `pick_up_items_at_player`.
 `pick_up_items_at_player` preserves a picked-up item's description into `GameState.item_lore`
 (keyed by inventory key) so its flavor survives the Entity's removal. Spell-focus marking lives
 here too: `set_focus`/`clear_focus` mark an already-equipped slot as a spell focus (a mark, not a
-new slot), resolved via `_equipped_slot_by_item`. Also holds `_EQUIPMENT_SLOT_ALIASES`.
+new slot), resolved via `_equipped_slot_by_item`. Identified item lore can provide direct-use
+specs and simple slot-passive attack/defense bonuses without adding authored entries to
+`game_data.py`. Also holds `_EQUIPMENT_SLOT_ALIASES`.
 
 ### `wildmagic/equipment.py`
 Pure equipment policy shared by mutation and read-model layers: canonical
@@ -354,6 +366,23 @@ Trade provider stack (`TradeProvider` / `Ollama` / `Mock` / `Auto` → `TradeRes
 `make_trade_provider`, `parse_trade_json`, `validate_trade_resolution`, and
 `resolve_trade_proposal`. A small structured-JSON surface decoupled from dialogue prose.
 
+### `wildmagic/item_ability_cards.py`
+Capability-card library for item identification. Defines reusable `ItemAbilityCard`
+records and `select_item_ability_cards`, which chooses a small prompt set from item
+name/tags/material and NPC role.
+
+### `wildmagic/item_identification.py`
+Item-identification provider stack (`ItemIdentificationProvider` / `Ollama` / `Mock` /
+`Auto` → `ItemIdentificationResolution`), fee/value helpers, prompt context assembly,
+JSON parsing/normalization/validation, and audit logging. It asks the model to adapt one
+ability card into an engine-supported item use/equipment spec; the engine still computes
+final value and applies inventory mutation.
+
+### `wildmagic/item_palettes.py`
+Shared color-palette catalog for identified item descriptors. Provides prompt cards for
+the item-identification LLM, semantic palette selection helpers, human labels for CLI
+inventory summaries, and RGB color cycles used by the GUI to render descriptor letters.
+
 ### `wildmagic/town_gen.py`
 Town generation provider (`TownProvider` / `Ollama` / `Mock` / `Auto` → `TownSpec`),
 `make_town_provider`, the `BuildingSpec` / `NpcSpec` / `TownSpec` dataclasses, and
@@ -418,7 +447,7 @@ Engine-owned secret resolution for the `investigate` verb: difficulty→turn cos
 deterministic anchor selection among room props, and tag-keyed reward tables. The engine
 fixes whether a secret exists (RoomProfile secret slots placed at generation), what
 anchors it, and what the reward is before any model is prompted; the LLM only words the
-clue. No provider calls live here.
+clue. Rewards may be stock items or generated semantic curios. No provider calls live here.
 
 ### `wildmagic/promises.py`
 Promise Ledger data types and prompt-shaping helpers. Defines `WorldPromise`,
@@ -572,7 +601,8 @@ All shared data types and tile constants. No game logic.
   semantic seed layer for richer content; `CanonRecord` stores per-run materialized text
   or descriptions that have become game canon. `Entity` carries its own per-body loadout —
   `equipment` (slot -> item) and `focus_slots` (the equipment slots marked as spell foci, a
-  mark on existing gear rather than a new slot). `Entity.details` stores engine-side
+  mark on existing gear rather than a new slot), plus `protected_items` (carried stack names
+  kept out of ordinary wild-magic item costs). `Entity.details` stores engine-side
   nonmechanical metadata such as a book's procedural shelf card; feature-specific
   context builders decide what, if anything, becomes visible to an LLM.
   `Curse` stores both semantic prompt text and optional engine-owned mechanics; unknown
@@ -591,6 +621,23 @@ All hand-authored game content and tunable constants:
   `_TOWN_SETTLEMENT_TYPES`, `_TOWN_GEN_TIMEOUT`, `_BUILDING_SIZES`, `_DEFAULT_BUILDING_SIZE`,
   `_ROLE_STATS`, `_DEFAULT_NPC_STATS`
 - Trade keyword detection: `TRADE_KEYWORDS`, `scan_for_trade_intent`
+
+### `wildmagic/item_catalog.py`
+Authoritative item metadata for the current fungible inventory model. Defines
+`ItemDefinition` and `SpellBias`, hand-authored definitions for starter reagents,
+consumables, equipment, keys, gold, and regional goods, plus inferred definitions for
+generated semantic curios. Helpers such as `item_definition`, `item_value`, `item_tags`,
+and `reagent_card` keep market value and spell reagent value unified. `state_view` uses
+these cards for CLI/GUI inventory display and resolver reagent context; `effects` uses
+`item_value` when reporting item costs. Durable `item_lore` metadata can override inferred
+value/material/tags for generated curios.
+
+### `wildmagic/item_generation.py`
+Small compositional generator for semantic curios. `GeneratedCurio` carries name, value,
+material, tags, description, and source. `generate_curio()` combines theme tags with material,
+form, and oddity tables to make objects such as debtor salt coins or moonlit pearl lenses.
+Secrets, monster loot, trader wares, and occasional procedural quest rewards use this module
+without adding direct-use mechanics or an extra LLM call.
 
 ### `wildmagic/templates.py`
 Frozen dataclasses `ItemTemplate` and `CreatureTemplate` plus their catalogues
@@ -631,7 +678,7 @@ Router-facing descriptions and injected bodies both come from these files, but i
 sections are omitted from model-facing prompts.
 
 ### `wildmagic/npc_quests.py`
-Quest-promise producer logic and data. Defines the `QUEST_ITEMS` dictionary mapping special unique quest items to their visual/materials/tags specs. When an NPC request is heard, `register_heard_quest_item()` appends a `WorldPromise(kind="quest")` with typed fetch objective/reward data. Quest item placement happens when that promise's reserved site realizes; there is no independent random zone-entry quest-item spawner. `generate_npc_quest()` still supplies request fields for procedural NPC profiles.
+Quest-promise producer logic and data. Defines the `QUEST_ITEMS` dictionary mapping special unique quest items to their visual/materials/tags specs. When an NPC request is heard, `register_heard_quest_item()` appends a `WorldPromise(kind="quest")` with typed fetch objective/reward data. Quest item placement happens when that promise's reserved site realizes; there is no independent random zone-entry quest-item spawner. `generate_npc_quest()` still supplies request fields for procedural NPC profiles and can choose a generated semantic curio as an optional item reward.
 
 ### `wildmagic/normalize.py`
 Pure functions for sanitising and coercing LLM output. No side effects, no imports outside

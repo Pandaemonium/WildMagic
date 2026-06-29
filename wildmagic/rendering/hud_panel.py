@@ -4,7 +4,7 @@ from typing import Any
 
 import pygame
 
-from wildmagic.actions import standing_summary_text
+from wildmagic.actions import inventory_summary_text, standing_summary_text
 from wildmagic.curses import curse_card
 from wildmagic.models import Entity
 from wildmagic.rendering.layout import (
@@ -284,12 +284,7 @@ def draw_inventory(host: Any, x: int, y: int) -> int:
     equipment_view = host.session.equipment_inventory_view()
     # Gold gets its own dedicated readout (draw_gold) right next to the HP/MP
     # bars - showing it again here would just be visual noise.
-    items = (
-        ", ".join(
-            f"{item['name']} x{item['quantity']}" for item in equipment_view["items"]
-        )
-        or "empty"
-    )
+    items = inventory_summary_text(equipment_view)
     y = host.draw_text("Inventory", x, y, host.small_font, GOLD)
     for line in wrap_text(items, 42):
         y = host.draw_text(line, x, y, host.small_font, TEXT)

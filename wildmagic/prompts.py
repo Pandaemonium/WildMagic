@@ -249,6 +249,47 @@ haggle - not a vending machine.
 """
 
 
+ITEM_IDENTIFICATION_SYSTEM_PROMPT = """Identify one semantic item into one modest functional
+item for Wild Magic. Return ONLY one JSON object: no markdown, prose, or <think>.
+
+Input keys: item, npc, identification, ability_cards, color_palettes.
+
+Required compact JSON:
+{
+  "identified": true,
+  "descriptor": "short color/palette adjective",
+  "palette_id": "one id from color_palettes",
+  "display_name": "base noun name, no descriptor",
+  "description": "one vivid sentence",
+  "ability_summary": "one plain player-facing sentence",
+  "tags": ["2-5", "semantic", "tags"],
+  "ability_card_id": "one id from ability_cards",
+  "effect_overrides": {
+    "message": "optional short use message",
+    "failure": "optional short failure message",
+    "charges": 1,
+    "damage_type": "optional",
+    "status": "optional",
+    "tile": "optional",
+    "duration": 1,
+    "range": 1
+  }
+}
+
+Rules:
+- Choose exactly one ability_card_id. The engine expands that card; do not rewrite the full
+  nested use_spec unless you must.
+- effect_overrides may only tune the chosen card's existing kind: prose, charges, amount,
+  damage_type, status, tile, radius, duration, range, or required.
+- Choose exactly one palette_id from color_palettes. descriptor must match that palette and
+  will be prefixed by the engine. display_name stays noun-like: "moon glass shard", not
+  "moonlit moon glass shard" and never "(identified)".
+- Keep description and ability_summary short. ability_summary must honestly say whether the
+  player should use or equip the item.
+- The engine sets value. Include no price, value, or gold fields.
+"""
+
+
 TOWN_SYSTEM_PROMPT = """You are a world-builder for a vibrant, eclectic fantasy roguelike. The world is a colorful
 patchwork of old magical traditions (blood, bone, crystal, song) living under the Grand Empire -- a polite,
 orderly power that licenses "charter magic" and outlaws wild sorcery. Generate a small frontier settlement.

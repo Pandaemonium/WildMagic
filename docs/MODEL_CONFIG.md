@@ -29,6 +29,7 @@ Every LLM call has a **purpose**, and each purpose belongs to a **route**:
 | `wild` | resolve typed wild-magic spells | URGENT | `WILDMAGIC_MODEL` |
 | `dialogue` | NPC conversation | URGENT | `WILDMAGIC_MODEL` |
 | `trade` | trade-offer extraction from dialogue | URGENT | dialogue's model |
+| `item` | item identification into functional abilities | URGENT | trade's model |
 | `canon` | on-demand canon materialization (`examine`, `read`) | URGENT | `WILDMAGIC_MODEL` |
 | `agent` | autonomous playtesting command chooser | URGENT | `WILDMAGIC_MODEL` |
 | `town` | settlement generation (name, buildings, NPCs) | BACKGROUND | `WILDMAGIC_MODEL` |
@@ -54,15 +55,17 @@ WILDMAGIC_<OPTION>               e.g. WILDMAGIC_OLLAMA_NUM_GPU
 ```
 
 Purpose names accept aliases (`SPELL`/`WILD_MAGIC`/`MAGIC` → `WILD`, `NPC_DIALOGUE` →
-`DIALOGUE`, `TOWN_GENERATION` → `TOWN`, `LORE_EXTRACTION` → `LORE`). Routes are
-`URGENT` (wild, dialogue, trade, canon, agent) and `BACKGROUND` (town, lore).
+`DIALOGUE`, `ITEM_IDENTIFICATION` → `ITEM`, `TOWN_GENERATION` → `TOWN`,
+`LORE_EXTRACTION` → `LORE`). Routes are `URGENT` (wild, dialogue, trade, item, canon,
+agent) and `BACKGROUND` (town, lore).
 
 ## Providers
 
 Per purpose: `WILDMAGIC_PROVIDER` (the master switch, default `ollama`), plus
 `WILDMAGIC_DIALOGUE_PROVIDER`, `WILDMAGIC_TRADE_PROVIDER` (defaults to dialogue's),
-`WILDMAGIC_TOWN_PROVIDER`, `WILDMAGIC_LORE_PROVIDER`, `WILDMAGIC_CANON_PROVIDER` (each
-defaults to the master).
+`WILDMAGIC_ITEM_PROVIDER` (defaults to trade's), `WILDMAGIC_TOWN_PROVIDER`,
+`WILDMAGIC_LORE_PROVIDER`, `WILDMAGIC_CANON_PROVIDER` (each defaults to the master
+unless noted).
 
 - `ollama` — real local LLM. The mode the game is designed around.
 - `mock` — deterministic fake. For tests, replays, and engine work; never needs a server.
@@ -80,6 +83,7 @@ resolver, while `--agent ollama` uses the `agent` purpose only to choose CLI com
 | `WILDMAGIC_WILD_MODEL` | shared | spell resolution |
 | `WILDMAGIC_DIALOGUE_MODEL` | shared | NPC conversation (a chattier finetune works well) |
 | `WILDMAGIC_TRADE_MODEL` | dialogue's | trade extraction |
+| `WILDMAGIC_ITEM_MODEL` | trade's | item identification |
 | `WILDMAGIC_CANON_MODEL` | shared | examine/read materialization |
 | `WILDMAGIC_BACKGROUND_CANON_MODEL` | canon model | background book previews |
 | `WILDMAGIC_AGENT_MODEL` | shared | autonomous playtesting command chooser |
@@ -106,11 +110,13 @@ ignoring the spell contract in creative ways.
 | `WILDMAGIC_OLLAMA_TEMPERATURE` | no | 0.25 | wild/town/lore/canon temperature |
 | `WILDMAGIC_DIALOGUE_TEMPERATURE` | no | 0.7 | dialogue temperature |
 | `WILDMAGIC_TRADE_TEMPERATURE` | no | 0.5 | falls back to the dialogue variable if unset |
+| `WILDMAGIC_ITEM_TEMPERATURE` | no | trade's | item-identification ability selection |
 | `WILDMAGIC_CANON_TEMPERATURE` | no | 0.85 | examine/read prose; hot by design so similar seed packets don't yield identical titles |
 | `WILDMAGIC_AGENT_TEMPERATURE` | no | 0.35 | autonomous playtesting command variety |
 | `WILDMAGIC_OLLAMA_NUM_PREDICT` | no | 1024 (128–4096) | wild-magic response budget |
 | `WILDMAGIC_DIALOGUE_NUM_PREDICT` | no | 320 (32–1024) | dialogue budget |
 | `WILDMAGIC_TRADE_NUM_PREDICT` | no | dialogue's | trade budget |
+| `WILDMAGIC_ITEM_NUM_PREDICT` | no | trade's | item-identification budget |
 | `WILDMAGIC_AGENT_NUM_PREDICT` | no | 256 (64-1024) | command-chooser response budget |
 | `WILDMAGIC_TOWN_NUM_PREDICT` | no | 2000 (256–8192) | town generation budget |
 | `WILDMAGIC_LORE_NUM_PREDICT` | no | 700 (64–2048) | lore/flesh budget |

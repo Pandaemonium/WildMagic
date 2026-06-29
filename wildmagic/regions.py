@@ -72,7 +72,7 @@ _COMMON_SOUNDS_BY_TAG: dict[str, tuple[str, ...]] = {
     ),
     "beast": (
         "Claws click on stone somewhere, unhurried.",
-        "Something large yawns in the dark and settles again.",
+        "Something large rustles through old rushes and settles again.",
         "You hear sniffing, then a thoughtful pause.",
     ),
     "slime": (
@@ -152,7 +152,7 @@ _FRONTIER = Region(
     ),
     ambient_by_tag=dict(_COMMON_SOUNDS_BY_TAG),
     ambient_default=(
-        "Something moves in the dark, curious.",
+        "Something unseen brushes the rushes, curious.",
         "The deep places are listening, politely.",
         "Far off, water finds a new way down.",
     ),
@@ -186,7 +186,7 @@ _FRONTIER = Region(
             (
                 "The stone underfoot is warm, like something sleeping.",
                 "The colors at the edge of your vision rearrange themselves when you turn.",
-                "The dark ahead hums a note you almost know.",
+                "The passage ahead hums a note you almost know.",
             ),
         ),
     ),

@@ -42,9 +42,23 @@ from .lore import (
     make_lore_provider,
     resolve_lore_extraction,
 )
+from .item_catalog import item_value
+from .item_identification import (
+    ItemIdentificationProvider,
+    identification_fee,
+    identified_item_value,
+    item_identification_context,
+    make_item_identification_provider,
+    resolve_item_identification,
+)
 from .normalize import normalize_id
 from .models import CanonRecord, CharacterProfile
-from .state_view import equipment_inventory_view, replay_summary_view
+from .state_view import (
+    equipment_inventory_view,
+    item_card,
+    reagent_cards,
+    replay_summary_view,
+)
 from .secrets import (
     choose_anchor,
     choose_reward,
@@ -99,6 +113,18 @@ DIRECTIONS = {
     "sw": (-1, 1),
 }
 
+COMPASS_NAMES = {
+    (-1, -1): "northwest",
+    (0, -1): "north",
+    (1, -1): "northeast",
+    (-1, 0): "west",
+    (0, 0): "here",
+    (1, 0): "east",
+    (-1, 1): "southwest",
+    (0, 1): "south",
+    (1, 1): "southeast",
+}
+
 # Aliases for the deterministic standard spells, mapped to the GameEngine method
 # that resolves them. These spells require no LLM call and always behave the
 # same way -- the reliable backbone a player can lean on between wild casts.
@@ -130,6 +156,7 @@ class ActionResult:
     wild_magic: dict[str, Any] | None = None
     dialogue: dict[str, Any] | None = None
     canon_materialization: dict[str, Any] | None = None
+    item_identification: dict[str, Any] | None = None
     llm_context: dict[str, Any] | None = None
     should_quit: bool = False
 
@@ -145,6 +172,7 @@ class ActionResult:
             "wild_magic": self.wild_magic,
             "dialogue": self.dialogue,
             "canon_materialization": self.canon_materialization,
+            "item_identification": self.item_identification,
         }
 
 
@@ -215,6 +243,8 @@ class GameSession:
         dialogue_provider_name: str | None = None,
         trade_provider: TradeProvider | None = None,
         trade_provider_name: str | None = None,
+        item_identifier_provider: ItemIdentificationProvider | None = None,
+        item_identifier_provider_name: str | None = None,
         lore_provider: LoreExtractionProvider | None = None,
         lore_provider_name: str | None = None,
         flesh_provider: FleshProvider | None = None,
@@ -244,6 +274,18 @@ class GameSession:
         )
         self.trade_provider = trade_provider or make_trade_provider(trade_provider_name)
         self.trade_provider_label = getattr(self.trade_provider, "name", "unknown")
+        resolved_item_provider_name = item_identifier_provider_name
+        if resolved_item_provider_name is None:
+            inferred_item_provider = provider_name or getattr(provider, "name", None)
+            if inferred_item_provider in {"mock", "ollama", "auto"}:
+                resolved_item_provider_name = inferred_item_provider
+        self.item_identifier_provider = (
+            item_identifier_provider
+            or make_item_identification_provider(resolved_item_provider_name)
+        )
+        self.item_identifier_provider_label = getattr(
+            self.item_identifier_provider, "name", "unknown"
+        )
         resolved_lore_provider_name = lore_provider_name
         if resolved_lore_provider_name is None and provider_name in {
             "mock",
@@ -344,6 +386,7 @@ class GameSession:
         replay_promises: dict[str, Any] | None = None,
         replay_flesh: dict[str, Any] | None = None,
         replay_canon: dict[str, Any] | None = None,
+        replay_item_identification: dict[str, Any] | None = None,
         record: bool = True,
     ) -> ActionResult:
         self.drain_lore(block=False)
@@ -371,6 +414,7 @@ class GameSession:
         wild_magic_record: dict[str, Any] | None = None
         dialogue_record: dict[str, Any] | None = None
         canon_record: dict[str, Any] | None = None
+        item_identification_record: dict[str, Any] | None = None
         llm_context: dict[str, Any] | None = None
         should_quit = False
         explicit_messages: list[str] | None = None
@@ -394,6 +438,16 @@ class GameSession:
                 action = "inspect"
                 success = True
                 explicit_messages = describe_state(self.engine)
+            elif verb in {"map", "nearby", "where"}:
+                action = "map"
+                success = True
+                explicit_messages = describe_local_map(
+                    self.engine, command_argument(original_command, tokens)
+                )
+            elif verb in {"reagents", "reagent", "fuel"}:
+                action = "reagents"
+                success = True
+                explicit_messages = describe_reagents(self.engine)
             elif verb in {"journal", "rumors", "promises"}:
                 action = "journal"
                 success = True
@@ -527,6 +581,17 @@ class GameSession:
                 explicit_messages = self._browse_wares(
                     command_argument(original_command, tokens)
                 )
+            elif verb in {"identify", "appraise"}:
+                action = "identify"
+                item_name = command_argument(original_command, tokens)
+                if item_name:
+                    success, technical_failure, item_identification_record = (
+                        self._identify_item(item_name, replay_item_identification)
+                    )
+                else:
+                    explicit_messages = [
+                        "Identify what? Specify a carried item, e.g. 'identify strange coin'."
+                    ]
             elif self.engine.state.pending_trade is not None and verb in {
                 "accept",
                 "yes",
@@ -599,10 +664,29 @@ class GameSession:
                     success = self.engine.drop_item(item_name)
                 else:
                     explicit_messages = ["Drop what? Specify an item name."]
+            elif verb in {"protect", "lock", "safeguard"}:
+                action = "protect"
+                item_name = command_argument(original_command, tokens)
+                if item_name:
+                    success = self.engine.protect_item(item_name)
+                else:
+                    explicit_messages = [
+                        "Protect what? Specify an item name, e.g. 'protect grave salt'."
+                    ]
+            elif verb in {"unprotect", "unlock"}:
+                action = "unprotect"
+                item_name = command_argument(original_command, tokens)
+                if item_name:
+                    success = self.engine.unprotect_item(item_name)
+                else:
+                    explicit_messages = [
+                        "Unprotect what? Specify an item name, e.g. 'unprotect grave salt'."
+                    ]
             elif verb in {"pickup", "get", "take", "grab"}:
                 action = "pickup"
-                self.engine.pick_up_items_at_player()
-                success = True
+                success = self.engine.pick_up_items_at_player()
+                if not success:
+                    self.engine.state.add_message("There is nothing here to pick up.")
             elif verb in {"use", "consume", "drink", "eat"}:
                 action = "use"
                 item_name = command_argument(original_command, tokens)
@@ -790,6 +874,7 @@ class GameSession:
             wild_magic=wild_magic_record,
             dialogue=dialogue_record,
             canon_materialization=canon_record,
+            item_identification=item_identification_record,
             llm_context=llm_context,
             should_quit=should_quit,
         )
@@ -872,9 +957,14 @@ class GameSession:
         self,
         replay_canon: dict[str, Any] | None = None,
     ) -> tuple[bool, bool, dict[str, Any] | None, list[str]]:
-        room = self.engine.room_profile_at(
-            self.engine.state.player.x, self.engine.state.player.y
-        )
+        player = self.engine.state.player
+        room = self.engine.room_profile_at(player.x, player.y)
+        if room is None:
+            visible_rooms = self.engine.visible_room_profiles()
+            if visible_rooms:
+                nearest = visible_rooms[0]
+                room_id = str(nearest.get("id") or "")
+                room = self.engine.state.room_profiles.get(room_id)
         if room is None:
             return False, False, None, ["There is no coherent place here to examine."]
         record_id = f"canon_room_{normalize_id(room.id)}"
@@ -1456,7 +1546,15 @@ class GameSession:
         reward = dict(slot.get("reward") or {})
         name = str(reward.get("name") or "trinket")
         quantity = max(1, int(reward.get("quantity") or 1))
-        engine.state.inventory[name] = engine.state.inventory.get(name, 0) + quantity
+        engine.add_inventory_item(engine.state.inventory, name, quantity)
+        if reward.get("description") or reward.get("value") or reward.get("tags"):
+            engine.set_item_lore(
+                name,
+                str(reward.get("display_name") or name),
+                str(reward.get("description") or ""),
+                source="generated" if reward.get("generated") else "description",
+                metadata=reward,
+            )
         engine.state.stats.items_collected += 1
         slot["status"] = "opened"
         qty_text = f"{quantity} {name}" if quantity > 1 else name
@@ -1465,6 +1563,9 @@ class GameSession:
             f"{slot.get('anchor')} until it gives: {secret_kind_label(slot)}. "
             f"Inside: {qty_text}."
         )
+        reward_description = " ".join(str(reward.get("description") or "").split())
+        if reward_description:
+            text = f"{text} {reward_description}"
         record = engine.add_canon_record(
             CanonRecord(
                 id=f"canon_secret_open_{normalize_id(str(slot.get('id')))}",
@@ -2218,7 +2319,9 @@ class GameSession:
         message = message.strip()
         npc = self.engine.find_talk_target()
         if npc is None:
-            self.engine.state.add_message("There's no one nearby to talk to.")
+            self.engine.state.add_message(
+                "No visible character is close enough to hail."
+            )
             return False, False, None
 
         if replay_dialogue is not None:
@@ -2848,21 +2951,207 @@ class GameSession:
         candidates.sort(key=lambda item: item[:2])
         return candidates[0][2]
 
+    def _known_trader_hints(self, target: str = "", limit: int = 4) -> list[str]:
+        wanted = normalize_id(target.strip())
+        player = self.engine.state.player
+        candidates: list[tuple[float, str, Any]] = []
+        for entity in self.engine.state.entities.values():
+            if entity.kind != "npc" or not entity.alive:
+                continue
+            profile = self.engine.state.npc_profiles.get(entity.id)
+            if profile is None or not profile.wares:
+                continue
+            if wanted and wanted not in normalize_id(entity.name):
+                continue
+            candidates.append((self.engine.distance(player, entity), entity.id, entity))
+        if not candidates:
+            return []
+        candidates.sort(key=lambda item: item[:2])
+        parts = []
+        for distance, _entity_id, entity in candidates[:limit]:
+            dx = (entity.x > player.x) - (entity.x < player.x)
+            dy = (entity.y > player.y) - (entity.y < player.y)
+            compass = COMPASS_NAMES.get((dx, dy), "nearby")
+            parts.append(f"{entity.name} {int(round(distance))} tiles {compass}")
+        return [
+            "Known traders nearby: "
+            + "; ".join(parts)
+            + ". Move closer or name a visible trader with 'wares <name>'."
+        ]
+
     def _browse_wares(self, target: str = "") -> list[str]:
         npc = self._find_wares_target(target)
         if npc is None:
+            hints = self._known_trader_hints(target)
             return (
-                [f"No visible trader matches '{target}'."]
+                [f"No visible trader matches '{target}'.", *hints]
                 if target.strip()
-                else ["There's no one nearby to trade with."]
+                else ["There's no one nearby to trade with.", *hints]
             )
         profile = self.engine.state.npc_profiles.get(npc.id)
         if profile is None or not profile.wares:
             return [f"{npc.name} has nothing to trade."]
+
+        def _ware_line(name: str, amount: int) -> str:
+            lore = self.engine.state.item_lore.get(normalize_id(name)) or {}
+            try:
+                value = max(1, int(lore.get("value") or item_value(name)))
+            except (TypeError, ValueError):
+                value = item_value(name)
+            return f"{name} x{amount} (v{value} each)"
+
         wares_text = ", ".join(
-            f"{name} x{amount}" for name, amount in sorted(profile.wares.items())
+            _ware_line(name, amount) for name, amount in sorted(profile.wares.items())
         )
         return [f"{npc.name} has for trade: {wares_text}"]
+
+    def _identify_item(
+        self,
+        item_name: str,
+        replay_item_identification: dict[str, Any] | None = None,
+    ) -> tuple[bool, bool, dict[str, Any] | None]:
+        matched = self.engine.find_inventory_item(item_name)
+        if matched is None or self.engine.state.inventory.get(matched, 0) < 1:
+            self.engine.state.add_message(
+                f"You don't have any {item_name.strip().lower()}."
+            )
+            return False, False, None
+        npc = self._find_identifier_target()
+        if npc is None:
+            self.engine.state.add_message("No visible NPC seems able to identify that.")
+            return False, False, None
+        profile = self.engine.state.npc_profiles.get(npc.id)
+        role = profile.role if profile is not None else npc.role
+        item_card_for_prompt = self._identification_item_card(matched)
+        base_value = int(item_card_for_prompt.get("value") or item_value(matched))
+        fee = identification_fee(base_value, role)
+        value_after = identified_item_value(base_value, fee)
+        gold_key = self.engine.find_inventory_item("gold")
+        gold = self.engine.state.inventory.get(gold_key, 0) if gold_key else 0
+        if gold < fee:
+            self.engine.state.add_message(
+                f"{npc.name} asks {fee} gold to identify it, but you have only {gold}."
+            )
+            return False, False, None
+
+        if replay_item_identification is not None:
+            resolution_data = replay_item_identification.get("resolution")
+            if replay_item_identification.get("technical_failure") or not isinstance(
+                resolution_data, dict
+            ):
+                self.engine.state.add_message(
+                    replay_item_identification.get("error")
+                    or "The identification could not be reconstructed."
+                )
+                return False, True, replay_item_identification
+            fee = int(replay_item_identification.get("fee", fee))
+            base_value = int(replay_item_identification.get("base_value", base_value))
+            value_after = int(
+                replay_item_identification.get("value_after", value_after)
+            )
+            identified_key = self.engine.identify_inventory_item(
+                matched,
+                resolution_data,
+                npc_name=str(replay_item_identification.get("npc") or npc.name),
+                fee=fee,
+                value_after=value_after,
+                base_value=base_value,
+            )
+            return identified_key is not None, False, replay_item_identification
+
+        npc_card_for_prompt = self._identification_npc_card(npc, profile)
+        context = item_identification_context(
+            item_card=item_card_for_prompt,
+            npc_card=npc_card_for_prompt,
+            fee=fee,
+            value_after=value_after,
+        )
+        resolution = resolve_item_identification(
+            self.item_identifier_provider, npc.name, context
+        )
+        record = {
+            "provider": resolution.provider_name,
+            "npc": npc.name,
+            "item": matched,
+            "fee": fee,
+            "base_value": base_value,
+            "value_after": value_after,
+            "technical_failure": resolution.technical_failure,
+            "error": resolution.error,
+            "resolution": resolution.data,
+            "audit_path": resolution.audit_path,
+        }
+        if resolution.technical_failure or resolution.data is None:
+            self.engine.state.add_message(
+                f"{npc.name} squints at the {matched}, but the reading fails."
+            )
+            return False, True, record
+        identified_key = self.engine.identify_inventory_item(
+            matched,
+            resolution.data,
+            npc_name=npc.name,
+            fee=fee,
+            value_after=value_after,
+            base_value=base_value,
+        )
+        return identified_key is not None, False, record
+
+    def _identification_item_card(self, item_name: str) -> dict[str, Any]:
+        for card in self.engine.reagent_cards(include_protected=True):
+            if normalize_id(str(card.get("name") or "")) == normalize_id(item_name):
+                return dict(card)
+        lore = self.engine.state.item_lore.get(normalize_id(item_name)) or {}
+        try:
+            value = int(lore.get("value") or item_value(item_name))
+        except (TypeError, ValueError):
+            value = item_value(item_name)
+        card = {
+            "name": item_name,
+            "quantity": self.engine.state.inventory.get(item_name, 1),
+            "value": value,
+            "total_value": value,
+            "tags": list(lore.get("tags") or []),
+        }
+        if lore.get("description"):
+            card["description"] = lore["description"]
+        if lore.get("material"):
+            card["material"] = lore["material"]
+        return card
+
+    def _identification_npc_card(self, npc: Any, profile: Any | None) -> dict[str, Any]:
+        role = profile.role if profile is not None else npc.role
+        lore_levels = (profile.lore if profile is not None else {}) or {}
+        knowledge_level = max(lore_levels.values(), default=0)
+        return {
+            "name": npc.name,
+            "role": role,
+            "traits": list(profile.traits if profile is not None else npc.traits),
+            "knowledge_level": knowledge_level,
+            "wares_for_sale": dict(sorted(profile.wares.items()))
+            if profile is not None and profile.wares
+            else {},
+        }
+
+    def _find_identifier_target(self) -> Any | None:
+        player = self.engine.state.player
+        candidates: list[tuple[int, str, Any]] = []
+        for entity in self.engine.state.entities.values():
+            if not entity.alive:
+                continue
+            if entity.id not in self.engine.state.npc_profiles:
+                continue
+            if not self.engine.is_visible(entity.x, entity.y):
+                continue
+            adjacent_bias = (
+                0 if max(abs(entity.x - player.x), abs(entity.y - player.y)) <= 1 else 1
+            )
+            candidates.append((adjacent_bias, entity.id, entity))
+        if not candidates:
+            return None
+        candidates.sort(
+            key=lambda item: (item[0], self.engine.distance(player, item[2]), item[1])
+        )
+        return candidates[0][2]
 
     def to_replay(self) -> dict[str, Any]:
         self.drain_lore(block=True)
@@ -2886,6 +3175,7 @@ class GameSession:
             "dialogue_provider": self.dialogue_provider_label,
             "trade_provider": self.trade_provider_label,
             "lore_provider": self.lore_provider_label,
+            "item_identifier_provider": self.item_identifier_provider_label,
             "actions": self.records,
             "final_summary": summarize_state(self.engine),
         }
@@ -2960,8 +3250,9 @@ def _parse_rest_arg(arg: str) -> tuple[float | None, float | None, str | None]:
 
 def command_help() -> list[str]:
     return [
-        "Commands: move north/south/east/west, open, descend, ascend, wait (recover 1 MP), rest [hours | until <time>] (camp 8h by default), cast <spell>, target <x> <y>, talk <message>, spare [enemy], possess [name], examine, read [book], use <item>, equip <item>, unequip <slot>, focus <item> (set spell focus), unfocus, drop <item>, pickup, inspect (or inventory), curses, journal (or rumors), world (or atlas), standing, wares [trader] (or browse), quit.",
+        "Commands: move north/south/east/west, open, descend, ascend, wait (recover 1 MP), rest [hours | until <time>] (camp 8h by default), cast <spell>, target <x> <y>, untarget, talk <message>, free, spare [enemy], possess [name], examine, investigate [target], read [book], use <item>, equip <item>, unequip <slot>, focus <item> (set spell focus), unfocus, protect/unprotect <item>, reagents, map [radius], drop <item>, pickup, inspect (or inventory), curses, journal (or rumors), world (or atlas), standing, followers, found <name>, wares [trader] (or browse), identify <item>, help, quit.",
         "Targeting: click a square (or 'target <x> <y>') to mark it - a free action, no turn. Then 'cast fireball at target', 'teleport to target', etc. aim there, and the standard spark/frost spells hit your marked foe. Click it again, 'untarget', or Esc to clear.",
+        "Local map: 'map' (or 'map 12') prints a coordinate-labeled nearby ASCII map. This is useful in scripted CLI runs with --no-render. Free, costs no turn.",
         "Possessing: 'possess' (or 'swap'/'inhabit') leaps your soul into the nearest body - or 'possess <name>' for a specific one. You become that body entirely: its stats, its hit points, its inventory. The body you leave drops as an inert husk. Costs a turn.",
         "Reading: stand on or next to a book and 'read' (or 'read <name>' to pick one). The first reading takes a turn and fixes the book's title and pages forever; rereading is free. What books claim about the world is hearsay - but the world has a way of honoring what gets written down.",
         "Investigating: 'investigate' (or 'search') studies the room - it costs 1-3 turns while the world keeps moving, and what you learn is permanent. If something here is hidden, careful search turns up a clue; investigate the thing the clue points at ('investigate <name>') to see what it was protecting.",
@@ -2972,10 +3263,12 @@ def command_help() -> list[str]:
         "Followers: 'followers' (or 'retinue') lists those who have come to follow you and the organizations you've founded; 'found <name>' raises a banner of your own. Free, costs no turn.",
         "Freeing captives: stand next to someone held in a cell and 'free' (or 'release') to strike their chains. What they do then is their own - some take up arms and come to follow you, some simply thank you and go, and a few repay you with what they know.",
         "Mercy: when a hostile combatant is beaten down or disabled, 'spare' (or 'spare <name>') lets them yield instead of dying. It costs a turn and the world remembers.",
-        "Talking: stand next to an NPC and 'talk <what you want to say>' (or 'speak'/'say') to start a conversation - it costs a turn, just like any other action.",
+        "Talking: 'talk <what you want to say>' (or 'speak'/'say') hails the preferred visible talkable character within range, including enemies and persona-bearing actors; adjacent candidates are preferred. It costs a turn, just like any other action.",
         "Trading: some NPCs deal in goods and gold - 'wares' (or 'wares <trader>') lists what they have for trade, a free look. Haggle naturally through 'talk' - if a real offer comes together, you'll get a confirmation prompt to 'accept' (or 'yes') or 'reject' (or 'no') before anything changes hands.",
+        "Identification: an NPC can turn a carried semantic item into a functional one with 'identify <item>'. You pay gold before the ability is revealed, the item keeps roughly its old value plus most of the fee, and the service costs a turn.",
         "Equipment: weapons, armor, clothing, and charms go in their own slots and add to your attack/defense while worn. Equip with 'equip <item>' (or 'wear'/'wield'); take gear off with 'unequip <slot_or_item>' (or 'remove <item>').",
         "Spell focus: mark any one equipped item as your spell focus and the wild-magic resolver weighs it heavily when flavoring your casts. Set it with 'focus <item_or_slot>' (or 'attune'); clear it with 'unfocus'. It stays on your normal gear, so it keeps its usual stats.",
+        "Reagents: carried items and gold can fuel wild magic. 'reagents' shows what spellcasting may spend; 'protect <item>' keeps a stack out of wild-magic costs until 'unprotect <item>'.",
         "Standard spells (deterministic, no wild magic risk): spark, frost, heal, ward, reveal. Type the name directly, e.g. 'frost' -- 'cast frost' instead asks wild magic to improvise one.",
         "Short movement aliases also work: n, s, e, w. Walk into an enemy to attack it.",
     ]
@@ -3066,6 +3359,180 @@ def describe_world(engine: GameEngine) -> list[str]:
         lines.append(
             f"Current realm: {template.name} ({placement.role}; {template.tradition})."
         )
+    return lines
+
+
+def describe_local_map(engine: GameEngine, arg: str = "") -> list[str]:
+    """Agent-facing local map with coordinates.
+
+    The CLI renders a map after commands unless `--no-render` is set; this command gives the
+    same spatial information on demand, including in compact scripted runs.
+    """
+    radius = _parse_map_radius(arg)
+    player = engine.state.player
+    left = max(0, player.x - radius)
+    right = min(engine.state.width - 1, player.x + radius)
+    top = max(0, player.y - radius)
+    bottom = min(engine.state.height - 1, player.y + radius)
+    rows = _local_map_rows(engine, left, right, top, bottom)
+    x_axis = "".join(str(x % 10) for x in range(left, right + 1))
+    lines = [
+        f"Local map centered on you at {player.x},{player.y} (radius {radius}).",
+        f"    {x_axis}",
+    ]
+    for y, row in zip(range(top, bottom + 1), rows, strict=False):
+        lines.append(f"{y:>3} {row}")
+    lines.extend(
+        [
+            "Legend: @ you; letters are creatures/NPCs; ? or other symbols are items/props; # wall; . floor; + door; / open door; >/< stairs.",
+            "Lowercase/dim terrain is explored but not currently visible. Use 'inspect' for entity and floor-item details, and 'target <x> <y>' to aim.",
+        ]
+    )
+    return lines
+
+
+def _parse_map_radius(arg: str) -> int:
+    text = str(arg or "").strip()
+    if not text:
+        return 9
+    try:
+        return max(3, min(25, int(text.split()[0])))
+    except (TypeError, ValueError):
+        return 9
+
+
+def _dim_map_tile(tile: str) -> str:
+    if tile == "#":
+        return "#"
+    if tile == ".":
+        return ","
+    return tile.lower()
+
+
+def _local_map_rows(
+    engine: GameEngine, left: int, right: int, top: int, bottom: int
+) -> list[str]:
+    rows: list[list[str]] = []
+    for y in range(top, bottom + 1):
+        rendered_row: list[str] = []
+        for x in range(left, right + 1):
+            if not engine.in_bounds(x, y) or not engine.is_explored(x, y):
+                rendered_row.append(" ")
+                continue
+            tile = engine.tile_at(x, y)
+            rendered_row.append(
+                tile if engine.is_visible(x, y) else _dim_map_tile(tile)
+            )
+        rows.append(rendered_row)
+
+    drawable_entities = [
+        entity
+        for entity in engine.state.entities.values()
+        if entity.kind != "item" or entity.alive
+    ]
+    for entity in sorted(
+        drawable_entities, key=lambda item: (item.kind == "player", item.kind != "item")
+    ):
+        if not (left <= entity.x <= right and top <= entity.y <= bottom):
+            continue
+        revealed = "revealed" in entity.statuses
+        if (
+            entity.id == engine.state.player_id
+            or engine.is_visible(entity.x, entity.y)
+            or revealed
+        ):
+            rows[entity.y - top][entity.x - left] = entity.char
+    return ["".join(row) for row in rows]
+
+
+def inventory_item_summary(
+    item: dict[str, Any], *, include_palette_label: bool = True
+) -> str:
+    protected = " [protected]" if item.get("protected") else ""
+    identified = " [identified]" if item.get("identified") else ""
+    charges = (
+        f" {item['charges']}ch"
+        if item.get("charges") is not None and item.get("identified")
+        else ""
+    )
+    palette = (
+        f"; {item['palette_label']}"
+        if include_palette_label
+        and item.get("identified")
+        and item.get("palette_label")
+        else ""
+    )
+    return (
+        f"{item['name']} x{item['quantity']} "
+        f"(v{item.get('value', 1)} each{charges}{palette}){identified}{protected}"
+    )
+
+
+def inventory_summary_text(
+    equipment_view: dict[str, Any], *, include_palette_label: bool = True
+) -> str:
+    return (
+        ", ".join(
+            inventory_item_summary(
+                item,
+                include_palette_label=include_palette_label,
+            )
+            for item in equipment_view["items"]
+        )
+        or "empty"
+    )
+
+
+def _short_item_description(card: dict[str, Any], limit: int = 118) -> str:
+    description = " ".join(str(card.get("description") or "").split())
+    if len(description) <= limit:
+        return description
+    return description[: limit - 3].rstrip() + "..."
+
+
+def describe_reagents(engine: GameEngine) -> list[str]:
+    available = reagent_cards(engine)
+    protected = [
+        card
+        for card in reagent_cards(engine, include_protected=True)
+        if card.get("protected")
+    ]
+    lines = ["Reagents available to wild magic:"]
+    if not available:
+        lines.append("  none")
+    for card in available:
+        tag_limit = 7 if card.get("generated") else 5
+        tags = ", ".join(card.get("tags", [])[:tag_limit]) or "none"
+        material = card.get("material") or "unknown"
+        palette = (
+            f"; palette: {card['palette_label']}"
+            if card.get("identified") and card.get("palette_label")
+            else ""
+        )
+        lines.append(
+            f"  {card['name']} x{card['quantity']} - "
+            f"value {card['value']} each / {card['total_value']} total; "
+            f"{material}; tags: {tags}{palette}"
+        )
+        description = _short_item_description(card)
+        if description:
+            lines.append(f"    {description}")
+    if protected:
+        lines.append("Protected from wild magic:")
+        for card in protected:
+            palette = (
+                f"; palette: {card['palette_label']}"
+                if card.get("identified") and card.get("palette_label")
+                else ""
+            )
+            lines.append(
+                f"  {card['name']} x{card['quantity']} - "
+                f"value {card['value']} each / {card['total_value']} total{palette}"
+            )
+            description = _short_item_description(card)
+            if description:
+                lines.append(f"    {description}")
+    lines.append("Use 'protect <item>' or 'unprotect <item>' to adjust the safe pouch.")
     return lines
 
 
@@ -3188,11 +3655,30 @@ def describe_followers(engine: GameEngine) -> list[str]:
             )
             lines.append(f"  {org.name}{rank} - {members} sworn")
     followers = engine.followers()
+    follower_ids = {npc_id for npc_id, _profile in followers}
     if followers:
         lines.append("Those who follow you:")
         for _npc_id, profile in followers:
             feeling = ", ".join(profile.bond_feeling()) or "at your side"
             lines.append(f"  {profile.name} the {profile.role} - {feeling}")
+    allies = sorted(
+        (
+            entity
+            for entity in state.entities.values()
+            if entity.kind in {"actor", "npc"}
+            and entity.faction == "ally"
+            and entity.hp > 0
+            and entity.id not in follower_ids
+        ),
+        key=lambda entity: entity.id,
+    )
+    if allies:
+        lines.append("Allied creatures:")
+        for ally in allies:
+            tag_text = f" - {', '.join(sorted(ally.tags))}" if ally.tags else ""
+            lines.append(
+                f"  {ally.name} ({ally.hp}/{ally.max_hp}) at {ally.x},{ally.y}{tag_text}"
+            )
     if not lines:
         return ["No one follows you yet. The world is still taking your measure."]
     return lines
@@ -3202,12 +3688,7 @@ def describe_state(engine: GameEngine) -> list[str]:
     state = engine.state
     player = state.player
     equipment_view = equipment_inventory_view(engine)
-    inventory = (
-        ", ".join(
-            f"{item['name']} x{item['quantity']}" for item in equipment_view["items"]
-        )
-        or "empty"
-    )
+    inventory = inventory_summary_text(equipment_view)
     curses = (
         ", ".join(f"{curse.name} x{curse.stacks}" for curse in state.curses.values())
         or "none"
@@ -3283,6 +3764,25 @@ def describe_state(engine: GameEngine) -> list[str]:
         captives.append(
             f"{captive.name} (held, can be freed) at {captive.x},{captive.y}"
         )
+    floor_items = []
+    for item in sorted(
+        (
+            e
+            for e in engine.state.entities.values()
+            if e.kind == "item" and engine.is_visible(e.x, e.y)
+        ),
+        key=lambda entity: entity.id,
+    ):
+        card = item_card(item, engine)
+        qty = f" x{card['quantity']}" if card.get("quantity", 1) != 1 else ""
+        position = (
+            "here"
+            if (item.x, item.y) == (player.x, player.y)
+            else f"at {item.x},{item.y}"
+        )
+        floor_items.append(
+            f"{card['name']}{qty} {position} (v{card.get('value', 1)} each)"
+        )
     props = []
     for prop in sorted(
         (
@@ -3325,7 +3825,8 @@ def describe_state(engine: GameEngine) -> list[str]:
         f"Depth {state.depth}/{state.max_depth} | Position {player.x},{player.y} | Scenario {state.scenario}",
         f"Visible tiles: {len(state.visible)} | Explored tiles: {len(state.explored)}",
         f"Statuses: {statuses}",
-        f"Gold: {equipment_view['gold']}",
+        f"Gold: {equipment_view['gold']} (value {equipment_view['gold_total_value']})"
+        + (" [protected]" if equipment_view["gold_protected"] else ""),
         f"Equipment: {equipment}",
         f"Inventory: {inventory}",
         f"Curses: {curses}",
@@ -3336,6 +3837,7 @@ def describe_state(engine: GameEngine) -> list[str]:
         "Allies: " + ("; ".join(allies) if allies else "none"),
         "Captives: " + ("; ".join(captives) if captives else "none"),
         "NPCs: " + ("; ".join(npcs) if npcs else "none"),
+        "Floor items: " + ("; ".join(floor_items) if floor_items else "none"),
         "Props: " + ("; ".join(props) if props else "none"),
         "Current room: "
         + (

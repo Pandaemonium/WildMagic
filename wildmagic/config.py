@@ -92,6 +92,7 @@ def _purpose_key(purpose: str | None) -> str | None:
         "WILD_MAGIC": "WILD",
         "MAGIC": "WILD",
         "NPC_DIALOGUE": "DIALOGUE",
+        "ITEM_IDENTIFICATION": "ITEM",
         "BACKGROUND_TOWN": "TOWN",
         "TOWN_GENERATION": "TOWN",
         "LORE_EXTRACTION": "LORE",
@@ -104,7 +105,7 @@ def _route_key(purpose: str | None) -> str | None:
     # CANON is on-demand materialization (examine/read): the player is blocked
     # waiting on it, so it routes URGENT. Background prewarming jobs construct
     # their provider with lore-scope overrides instead.
-    if key in {"WILD", "DIALOGUE", "TRADE", "CANON", "AGENT"}:
+    if key in {"WILD", "DIALOGUE", "TRADE", "ITEM", "CANON", "AGENT"}:
         return "URGENT"
     if key in {"TOWN", "LORE"}:
         return "BACKGROUND"
@@ -182,6 +183,10 @@ def get_trade_model() -> str:
     return get_config_value("WILDMAGIC_TRADE_MODEL") or get_dialogue_model()
 
 
+def get_item_model() -> str:
+    return get_config_value("WILDMAGIC_ITEM_MODEL") or get_trade_model()
+
+
 def get_town_model() -> str:
     return get_config_value("WILDMAGIC_TOWN_MODEL") or _shared_model()
 
@@ -222,6 +227,10 @@ def get_trade_provider() -> str:
     return (
         get_config_value("WILDMAGIC_TRADE_PROVIDER") or get_dialogue_provider()
     ).lower()
+
+
+def get_item_provider() -> str:
+    return (get_config_value("WILDMAGIC_ITEM_PROVIDER") or get_trade_provider()).lower()
 
 
 def get_town_provider() -> str:
@@ -308,6 +317,18 @@ def ollama_trade_num_predict() -> int:
     if get_config_value("WILDMAGIC_TRADE_NUM_PREDICT") is None:
         return _int_value("WILDMAGIC_DIALOGUE_NUM_PREDICT", 320, 32, 1024)
     return _int_value("WILDMAGIC_TRADE_NUM_PREDICT", 320, 32, 1024)
+
+
+def ollama_item_temperature() -> float:
+    if get_config_value("WILDMAGIC_ITEM_TEMPERATURE") is None:
+        return ollama_trade_temperature()
+    return _float_value("WILDMAGIC_ITEM_TEMPERATURE", 0.45, 0.0, 1.5)
+
+
+def ollama_item_num_predict() -> int:
+    if get_config_value("WILDMAGIC_ITEM_NUM_PREDICT") is None:
+        return ollama_trade_num_predict()
+    return _int_value("WILDMAGIC_ITEM_NUM_PREDICT", 384, 64, 1024)
 
 
 def ollama_thinking_enabled(purpose: str | None = None) -> bool:

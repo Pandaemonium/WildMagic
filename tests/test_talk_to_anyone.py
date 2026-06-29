@@ -136,9 +136,25 @@ def test_wares_can_target_visible_trader_by_id() -> None:
 
         assert result.success
         assert not result.consumed_turn
-        assert result.messages == [
-            "sash seller has for trade: fresh linen shirt x1, gold x8"
-        ]
+        assert len(result.messages) == 1
+        assert result.messages[0].startswith("sash seller has for trade: ")
+        assert "fresh linen shirt x1" in result.messages[0]
+        assert "gold x8" in result.messages[0]
+        assert "(v" in result.messages[0]
+    finally:
+        session.close()
+
+
+def test_wares_points_toward_known_traders_when_none_are_adjacent() -> None:
+    session = GameSession(seed=753, scenario="bazaar", provider_name="mock")
+    try:
+        result = session.execute_command("wares")
+
+        assert result.success is True
+        assert result.consumed_turn is False
+        assert result.messages[0] == "There's no one nearby to trade with."
+        assert any("Known traders nearby:" in message for message in result.messages)
+        assert any("Madame Velline" in message for message in result.messages)
     finally:
         session.close()
 

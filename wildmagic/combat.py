@@ -4,6 +4,7 @@ from collections import deque
 
 from .game_data import EQUIPMENT_SPECS
 from .geometry import sign
+from .item_generation import generate_curio
 from .models import FIRE, FLOOR, POISON_CLOUD, RUBBLE, SLICK_ICE, WALL, WATER, Entity
 from .normalize import clamp_int, normalize_id, status_duration
 from .operations import StateDelta
@@ -59,6 +60,10 @@ class _CombatMixin:
             spec = EQUIPMENT_SPECS.get(item_name.strip().lower())
             if spec:
                 total += int(spec.get(stat, 0))
+            lore = self.state.item_lore.get(normalize_id(item_name)) or {}
+            dynamic_spec = lore.get("equipment_spec")
+            if lore.get("identified") and isinstance(dynamic_spec, dict):
+                total += int(dynamic_spec.get(stat, 0) or 0)
         return total
 
     def effective_attack(self, entity: Entity) -> int:
@@ -209,7 +214,7 @@ class _CombatMixin:
             entity.hp -= actual
             if entity.id == self.state.player_id:
                 self.state.stats.damage_taken += actual
-            elif entity.kind == "actor":
+            elif entity.kind == "actor" and self._deed_attributed_to_player(source):
                 self.state.stats.damage_dealt += actual
             if actual and self._delta_capture:
                 self.record_delta(
@@ -345,8 +350,10 @@ class _CombatMixin:
                     self._fire_death_triggers(entity, source, hp_before, damage_type)
                 else:
                     self.state.add_message(f"{entity.name} dies.")
-                    self.state.stats.enemies_killed += 1
-                    if self._deed_attributed_to_player(source):
+                    was_enemy = entity.faction == "enemy"
+                    if was_enemy:
+                        self.state.stats.enemies_killed += 1
+                    if was_enemy and self._deed_attributed_to_player(source):
                         self.award_experience(1)
                     # Emergent world: a kill the player's soul is responsible for can
                     # become a deed (Phase 0 records imperial kills). Recorded now;
@@ -373,7 +380,7 @@ class _CombatMixin:
                         and entity.max_hp > 2
                     ):
                         self._split_slime(entity)
-                    if not self.living_enemies():
+                    if was_enemy and not self.living_enemies():
                         # Clearing the local enemies is a breather, NOT the run victory
                         # (which is toppling the Empire, D9). Keep them distinct.
                         self.state.add_message("For a breath, the floor is yours.")
@@ -631,6 +638,26 @@ class _CombatMixin:
             if tag in tags:
                 drop_name, drop_char, drop_mat = drop_data
                 break
+        if self.rng.random() < 0.30:
+            curio = generate_curio(
+                self.rng,
+                themes=[*tags, entity.faction, entity.kind],
+                region_id=self.state.region_id,
+                source="loot",
+            )
+            dropped = self.spawn_item(
+                curio.name,
+                "?",
+                entity.x,
+                entity.y,
+                item_type=curio.name,
+                material=curio.material,
+                tags=set(curio.tags),
+            )
+            dropped.description = curio.description
+            dropped.details["item_metadata"] = curio.lore_metadata()
+            self.state.add_message(f"{entity.name} drops {curio.name}.")
+            return
         self.spawn_item(
             drop_name,
             drop_char,

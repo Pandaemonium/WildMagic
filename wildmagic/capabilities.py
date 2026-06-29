@@ -124,7 +124,11 @@ Cost catalog:
 - If a cost is odd or poetic, use a curse instead of inventing a new status.
 - Prefer varied semantic and mixed curses over generic debt: ash in the voice, mirrored sleep, borrowed shadow, glass hunger, moth-lit lies, a range/area/sight curse when that mechanic fits. Give curse costs an id, name, description, and optional semantic_prompt/mechanics when useful.
 - Use Wild Debt only when debt is the point of the spell, not as the default balancing knob.
-- Item costs should match items visible in the player's inventory. Use the exact inventory key name.
+- The user JSON includes "reagents": carried items and gold that wild magic may spend. Each reagent has name, quantity, per-item value, total_value, material, tags, and spell_bias. Higher-value reagents justify stronger effects; material/tags should color the spell.
+- "protected_inventory" lists carried items deliberately kept out of ordinary spell costs. Do not spend protected items unless the player explicitly names or authorizes burning that protected item.
+- Item costs should match items visible in "reagents". Use the exact reagent name. Gold is a valid item cost when gold appears in reagents.
+- When the player's spell explicitly spends, burns, offers, sacrifices, consumes, or trades an inventory item, include a matching item cost. Do not merely mention the item in outcome_text while leaving costs empty.
+- If spending a high-value reagent, make the outcome feel worth that sacrifice. Do not consume expensive items for a trivial effect unless the player explicitly asks to waste them.
 
 Balance rules:
 - Allow crazy, powerful, and dramatic spells — they should just have appropriate costs.

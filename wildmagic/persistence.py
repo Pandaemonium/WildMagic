@@ -176,6 +176,7 @@ def entity_to_snapshot(entity: Entity) -> dict[str, Any]:
         "description": entity.description,
         "details": _save_value(entity.details),
         "inventory": dict(entity.inventory),
+        "protected_items": sorted(entity.protected_items),
         "curses": {
             curse_id: curse_to_snapshot(curse)
             for curse_id, curse in sorted(entity.curses.items())
@@ -231,6 +232,7 @@ def entity_from_snapshot(data: dict[str, Any]) -> Entity:
         inventory={
             str(key): int(value) for key, value in (data.get("inventory") or {}).items()
         },
+        protected_items={str(item) for item in data.get("protected_items", [])},
         curses={
             str(curse_id): curse_from_snapshot(curse)
             for curse_id, curse in (data.get("curses") or {}).items()

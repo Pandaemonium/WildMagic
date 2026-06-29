@@ -245,6 +245,23 @@ def test_local_map_view_is_cropped_and_shows_player() -> None:
         session.close()
 
 
+def test_map_command_is_coordinate_labeled_and_free() -> None:
+    session = GameSession(seed=7, scenario="test_chamber", provider_name="mock")
+    try:
+        turn_before = session.engine.state.turn
+
+        result = session.execute_command("map 6")
+
+        assert result.success
+        assert not result.consumed_turn
+        assert session.engine.state.turn == turn_before
+        assert any("Local map centered on you" in line for line in result.messages)
+        assert any("@" in line for line in result.messages)
+        assert any("target <x> <y>" in line for line in result.messages)
+    finally:
+        session.close()
+
+
 def test_agent_observation_compacts_long_messages_and_exposes_decision_hints() -> None:
     long_message = "lore " * 200
     observation = AgentObservation(

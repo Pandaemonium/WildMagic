@@ -10,6 +10,7 @@ from . import operations
 from .behaviors import SUPPORTED_BEHAVIORS, normalize_behavior, upsert_behavior_modifier
 from .curses import build_curse, merge_curse, validate_resolution_against_curses
 from .geometry import bresenham_line, sign, unique_points
+from .item_catalog import item_value
 from .models import (
     BLOCKING_TILES,
     DOOR,
@@ -173,6 +174,12 @@ class _EffectsMixin:
             self.finish_player_turn()
             return WildMagicOutcome(True, False, [curse_error])
 
+        cost_error = self._resolution_cost_error(resolution)
+        if cost_error:
+            message = f"Wild magic failed validation: {cost_error}"
+            self.state.add_message(message)
+            return WildMagicOutcome(False, True, [message])
+
         # The Empire learns what you are the moment its people see you raise wild magic (the
         # exposure model). Fired as the spell is cast — being *seen casting* is the trigger,
         # whatever the spell then does.
@@ -241,6 +248,32 @@ class _EffectsMixin:
             self.state.add_message(message)
             return WildMagicOutcome(False, True, [message])
 
+    def _resolution_cost_error(self, resolution: dict[str, Any]) -> str | None:
+        for index, cost in enumerate(coerce_list(resolution.get("costs"))):
+            if not isinstance(cost, dict):
+                continue
+            cost_type = str(cost.get("type", "")).lower()
+            if cost_type != "item":
+                continue
+            raw_item = str(
+                cost.get("item")
+                or cost.get("item_name")
+                or cost.get("name")
+                or cost.get("reagent")
+                or cost.get("id")
+                or ""
+            ).strip()
+            if not raw_item:
+                return f"item cost {index} must name an item"
+            item = self.find_inventory_item(raw_item)
+            if item is None or self.state.inventory.get(item, 0) < 1:
+                return f"item cost '{raw_item}' is not carried"
+            if self.is_item_protected(item) and not bool(
+                cost.get("allow_protected") or cost.get("protected")
+            ):
+                return f"item cost '{item}' is protected; unprotect it or choose another reagent"
+        return None
+
     def _apply_cost(self, cost: dict[str, Any]) -> str | None:
         if not isinstance(cost, dict):
             return None
@@ -284,21 +317,33 @@ class _EffectsMixin:
             player.mana = min(player.mana, player.max_mana)
             return f"Cost: {amount} maximum mana."
         if cost_type == "item":
-            item = str(
-                cost.get("item") or cost.get("item_name") or cost.get("id") or ""
+            raw_item = str(
+                cost.get("item")
+                or cost.get("item_name")
+                or cost.get("name")
+                or cost.get("reagent")
+                or cost.get("id")
+                or ""
             ).strip()
             amount = clamp_int(cost.get("amount"), 1, 99)
-            if not item:
+            if not raw_item:
                 return None
-            current = self.state.inventory.get(item, 0)
-            spent = min(current, amount)
+            item = self.find_inventory_item(raw_item) or raw_item
+            if self.is_item_protected(item) and not bool(
+                cost.get("allow_protected") or cost.get("protected")
+            ):
+                return f"Cost blocked: {item} is protected from wild magic."
+            spent = self.consume_inventory_item(item, amount)
             if spent:
-                remaining = current - spent
-                if remaining:
-                    self.state.inventory[item] = remaining
-                else:
-                    self.state.inventory.pop(item, None)
-            return f"Cost: {spent} {item}." if spent else f"Cost unpaid: no {item}."
+                lore = self.state.item_lore.get(normalize_id(item)) or {}
+                try:
+                    value_each = max(1, int(lore.get("value") or item_value(item)))
+                except (TypeError, ValueError):
+                    value_each = item_value(item)
+                value = value_each * spent
+                count = f"{spent} " if spent != 1 else ""
+                return f"Cost: {count}{item} (value {value})."
+            return f"Cost unpaid: no {raw_item}."
         if cost_type == "curse":
             curse = build_curse(cost, turn=self.state.turn)
             if curse.id in self.state.curses:
@@ -2496,7 +2541,7 @@ class _EffectsMixin:
             sanitize_char(str(effect.get("char") or template.char), template.char),
             x,
             y,
-            str(effect.get("item_type") or template.item_type),
+            str(effect.get("item_type") or name),
             count,
             material=material,
             tags=tags,

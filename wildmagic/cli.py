@@ -5,7 +5,7 @@ from pathlib import Path
 import random
 import sys
 
-from .actions import GameSession, standing_summary_text
+from .actions import GameSession, inventory_summary_text, standing_summary_text
 from .character import CREATION_POINTS, ORIGINS, STAT_CAP, STATS, build_profile
 from .models import CharacterProfile
 from .replay import save_replay
@@ -128,7 +128,21 @@ def prompt_character_creation() -> CharacterProfile | None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Play Wild Magic from the terminal.")
+    parser = argparse.ArgumentParser(
+        description="Play Wild Magic from the terminal.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""Common commands:
+  inspect, map [radius], help, journal, world, standing, followers, reagents
+  move north/south/east/west (or n/s/e/w), open, descend, ascend, wait, rest
+  target <x> <y>, untarget, spark, frost, heal, ward, reveal
+  cast <wild spell text>
+  talk <message>, examine, investigate [target], read [book]
+  free, spare [enemy], possess [name]
+  pickup, drop/use/equip/unequip/focus <item>, unfocus
+  protect/unprotect <item>
+  wares [trader], identify <item>, accept, reject, found <name>, quit
+""",
+    )
     parser.add_argument("--seed", type=int, default=None)
     parser.add_argument(
         "--scenario",
@@ -244,12 +258,7 @@ def render_screen(session: GameSession) -> str:
     state = session.engine.state
     player = state.player
     equipment_view = session.equipment_inventory_view()
-    inventory = (
-        ", ".join(
-            f"{item['name']} x{item['quantity']}" for item in equipment_view["items"]
-        )
-        or "empty"
-    )
+    inventory = inventory_summary_text(equipment_view)
     equipment = (
         ", ".join(
             f"{slot['slot']}: {slot['item']}" + (" [focus]" if slot["focused"] else "")
@@ -266,7 +275,7 @@ def render_screen(session: GameSession) -> str:
     footer = [
         "",
         f"Turn {state.turn} | {state.clock_label()} | {location} | HP {player.hp}/{player.max_hp} | MP {player.mana}/{player.max_mana} | XP {state.experience}",
-        f"Gold: {equipment_view['gold']}",
+        f"Gold: {equipment_view['gold']} (value {equipment_view['gold_total_value']})",
         f"Equipment: {equipment}",
         f"Inventory: {inventory}",
         f"Curses: {curses}",
