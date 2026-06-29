@@ -147,13 +147,24 @@ Useful CLI commands:
 - `open`
 - `descend`
 - `ascend`
+- `map [radius]` — print a coordinate-labeled local map; works even in `--no-render`
+- `target <x> <y>` / `untarget`
 - `spark`
 - `cast <wild spell text>`
-- `talk <message>` (or `speak`/`say`) — talk to an adjacent NPC; costs a turn
+- `talk <message>` (or `speak`/`say`) — hail a visible talkable character within range, including enemies; adjacent candidates are preferred; costs a turn
 - `examine` (or `study`/`observe`) - materialize or reread room canon
+- `investigate [target]` (or `search`)
+- `read [book]`
+- `free` (or `release`) — free an adjacent captive
+- `reagents` — list the carried item stacks and gold that wild magic may spend
+- `protect <item>` / `unprotect <item>` — move a carried stack into or out of the spell-safe pouch
+- `identify <item>` — ask a visible NPC to turn one carried semantic item into a functional item; costs gold and a turn on success
+- `journal`, `world`, `standing`, `followers`, `wares`
 - `quit`
 
-Use `inspect` often. It prints turn, HP, MP, inventory, curses, flags, scheduled events, and enemy summaries.
+By default the CLI prints the map after each command. `--no-render` suppresses that automatic map for compact scripted runs; use `map` whenever an agent still needs spatial context.
+
+Use `inspect` often. It prints turn, HP, MP, inventory values/protection, visible floor items, curses, flags, scheduled events, and enemy summaries.
 
 ## Providers
 

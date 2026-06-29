@@ -523,13 +523,13 @@ it doesn't care who speaks. Four concrete blockers:
    `find_talk_target`, the `resolve_faction` civilian heuristic, …). *Fix:* gate conversation
    on *having a persona*, fight/flee on *faction + role* (FACTION_KILL §0), neither on `kind`.
    *[medium–large cleanup]*
-3. **Talk targeting is adjacent-only + `kind=="npc"`-only** (`find_talk_target`, an 8-neighbour
-   scan). *Fix:* a targeted `talk <who>` with a range / line-of-sight check that accepts any
-   persona-bearing actor. *[small–medium]*
-4. **Dialogue context has no situational awareness.** It carries persona, player block, legend,
-   nearby *objects*, scene notes — but no **distance, hostility/combat state, or nearby
-   actors/threats**. *Fix:* add those fields to `dialogue_context_for_llm` so the model can
-   modulate tone. *[small]*
+3. **Talk targeting now reaches beyond adjacent NPCs.** `find_talk_target` accepts any visible
+   talkable character within hailing range, including enemies and persona-bearing actors, while
+   still preferring adjacent candidates when no selector is supplied. This deliberately replaced
+   the old adjacent-only NPC scan.
+4. **Dialogue context now carries situational awareness.** `dialogue_context_for_llm` includes
+   distance, adjacency, hostility/combat state, and nearby actors/threats so the model can
+   modulate tone.
 
 **Recommended sequence (delivers the feature before the full refactor):**
 

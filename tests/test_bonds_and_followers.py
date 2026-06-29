@@ -212,3 +212,27 @@ def test_followers_readout_lists_followers_and_orgs() -> None:
     lines = "\n".join(describe_followers(engine))
     assert "the Ashen Hand" in lines
     assert "lieutenant" in lines
+
+
+def test_followers_readout_lists_allied_creatures() -> None:
+    from wildmagic.actions import describe_followers
+
+    engine = GameEngine(seed=7, scenario="test_chamber")
+    player = engine.state.player
+    engine.spawn_actor(
+        "brass moth",
+        "m",
+        player.x + 1,
+        player.y,
+        5,
+        2,
+        0,
+        "ally",
+        "melee",
+        tags={"clockwork", "conjured"},
+    )
+
+    lines = "\n".join(describe_followers(engine))
+    assert "Allied creatures" in lines
+    assert "brass moth" in lines
+    assert "clockwork" in lines

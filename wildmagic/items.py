@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from .equipment import equipment_slot_for_item
+from .equipment import EQUIPMENT_SLOTS, equipment_slot_for_item
 from .game_data import DEFAULT_ITEM_USE_SPEC, ITEM_USE_SPECS
+from .item_catalog import reagent_card
 from .models import MIST, Entity
 from .operations import StateDelta
 from .normalize import (
@@ -67,13 +68,180 @@ class _ItemsMixin:
         if matched is None or self.state.inventory.get(matched, 0) < 1:
             self.state.add_message(f"You don't have any {item_name.strip().lower()}.")
             return False
-        spec = ITEM_USE_SPECS.get(normalize_id(matched), DEFAULT_ITEM_USE_SPEC)
+        spec = self.item_use_spec(matched)
+        charges = spec.get("charges")
+        if charges is not None:
+            try:
+                charge_count = int(charges)
+            except (TypeError, ValueError):
+                charge_count = 0
+            if charge_count <= 0:
+                self.state.add_message(f"The {matched} has no charge left.")
+                return False
         consumed = self._apply_item_use_spec(matched, spec)
         if consumed:
-            self.consume_inventory_item(matched, 1)
+            if bool(spec.get("consume_on_use", True)):
+                self.consume_inventory_item(matched, 1)
+            elif charges is not None:
+                self._set_item_use_charges(matched, max(0, int(charges) - 1))
             self.state.stats.items_used += 1
             self.finish_player_turn()
         return consumed
+
+    def item_use_spec(self, item_name: str) -> dict[str, Any]:
+        lore = self.state.item_lore.get(normalize_id(item_name)) or {}
+        spec = lore.get("use_spec")
+        if lore.get("identified") and isinstance(spec, dict):
+            return dict(spec)
+        return ITEM_USE_SPECS.get(normalize_id(item_name), DEFAULT_ITEM_USE_SPEC)
+
+    def _set_item_use_charges(self, item_name: str, charges: int) -> None:
+        key = normalize_id(item_name)
+        lore = dict(self.state.item_lore.get(key) or {})
+        spec = dict(lore.get("use_spec") or {})
+        spec["charges"] = max(0, charges)
+        lore["use_spec"] = spec
+        self.state.item_lore[key] = lore
+
+    def identify_inventory_item(
+        self,
+        item_name: str,
+        resolution: dict[str, Any],
+        *,
+        npc_name: str,
+        fee: int,
+        value_after: int,
+        base_value: int,
+    ) -> str | None:
+        if self.state.game_over:
+            return None
+        matched = self.find_inventory_item(item_name)
+        if matched is None or self.state.inventory.get(matched, 0) < 1:
+            self.state.add_message(f"You don't have any {item_name.strip().lower()}.")
+            return None
+        if normalize_id(matched) == "gold":
+            self.state.add_message("Gold is already exactly as mysterious as it looks.")
+            return None
+        lore = self.state.item_lore.get(normalize_id(matched)) or {}
+        if lore.get("identified"):
+            self.state.add_message(f"The {matched} has already been identified.")
+            return None
+        gold_key = self.find_inventory_item("gold")
+        gold = self.state.inventory.get(gold_key, 0) if gold_key else 0
+        if gold < fee:
+            self.state.add_message(
+                f"{npc_name} asks {fee} gold to identify it, but you have only {gold}."
+            )
+            return None
+
+        descriptor = _clean_item_descriptor(resolution.get("descriptor"))
+        display_name = self._identified_display_name(
+            matched,
+            resolution.get("display_name"),
+            descriptor,
+        )
+        identified_key = self._identified_inventory_key(
+            matched,
+            display_name,
+            descriptor=descriptor,
+        )
+        was_protected = self.is_item_protected(matched)
+        self.consume_inventory_item(matched, 1)
+        if gold_key is not None:
+            self.consume_inventory_item(gold_key, fee)
+        self.state.inventory[identified_key] = (
+            self.state.inventory.get(identified_key, 0) + 1
+        )
+        if was_protected:
+            self.state.player.protected_items.add(identified_key)
+
+        tags = {
+            normalize_id(str(tag))
+            for tag in resolution.get("tags", [])
+            if str(tag).strip()
+        }
+        if isinstance(lore.get("tags"), list):
+            tags.update(normalize_id(str(tag)) for tag in lore["tags"])
+        metadata = {
+            "identified": True,
+            "descriptor": descriptor or "awakened",
+            "palette_id": normalize_id(str(resolution.get("palette_id") or "")),
+            "value": value_after,
+            "base_item": matched,
+            "base_value": base_value,
+            "identification_fee": fee,
+            "identified_by": npc_name,
+            "identified_turn": self.state.turn,
+            "tags": sorted(tags),
+            "ability_summary": _clean_message_text(resolution.get("ability_summary"))
+            or _item_ability_summary(resolution),
+            "ability_card_id": normalize_id(
+                str(resolution.get("ability_card_id") or "")
+            ),
+            "ability_kind": resolution.get("ability_kind") or "active",
+            "use_spec": dict(resolution.get("use_spec") or {}),
+        }
+        if lore.get("material"):
+            metadata["material"] = lore["material"]
+        if lore.get("rarity"):
+            metadata["rarity"] = lore["rarity"]
+        if resolution.get("equipment_slot"):
+            metadata["equipment_slot"] = resolution["equipment_slot"]
+        if isinstance(resolution.get("equipment_spec"), dict):
+            metadata["equipment_spec"] = dict(resolution["equipment_spec"])
+        self.set_item_lore(
+            identified_key,
+            display_name,
+            str(resolution.get("description") or ""),
+            source="identified",
+            metadata=metadata,
+        )
+        self.state.add_message(f"{npc_name} identifies the {matched}: {display_name}.")
+        description = _clean_message_text(resolution.get("description"))
+        if description:
+            self.state.add_message(description)
+        ability_summary = str(metadata.get("ability_summary") or "").strip()
+        if ability_summary:
+            self.state.add_message(f"Ability: {ability_summary}")
+        self.state.add_message(
+            f"You pay {fee} gold. It is now worth about {value_after} gold."
+        )
+        self.finish_player_turn()
+        return identified_key
+
+    def _identified_display_name(
+        self,
+        source_key: str,
+        display_name: object,
+        descriptor: str,
+    ) -> str:
+        base = _clean_item_name(display_name or source_key)
+        prefix = _clean_item_descriptor(descriptor) or "awakened"
+        if _name_has_prefix(base, prefix):
+            return base
+        return _clean_item_name(f"{prefix} {base}")
+
+    def _identified_inventory_key(
+        self,
+        source_key: str,
+        display_name: str,
+        *,
+        descriptor: str = "",
+    ) -> str:
+        base = _clean_item_name(display_name)
+        remaining_source = self.state.inventory.get(source_key, 0) > 1
+        if normalize_id(base) == normalize_id(source_key):
+            base = _clean_item_name(
+                f"{_clean_item_descriptor(descriptor) or 'awakened'} {base}"
+            )
+        candidate = base
+        suffix = 2
+        while candidate in self.state.inventory and (
+            remaining_source or candidate != source_key
+        ):
+            candidate = f"{base} {suffix}"
+            suffix += 1
+        return candidate
 
     def drop_item(self, item_name: str) -> bool:
         if self.state.game_over:
@@ -89,17 +257,138 @@ class _ItemsMixin:
         self.finish_player_turn()
         return True
 
-    def find_inventory_item(self, item_name: str) -> str | None:
-        return self.find_item_in(self.state.inventory, item_name)
+    def find_inventory_item(
+        self, item_name: str, *, include_lore_aliases: bool = True
+    ) -> str | None:
+        return self.find_item_in(
+            self.state.inventory,
+            item_name,
+            include_lore_aliases=include_lore_aliases,
+        )
 
-    def find_item_in(self, container: dict[str, int], item_name: str) -> str | None:
+    def protected_inventory_key(self, item_name: str) -> str | None:
+        """Return the protected carried stack matching `item_name`, if any."""
+        matched = self.find_inventory_item(item_name)
+        if matched is None:
+            return None
+        wanted = normalize_id(matched)
+        player = self.state.player
+        for protected in set(player.protected_items):
+            if protected == matched or normalize_id(protected) == wanted:
+                return protected
+        return None
+
+    def is_item_protected(self, item_name: str) -> bool:
+        return self.protected_inventory_key(item_name) is not None
+
+    def protect_item(self, item_name: str) -> bool:
+        """Move a carried stack into the spell-safe part of inventory.
+
+        Protection only blocks wild-magic item costs. Manual actions such as use, drop,
+        equip, and trade still operate normally because the player is explicitly choosing
+        that item.
+        """
+        if self.state.game_over:
+            return False
+        matched = self.find_inventory_item(item_name)
+        if matched is None or self.state.inventory.get(matched, 0) < 1:
+            self.state.add_message(f"You don't have any {item_name.strip().lower()}.")
+            return False
+        player = self.state.player
+        if self.is_item_protected(matched):
+            self.state.add_message(f"{matched} is already protected from wild magic.")
+            return True
+        player.protected_items.add(matched)
+        self.state.add_message(f"You protect {matched} from wild-magic costs.")
+        return True
+
+    def unprotect_item(self, item_name: str) -> bool:
+        """Return a carried stack to the ordinary reagent pool."""
+        if self.state.game_over:
+            return False
+        matched = self.find_inventory_item(item_name)
+        if matched is None:
+            self.state.add_message(f"You don't have any {item_name.strip().lower()}.")
+            return False
+        protected = self.protected_inventory_key(matched)
+        if protected is None:
+            self.state.add_message(f"{matched} is not protected.")
+            return True
+        self.state.player.protected_items.discard(protected)
+        self.state.add_message(f"{matched} can be spent by wild magic again.")
+        return True
+
+    def reagent_cards(self, *, include_protected: bool = False) -> list[dict[str, Any]]:
+        """Carried item stacks formatted as spell-fuel cards."""
+        cards: list[dict[str, Any]] = []
+        protected_ids = {
+            normalize_id(name)
+            for name in self.state.player.protected_items
+            if name in self.state.inventory
+        }
+        for name, quantity in sorted(self.state.inventory.items()):
+            if quantity <= 0:
+                continue
+            protected = normalize_id(name) in protected_ids
+            if protected and not include_protected:
+                continue
+            lore = self.state.item_lore.get(normalize_id(name)) or {}
+            cards.append(
+                reagent_card(
+                    name,
+                    quantity,
+                    protected=protected,
+                    lore=lore,
+                )
+            )
+        return cards
+
+    def find_item_in(
+        self,
+        container: dict[str, int],
+        item_name: str,
+        *,
+        include_lore_aliases: bool = True,
+    ) -> str | None:
         """Fuzzy name lookup against any item-quantity dict (player inventory, NPC
         wares, ...) -- the same dict shape, so the same matching rules apply."""
         wanted = normalize_id(item_name)
         for key in container:
             if key.lower() == item_name.strip().lower() or normalize_id(key) == wanted:
                 return key
+        if include_lore_aliases and container is self.state.inventory:
+            alias_match = self._find_inventory_item_by_lore_alias(wanted)
+            if alias_match is not None:
+                return alias_match
         return None
+
+    def _find_inventory_item_by_lore_alias(self, wanted: str) -> str | None:
+        if not wanted:
+            return None
+        matches: list[str] = []
+        for key in self.state.inventory:
+            lore = self.state.item_lore.get(normalize_id(key)) or {}
+            aliases = [
+                lore.get("display_name"),
+                lore.get("base_item"),
+            ]
+            if lore.get("identified"):
+                descriptor = _clean_item_descriptor(lore.get("descriptor"))
+                aliases.extend(
+                    [
+                        f"identified {lore.get('base_item') or ''}",
+                        f"identified {lore.get('display_name') or ''}",
+                        f"{descriptor} {lore.get('base_item') or ''}",
+                    ]
+                )
+            alias_ids = {
+                normalize_id(str(alias))
+                for alias in aliases
+                if str(alias or "").strip()
+            }
+            if wanted in alias_ids:
+                matches.append(key)
+        return matches[0] if len(matches) == 1 else None
 
     def consume_inventory_item(
         self, item_name: str, amount: int, container: dict[str, int] | None = None
@@ -116,6 +405,8 @@ class _ItemsMixin:
             target[item_name] = remaining
         else:
             target.pop(item_name, None)
+            if target is self.state.inventory:
+                self.state.player.protected_items.discard(item_name)
         return spent
 
     def add_inventory_item(
@@ -126,7 +417,11 @@ class _ItemsMixin:
         accumulate together) or creates a new one."""
         if amount <= 0:
             return
-        existing = self.find_item_in(container, item_name)
+        existing = self.find_item_in(
+            container,
+            item_name,
+            include_lore_aliases=False,
+        )
         key = existing if existing is not None else item_name
         container[key] = container.get(key, 0) + amount
 
@@ -141,22 +436,33 @@ class _ItemsMixin:
                 spec = self.rng.choice(choices)
         context: dict[str, Any] = {"item": item_name.replace("_", " ")}
         target_clause = ""
+        any_success = False
+        fallback_reason = str(spec.get("failure") or "")
         for effect in coerce_list(spec.get("effects")):
             if not isinstance(effect, dict):
                 continue
             success, updates = self._apply_item_effect(effect)
             context.update(updates)
+            if "reason" in updates and not fallback_reason:
+                fallback_reason = str(updates["reason"])
             if "target" in updates and "amount" in updates and "damage_type" in updates:
                 target_clause = f"{updates['target']} takes {updates['amount']} {updates['damage_type']}."
             if not success and effect.get("required"):
                 self.state.add_message(str(spec.get("failure") or "Nothing happens."))
                 return False
+            any_success = any_success or success
+        if not any_success:
+            self.state.add_message(fallback_reason or "Nothing happens.")
+            return False
         context["target_clause"] = (
             target_clause or "No enemy is close enough to be caught in it."
         )
-        self.state.add_message(
-            str(spec.get("message") or "You use the {item}.").format(**context)
-        )
+        message = str(spec.get("message") or "You use the {item}.")
+        try:
+            rendered = message.format(**context)
+        except (KeyError, ValueError):
+            rendered = message
+        self.state.add_message(rendered)
         return True
 
     def _apply_item_effect(self, effect: dict[str, Any]) -> tuple[bool, dict[str, Any]]:
@@ -167,10 +473,14 @@ class _ItemsMixin:
             return False, {}
         if kind == "restore_mana":
             gained = min(amount, player.max_mana - player.mana)
+            if gained <= 0:
+                return False, {"reason": "Your mana is already full."}
             player.mana += gained
             return True, {"amount": gained, "mana": gained}
         if kind == "heal":
             healed = self.heal_entity(player, amount)
+            if healed <= 0:
+                return False, {"reason": "You are already unhurt."}
             return True, {"amount": healed}
         if kind == "status":
             status = normalize_id(str(effect.get("status") or "marked"))
@@ -292,7 +602,7 @@ class _ItemsMixin:
         if matched is None or self.state.inventory.get(matched, 0) < 1:
             self.state.add_message(f"You don't have any {item_name.strip().lower()}.")
             return False
-        slot = equipment_slot_for_item(matched)
+        slot = self.equipment_slot_for_inventory_item(matched)
         if not slot:
             self.state.add_message(
                 f"The {matched} isn't something you can wear or wield."
@@ -309,6 +619,16 @@ class _ItemsMixin:
             self.state.add_message(f"You equip the {matched}.")
         self.finish_player_turn()
         return True
+
+    def equipment_slot_for_inventory_item(self, item_name: str) -> str | None:
+        slot = equipment_slot_for_item(item_name)
+        if slot:
+            return slot
+        lore = self.state.item_lore.get(normalize_id(item_name)) or {}
+        if not lore.get("identified"):
+            return None
+        lore_slot = normalize_id(str(lore.get("equipment_slot") or ""))
+        return lore_slot if lore_slot in EQUIPMENT_SLOTS else None
 
     def unequip_item(self, slot_name: str) -> bool:
         if self.state.game_over:
@@ -418,22 +738,112 @@ class _ItemsMixin:
         self.finish_player_turn()
         return True
 
-    def pick_up_items_at_player(self) -> None:
+    def pick_up_items_at_player(self) -> bool:
         player = self.state.player
+        picked_up = False
         for entity in list(self.entities_at(player.x, player.y)):
             if entity.kind != "item":
                 continue
             item_type = entity.item_type or entity.name
-            self.state.inventory[item_type] = (
-                self.state.inventory.get(item_type, 0) + entity.quantity
-            )
+            inventory_key = self.find_inventory_item(item_type) or item_type
+            self.add_inventory_item(self.state.inventory, item_type, entity.quantity)
+            metadata = dict(entity.details.get("item_metadata") or {})
             # Preserve the item's flavor before the Entity (and its description) is gone, so a
             # picked-up item can still be a meaningful spell focus. Keyed by the inventory key;
             # a prior Investigate description outranks this and is kept (see set_item_lore).
-            if entity.description:
+            if entity.description or metadata:
                 self.set_item_lore(
-                    item_type, entity.name, entity.description, source="description"
+                    inventory_key,
+                    entity.name,
+                    entity.description or metadata.get("description", ""),
+                    source="description",
+                    metadata=metadata,
                 )
             self.state.add_message(f"You pick up {entity.name}.")
             self.state.stats.items_collected += 1
             del self.state.entities[entity.id]
+            picked_up = True
+        return picked_up
+
+
+def _clean_item_name(value: object) -> str:
+    cleaned = " ".join(str(value or "identified item").replace("_", " ").split())
+    return cleaned[:80] or "identified item"
+
+
+def _clean_item_descriptor(value: object) -> str:
+    cleaned = " ".join(str(value or "").replace("_", " ").split()).lower()
+    cleaned = "".join(
+        char for char in cleaned if char.isascii() and (char.isalnum() or char in " -'")
+    )
+    return cleaned.strip(" -'")[:28]
+
+
+def _name_has_prefix(name: str, prefix: str) -> bool:
+    prefix_id = normalize_id(prefix)
+    name_id = normalize_id(name)
+    return bool(prefix_id) and (
+        name_id == prefix_id or name_id.startswith(f"{prefix_id}_")
+    )
+
+
+def _clean_message_text(value: object, *, limit: int = 240) -> str:
+    cleaned = " ".join(str(value or "").split())
+    if len(cleaned) > limit:
+        cleaned = cleaned[:limit].rsplit(" ", 1)[0] or cleaned[:limit]
+    return cleaned
+
+
+def _item_ability_summary(resolution: dict[str, Any]) -> str:
+    if resolution.get("ability_kind") == "slot_passive":
+        slot = normalize_id(str(resolution.get("equipment_slot") or "charm"))
+        spec = resolution.get("equipment_spec")
+        bonuses: list[str] = []
+        if isinstance(spec, dict):
+            try:
+                attack = int(spec.get("attack") or 0)
+            except (TypeError, ValueError):
+                attack = 0
+            try:
+                defense = int(spec.get("defense") or 0)
+            except (TypeError, ValueError):
+                defense = 0
+            if attack:
+                bonuses.append(f"+{attack} attack")
+            if defense:
+                bonuses.append(f"+{defense} defense")
+        bonus_text = " and ".join(bonuses) or "a small bonus"
+        return f"Equip it in your {slot} slot for {bonus_text}."
+
+    use_spec = resolution.get("use_spec")
+    if not isinstance(use_spec, dict):
+        return "Use it to release a small stored magic."
+    effect = next(
+        (
+            effect
+            for effect in coerce_list(use_spec.get("effects"))
+            if isinstance(effect, dict)
+        ),
+        {},
+    )
+    kind = normalize_id(str(effect.get("kind") or ""))
+    if kind == "restore_mana":
+        return "Use it to restore mana."
+    if kind == "heal":
+        return "Use it to heal wounds."
+    if kind == "status":
+        status = str(effect.get("status") or "marked").replace("_", " ")
+        return f"Use it to give yourself {status}."
+    if kind == "resistance":
+        damage_type = str(effect.get("damage_type") or "damage").replace("_", " ")
+        return f"Use it to gain {damage_type} resistance."
+    if kind == "create_tiles":
+        return "Use it to spill temporary terrain nearby."
+    if kind == "teleport_explored":
+        return "Use it to blink to a random explored place."
+    if kind == "damage_nearest":
+        return "Use it to strike the nearest enemy in range."
+    if kind == "status_nearest":
+        status = str(effect.get("status") or "marked").replace("_", " ")
+        return f"Use it to make the nearest enemy {status}."
+    return "Use it to release a small stored magic."

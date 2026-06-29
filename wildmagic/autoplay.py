@@ -146,7 +146,8 @@ Coverage goals:
   persistent rumors/promises; examine/study/observe to materialize room lore; investigate/search
   rooms, props, clues, or secrets; read books or readable objects once; talk/speak/say to NPCs;
   wares/browse/shop near merchants; accept or reject real trade offers; spare beaten enemies;
-  use/equip/unequip/drop items when inventory suggests it.
+  use/equip/unequip/drop items when inventory suggests it; check reagents and protect or
+  unprotect valuables when testing wild-magic item costs.
 - Do not treat movement as the default answer. If the last few commands were mostly movement,
   choose a different useful system command such as inspect, examine, investigate, talk, read,
   pickup, a standard spell, or a wild spell. If the last few commands were mostly spells and
@@ -169,9 +170,12 @@ Command meanings:
 - examine/study/observe: study the current room; may create durable room lore and usually costs time.
 - investigate/search [target]: search the room or a named clue/prop/secret more deeply; costs time.
 - read [target]: read a nearby book/readable object; first read can create durable text, rereads are free.
-- talk/speak/say your own message: converse with an adjacent NPC; can create lore or trade opportunities.
+- talk/speak/say your own message: hail the preferred visible talkable character within range; adjacent candidates are preferred, and enemies can answer.
 - wares/browse/shop: inspect merchant goods when near a trading NPC.
 - pickup/drop/use/equip/unequip: exercise inventory, consumable, and equipment systems.
+- reagents: inspect which carried items and gold wild magic may spend.
+- protect/unprotect <item>: keep a carried stack out of ordinary wild-magic item costs, or
+  return it to the reagent pool.
 - standing/followers: free readouts of your reputation, legend, Empire pressure, and retinue.
 - found a name: raise your own organization; followers who believe in your cause may pledge to it.
 - rest / rest until dawn: pass time and let the world's daily 05:00 events run (deeds become
@@ -214,7 +218,7 @@ free (stand next to someone held in a cell and free/release them - some will joi
 rest (camp to pass time; "rest" is 8 hours, "rest until dawn" sleeps to the next 05:00 -
 the world's daily events only happen at 05:00, so resting is how you let the world react),
 wild magic: command must start with cast and continue with specific original spell wording,
-talk: command must start with talk and continue with your message to an adjacent NPC.
+talk: command must start with talk and continue with your message to a visible talkable character within hailing range.
 The words "spell idea", "message", "target", "item", and "slot" are descriptions, not
 literal command text. Never include angle brackets or instruction phrases in your command.
 Return JSON only: {"command":"...", "note":null, "bug_suspected":false}

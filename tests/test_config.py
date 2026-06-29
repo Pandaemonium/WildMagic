@@ -13,6 +13,7 @@ MODEL_KEYS = (
     "WILDMAGIC_WILD_MODEL",
     "WILDMAGIC_DIALOGUE_MODEL",
     "WILDMAGIC_TRADE_MODEL",
+    "WILDMAGIC_ITEM_MODEL",
     "WILDMAGIC_TOWN_MODEL",
     "WILDMAGIC_LORE_MODEL",
     "WILDMAGIC_CANON_MODEL",
@@ -23,6 +24,7 @@ PROVIDER_KEYS = (
     "WILDMAGIC_PROVIDER",
     "WILDMAGIC_DIALOGUE_PROVIDER",
     "WILDMAGIC_TRADE_PROVIDER",
+    "WILDMAGIC_ITEM_PROVIDER",
     "WILDMAGIC_TOWN_PROVIDER",
     "WILDMAGIC_LORE_PROVIDER",
 )
@@ -34,6 +36,7 @@ OLLAMA_ROUTE_KEYS = (
     "WILDMAGIC_WILD_OLLAMA_HOST",
     "WILDMAGIC_DIALOGUE_OLLAMA_HOST",
     "WILDMAGIC_TRADE_OLLAMA_HOST",
+    "WILDMAGIC_ITEM_OLLAMA_HOST",
     "WILDMAGIC_TOWN_OLLAMA_HOST",
     "WILDMAGIC_LORE_OLLAMA_HOST",
     "WILDMAGIC_AGENT_OLLAMA_HOST",
@@ -65,6 +68,7 @@ def test_model_fallback_chains(monkeypatch) -> None:
     assert config.get_wild_magic_model() == config.DEFAULT_MODEL
     assert config.get_dialogue_model() == config.DEFAULT_MODEL
     assert config.get_trade_model() == config.DEFAULT_MODEL
+    assert config.get_item_model() == config.DEFAULT_MODEL
     assert config.get_town_model() == config.DEFAULT_MODEL
     assert config.get_lore_model() == config.DEFAULT_LORE_MODEL
     assert config.get_canon_model() == config.DEFAULT_MODEL
@@ -75,6 +79,7 @@ def test_model_fallback_chains(monkeypatch) -> None:
     assert config.get_wild_magic_model() == "shared-model"
     assert config.get_dialogue_model() == "shared-model"
     assert config.get_trade_model() == "shared-model"
+    assert config.get_item_model() == "shared-model"
     assert config.get_town_model() == "shared-model"
     assert config.get_lore_model() == config.DEFAULT_LORE_MODEL
     assert config.get_canon_model() == "shared-model"
@@ -89,6 +94,7 @@ def test_model_fallback_chains(monkeypatch) -> None:
     monkeypatch.setenv("WILDMAGIC_DIALOGUE_MODEL", "dialogue-model")
     assert config.get_dialogue_model() == "dialogue-model"
     assert config.get_trade_model() == "dialogue-model"
+    assert config.get_item_model() == "dialogue-model"
     assert config.get_town_model() == "shared-model"
 
     monkeypatch.setenv("WILDMAGIC_CANON_MODEL", "canon-model")
@@ -99,10 +105,12 @@ def test_model_fallback_chains(monkeypatch) -> None:
     assert config.get_background_canon_model() == "background-canon-model"
 
     monkeypatch.setenv("WILDMAGIC_TRADE_MODEL", "trade-model")
+    monkeypatch.setenv("WILDMAGIC_ITEM_MODEL", "item-model")
     monkeypatch.setenv("WILDMAGIC_TOWN_MODEL", "town-model")
     monkeypatch.setenv("WILDMAGIC_LORE_MODEL", "lore-model")
     monkeypatch.setenv("WILDMAGIC_AGENT_MODEL", "agent-model")
     assert config.get_trade_model() == "trade-model"
+    assert config.get_item_model() == "item-model"
     assert config.get_town_model() == "town-model"
     assert config.get_lore_model() == "lore-model"
     assert config.get_agent_model() == "agent-model"
@@ -115,20 +123,26 @@ def test_provider_fallback_chains(monkeypatch) -> None:
     assert config.get_wild_magic_provider() == config.DEFAULT_PROVIDER
     assert config.get_dialogue_provider() == config.DEFAULT_PROVIDER
     assert config.get_trade_provider() == config.DEFAULT_PROVIDER
+    assert config.get_item_provider() == config.DEFAULT_PROVIDER
     assert config.get_town_provider() == config.DEFAULT_PROVIDER
     assert config.get_lore_provider() == config.DEFAULT_PROVIDER
 
     monkeypatch.setenv("WILDMAGIC_PROVIDER", "mock")
     assert config.get_dialogue_provider() == "mock"
     assert config.get_trade_provider() == "mock"
+    assert config.get_item_provider() == "mock"
     assert config.get_town_provider() == "mock"
     assert config.get_lore_provider() == "mock"
 
     monkeypatch.setenv("WILDMAGIC_DIALOGUE_PROVIDER", "auto")
     assert config.get_dialogue_provider() == "auto"
     assert config.get_trade_provider() == "auto"
+    assert config.get_item_provider() == "auto"
     assert config.get_town_provider() == "mock"
     assert config.get_lore_provider() == "mock"
+
+    monkeypatch.setenv("WILDMAGIC_ITEM_PROVIDER", "ollama")
+    assert config.get_item_provider() == "ollama"
 
 
 def test_typed_values_use_defaults_and_bounds(monkeypatch) -> None:
@@ -159,6 +173,7 @@ def test_scoped_ollama_routing_precedence(monkeypatch) -> None:
     assert config.ollama_host("wild") == "http://127.0.0.1:11432"
     assert config.ollama_host("dialogue") == "http://127.0.0.1:11432"
     assert config.ollama_host("trade") == "http://127.0.0.1:11432"
+    assert config.ollama_host("item") == "http://127.0.0.1:11432"
     assert config.ollama_host("agent") == "http://127.0.0.1:11432"
     assert config.ollama_host("town") == "http://127.0.0.1:11433"
     assert config.ollama_host("lore") == "http://127.0.0.1:11433"
@@ -166,10 +181,12 @@ def test_scoped_ollama_routing_precedence(monkeypatch) -> None:
 
     monkeypatch.setenv("WILDMAGIC_WILD_OLLAMA_HOST", "127.0.0.1:11434")
     monkeypatch.setenv("WILDMAGIC_AGENT_OLLAMA_HOST", "127.0.0.1:11437")
+    monkeypatch.setenv("WILDMAGIC_ITEM_OLLAMA_HOST", "127.0.0.1:11438")
     monkeypatch.setenv("WILDMAGIC_TOWN_OLLAMA_HOST", "127.0.0.1:11435")
     monkeypatch.setenv("WILDMAGIC_LORE_OLLAMA_HOST", "127.0.0.1:11436")
     assert config.ollama_host("wild") == "http://127.0.0.1:11434"
     assert config.ollama_host("agent") == "http://127.0.0.1:11437"
+    assert config.ollama_host("item") == "http://127.0.0.1:11438"
     assert config.ollama_host("town") == "http://127.0.0.1:11435"
     assert config.ollama_host("lore") == "http://127.0.0.1:11436"
 
@@ -198,6 +215,7 @@ def test_scoped_ollama_settings_follow_purpose_and_route_precedence(
     monkeypatch.setenv("WILDMAGIC_BACKGROUND_OLLAMA_NUM_GPU", "0")
 
     assert config.ollama_timeout_seconds("dialogue") == 200.0
+    assert config.ollama_timeout_seconds("item") == 200.0
     assert config.ollama_timeout_seconds("agent") == 200.0
     assert config.ollama_timeout_seconds("wild") == 300.0
     assert config.ollama_num_gpu("town") == 0

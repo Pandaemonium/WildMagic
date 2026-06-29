@@ -101,6 +101,123 @@ _STATUS_AS_TYPE: dict[str, tuple[str, str]] = {
 _KNOWN_TILE_NAMES = frozenset(TILE_ALIASES)
 
 
+_COMMON_RESOLUTION_WRAPPERS = (
+    "resolution",
+    "spell_resolution",
+    "result",
+    "response",
+    "output",
+)
+
+_RESOLUTION_LEVEL_KEYS = {
+    "accepted",
+    "severity",
+    "outcome_text",
+    "message",
+    "response",
+    "text",
+    "description",
+    "outcome",
+    "rejected_reason",
+    "cost",
+    "costs",
+    "spell",
+    "input",
+    "error",
+    "valid_options",
+    "previous_json",
+}
+
+_EFFECT_FIELD_HINTS = {
+    "target",
+    "status",
+    "duration",
+    "radius",
+    "tile",
+    "amount",
+    "damage_type",
+    "x",
+    "y",
+    "name",
+    "faction",
+    "template",
+    "hp",
+    "max_hp",
+    "attack",
+    "defense",
+    "count",
+    "tags",
+    "material",
+    "quantity",
+    "shape",
+    "pattern",
+    "trigger",
+    "origin",
+}
+
+
+def _looks_like_resolution_object(obj: dict[str, Any]) -> bool:
+    return any(
+        key in obj
+        for key in (
+            "accepted",
+            "effects",
+            "effect",
+            "costs",
+            "cost",
+            "outcome_text",
+            "rejected_reason",
+            "severity",
+        )
+    ) or _looks_like_bare_effect_object(obj)
+
+
+def _looks_like_bare_effect_object(obj: dict[str, Any]) -> bool:
+    if any(key in obj for key in ("accepted", "effects", "effect", "rejected_reason")):
+        return False
+    effect_type = str(obj.get("type") or obj.get("effect_type") or "").lower().strip()
+    if not effect_type:
+        return False
+    if (
+        effect_type in SUPPORTED_EFFECTS
+        or effect_type in _EFFECT_TYPE_ALIASES
+        or effect_type in _STATUS_AS_TYPE
+        or effect_type in _ELEMENT_DAMAGE_ALIASES
+    ):
+        return True
+    return any(key in obj for key in _EFFECT_FIELD_HINTS)
+
+
+def _unwrap_common_resolution_wrapper(data: dict[str, Any]) -> dict[str, Any]:
+    for key in _COMMON_RESOLUTION_WRAPPERS:
+        wrapped = data.get(key)
+        if isinstance(wrapped, dict) and _looks_like_resolution_object(wrapped):
+            merged = dict(wrapped)
+            for spell_key in ("spell", "input"):
+                if spell_key in data and "spell" not in merged:
+                    merged["spell"] = data[spell_key]
+            return merged
+    return data
+
+
+def _wrap_bare_effect_object(data: dict[str, Any]) -> dict[str, Any]:
+    if not _looks_like_bare_effect_object(data):
+        return data
+    effect = {
+        key: value for key, value in data.items() if key not in _RESOLUTION_LEVEL_KEYS
+    }
+    if "effect_type" in effect and "type" not in effect:
+        effect["type"] = effect.pop("effect_type")
+    normalized: dict[str, Any] = {
+        key: value
+        for key, value in data.items()
+        if key in _RESOLUTION_LEVEL_KEYS and key != "input"
+    }
+    normalized.setdefault("accepted", True)
+    normalized["effects"] = [effect]
+    return normalized
+
+
 def _normalize_create_tiles_tile(e: dict[str, Any]) -> dict[str, Any]:
     """Infer tile from tags/name when tile field is missing or uses an unrecognized char."""
     tile_val = str(e.get("tile") or "").strip().lower()
@@ -284,6 +401,9 @@ def _infer_trigger_action(text: str) -> dict[str, Any] | None:
 
 
 def _normalize_resolution(data: dict[str, Any]) -> dict[str, Any]:
+    data = _unwrap_common_resolution_wrapper(data)
+    data = _wrap_bare_effect_object(data)
+
     if isinstance(data.get("outcome"), dict):
         outcome = data["outcome"]
         merged = dict(data)
@@ -768,7 +888,10 @@ def _normalize_resolution(data: dict[str, Any]) -> dict[str, Any]:
     if isinstance(costs, list):
         data = dict(data)
         data["costs"] = [
-            _flatten_nested_effect(c) if isinstance(c, dict) else c for c in costs
+            _normalize_cost_entry(_flatten_nested_effect(c))
+            if isinstance(c, dict)
+            else c
+            for c in costs
         ]
 
     # Rescue cost entries whose type is actually a known effect type. The LLM sometimes
@@ -803,7 +926,7 @@ def _coerce_cost_dict(raw_dict: dict[str, Any]) -> list[dict[str, Any]]:
         cost = dict(raw_dict)
         if "quantity" in cost and "amount" not in cost:
             cost["amount"] = cost["quantity"]
-        return [cost]
+        return [_normalize_cost_entry(cost)]
     coerced: list[dict[str, Any]] = []
     for key, val in raw_dict.items():
         if key in {"mana", "health", "max_health", "max_mana", "hp"}:
@@ -823,7 +946,29 @@ def _coerce_cost_dict(raw_dict: dict[str, Any]) -> list[dict[str, Any]]:
                     "amount": int(raw_dict.get("quantity", 1)),
                 }
             )
+        elif key in {"name", "reagent", "item_name"}:
+            coerced.append(
+                {
+                    "type": "item",
+                    "item": str(val),
+                    "amount": int(raw_dict.get("quantity", raw_dict.get("amount", 1))),
+                }
+            )
     return coerced
+
+
+def _normalize_cost_entry(cost: dict[str, Any]) -> dict[str, Any]:
+    normalized = dict(cost)
+    cost_type = str(normalized.get("type") or "").lower().strip()
+    if cost_type == "item" and not normalized.get("item"):
+        for alias in ("item_name", "name", "reagent", "id"):
+            value = normalized.get(alias)
+            if value:
+                normalized["item"] = value
+                break
+    if "quantity" in normalized and "amount" not in normalized:
+        normalized["amount"] = normalized["quantity"]
+    return normalized
 
 
 def _effect_from_text(text: str) -> dict[str, Any] | None:

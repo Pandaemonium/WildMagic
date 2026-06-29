@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any, TYPE_CHECKING
 
+from .item_generation import generate_curio
+
 if TYPE_CHECKING:
     from .engine import GameEngine
 
@@ -124,9 +126,25 @@ def generate_npc_quest(engine: GameEngine, rng: Any) -> dict[str, Any] | None:
     reward_item = None
     reward_qty = 0
     if rng.random() < 0.30:
-        reward_item = rng.choice(
-            ["blood moss", "lockpick", "smoke vial", "mana crystal", "grave salt"]
-        )
+        if rng.random() < 0.50:
+            curio = generate_curio(
+                rng,
+                themes=["quest", "reward", chosen_item],
+                region_id=engine.state.region_id,
+                source="quest_reward",
+            )
+            reward_item = curio.name
+            engine.set_item_lore(
+                curio.name,
+                curio.name,
+                curio.description,
+                source="generated",
+                metadata=curio.lore_metadata(),
+            )
+        else:
+            reward_item = rng.choice(
+                ["blood moss", "lockpick", "smoke vial", "mana crystal", "grave salt"]
+            )
         reward_qty = 1
 
     return {

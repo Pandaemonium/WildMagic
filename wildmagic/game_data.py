@@ -225,10 +225,12 @@ ITEM_USE_SPECS: dict[str, dict[str, Any]] = {
     "mana_crystal": {
         "effects": [{"kind": "restore_mana", "amount": 6}],
         "message": "The {item} dissolves. You recover {amount} mana.",
+        "failure": "Your mana is already full; the crystal stays whole.",
     },
     "blood_moss": {
         "effects": [{"kind": "heal", "amount": 5}],
         "message": "You chew the {item}. You heal {amount} HP.",
+        "failure": "You are already unhurt; the moss can wait.",
     },
     "bone_charm": {
         "effects": [

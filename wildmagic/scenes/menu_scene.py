@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import pygame
 
-from ..actions import describe_world
+from ..actions import describe_world, inventory_item_summary
 from ..config import DEFAULT_MODEL, get_config_value, set_config_value
+from ..item_palettes import palette_colors
 from ..llm_client import fetch_ollama_models
 from ..rendering.layout import WINDOW_HEIGHT, WINDOW_WIDTH
 from ..ui_theme import ACCENT, GOLD, MUTED, PANEL_EDGE, TEXT, wrap_text
@@ -184,6 +185,19 @@ class MenuScene:
                             self.execute_command(f"unfocus {slot}")
                         else:
                             self.execute_command(f"focus {slot}")
+                return
+            elif event.key == pygame.K_p:
+                # Toggle whether the selected carried stack can be spent by wild magic.
+                if self.inventory_pane == 1 and inventory_items:
+                    item_view = equipment_view["items"][self.inventory_right_cursor]
+                    command = "unprotect" if item_view.get("protected") else "protect"
+                    self.execute_command(f"{command} {item_view['name']}")
+                return
+            elif event.key == pygame.K_a:
+                # Appraise/identify the selected carried item through the shared command path.
+                if self.inventory_pane == 1 and inventory_items:
+                    item_view = equipment_view["items"][self.inventory_right_cursor]
+                    self.execute_command(f"identify {item_view['name']}")
                 return
             elif event.key in (
                 pygame.K_RETURN,
@@ -458,8 +472,6 @@ class MenuScene:
                     if item_idx >= len(inventory_items):
                         break
                     item_view = inventory_items[item_idx]
-                    item_name = item_view["name"]
-                    qty = item_view["quantity"]
                     qy = pane_y_list + idx * row_h
                     is_selected = (self.inventory_pane == 1) and (
                         item_idx == self.inventory_right_cursor
@@ -478,7 +490,10 @@ class MenuScene:
                             border_radius=4,
                         )
 
-                    display_text = f"{item_name} x{qty}"
+                    display_text = inventory_item_summary(
+                        item_view,
+                        include_palette_label=False,
+                    )
                     if is_selected:
                         color = GOLD
                     elif item_view["equippable"]:
@@ -486,11 +501,16 @@ class MenuScene:
                     else:
                         color = TEXT
 
-                    item_surf = self.ui_font.render(display_text, True, color)
-                    self.screen.blit(item_surf, (rx, qy))
+                    self._draw_inventory_item_text(
+                        display_text,
+                        item_view,
+                        rx,
+                        qy,
+                        color,
+                    )
 
             hint_surf = self.small_font.render(
-                "◄► Switch Pane  •  ▲▼ Select  •  Enter/E Equip  •  Enter/U Unequip  •  F Focus  •  Esc Close",
+                "◄► Switch Pane  •  ▲▼ Select  •  Enter/E Equip  •  U Unequip  •  F Focus  •  P Protect  •  A Identify  •  Esc Close",
                 True,
                 MUTED,
             )
@@ -834,3 +854,38 @@ class MenuScene:
         }
         hint_surf = self.small_font.render(hints[self.menu_page], True, MUTED)
         self.screen.blit(hint_surf, (bx + padding, by + box_h - 20))
+
+    def _draw_inventory_item_text(
+        self,
+        text: str,
+        item_view: dict,
+        x: int,
+        y: int,
+        base_color: tuple[int, int, int],
+    ) -> None:
+        descriptor = str(item_view.get("descriptor") or "").strip()
+        palette_id = str(item_view.get("palette_id") or "").strip()
+        if (
+            not descriptor
+            or not palette_id
+            or not text.lower().startswith(descriptor.lower())
+        ):
+            item_surf = self.ui_font.render(text, True, base_color)
+            self.screen.blit(item_surf, (x, y))
+            return
+
+        colors = palette_colors(palette_id)
+        cursor_x = x
+        color_index = 0
+        for char in text[: len(descriptor)]:
+            color = base_color if char.isspace() else colors[color_index % len(colors)]
+            if not char.isspace():
+                color_index += 1
+            surf = self.ui_font.render(char, True, color)
+            self.screen.blit(surf, (cursor_x, y))
+            cursor_x += surf.get_width()
+
+        rest = text[len(descriptor) :]
+        if rest:
+            rest_surf = self.ui_font.render(rest, True, base_color)
+            self.screen.blit(rest_surf, (cursor_x, y))

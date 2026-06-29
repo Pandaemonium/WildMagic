@@ -133,3 +133,38 @@ def test_townsperson_does_not_initiate_combat() -> None:
     )
     # The townsperson flees rather than fights — they never initiate, even against the Empire.
     assert not engine.is_hostile_to(weaver, imperial)
+
+
+def test_enemy_killing_ally_does_not_count_as_player_damage_or_kill() -> None:
+    engine = _enemy_pair_engine()
+    attacker = engine.spawn_actor(
+        "test goblin",
+        "g",
+        2,
+        2,
+        hp=8,
+        attack=3,
+        defense=0,
+        faction="enemy",
+        ai="melee",
+    )
+    ally = engine.spawn_actor(
+        "brass moth",
+        "m",
+        3,
+        2,
+        hp=5,
+        attack=2,
+        defense=0,
+        faction="ally",
+        ai="melee",
+        tags={"conjured"},
+    )
+    kills_before = engine.state.stats.enemies_killed
+    damage_before = engine.state.stats.damage_dealt
+
+    engine.damage_entity(ally, 99, "physical", source=attacker)
+
+    assert ally.hp == 0
+    assert engine.state.stats.enemies_killed == kills_before
+    assert engine.state.stats.damage_dealt == damage_before

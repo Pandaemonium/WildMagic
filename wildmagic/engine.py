@@ -121,6 +121,7 @@ from .game_data import (
     scan_for_trade_intent,
 )
 from .geometry import bresenham_line
+from .item_generation import generate_curio
 from .normalize import (
     clamp_int,
     status_duration,
@@ -792,6 +793,21 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         disposition = derive_disposition(role, profile_traits, npc_tags)
         if disposition is not None and disposition not in profile_traits:
             profile_traits.append(disposition)
+        if wares and npc_wares and self.rng.random() < 0.60:
+            curio = generate_curio(
+                self.rng,
+                themes=[role, *profile_traits, *npc_tags],
+                region_id=self.state.region_id,
+                source="trade",
+            )
+            npc_wares[curio.name] = npc_wares.get(curio.name, 0) + 1
+            self.set_item_lore(
+                curio.name,
+                curio.name,
+                curio.description,
+                source="generated",
+                metadata=curio.lore_metadata(),
+            )
         self.state.npc_profiles[entity.id] = NPCProfile(
             entity_id=entity.id,
             name=name,
@@ -2113,7 +2129,12 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
     # be downgraded. Equal-tier writes keep the longer text. This keeps the merge
     # order-independent (Investigate always wins regardless of pickup order), so replay is
     # deterministic. See GameState.item_lore.
-    _ITEM_LORE_SOURCE_RANK = {"description": 1, "generated": 1, "investigated": 2}
+    _ITEM_LORE_SOURCE_RANK = {
+        "description": 1,
+        "generated": 1,
+        "investigated": 2,
+        "identified": 3,
+    }
 
     def set_item_lore(
         self,
@@ -2122,10 +2143,12 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
         description: str,
         *,
         source: str = "description",
+        metadata: dict[str, Any] | None = None,
     ) -> None:
         key = normalize_id(str(item_key or ""))
         text = " ".join(str(description or "").split())
-        if not key or not text:
+        meta = dict(metadata or {})
+        if not key or (not text and not meta):
             return
         rank = self._ITEM_LORE_SOURCE_RANK.get(source, 1)
         existing = self.state.item_lore.get(key)
@@ -2133,15 +2156,80 @@ class GameEngine(_CombatMixin, _ItemsMixin, _AIMixin, _GenerationMixin, _Effects
             existing_rank = self._ITEM_LORE_SOURCE_RANK.get(existing.get("source"), 1)
             if rank < existing_rank:
                 return
-            if rank == existing_rank and len(text) <= len(
-                str(existing.get("description") or "")
+            if (
+                rank == existing_rank
+                and len(text) <= len(str(existing.get("description") or ""))
+                and not meta
             ):
                 return
-        self.state.item_lore[key] = {
+        payload = {
             "display_name": str(display_name or item_key),
-            "description": text,
+            "description": text or str(existing.get("description") or "")
+            if existing
+            else text,
             "source": source,
         }
+        lore_meta_keys = (
+            "value",
+            "material",
+            "tags",
+            "rarity",
+            "generated",
+            "identified",
+            "descriptor",
+            "palette_id",
+            "ability_summary",
+            "ability_card_id",
+            "base_item",
+            "base_value",
+            "identification_fee",
+            "identified_by",
+            "identified_turn",
+            "ability_kind",
+            "use_spec",
+            "equipment_slot",
+            "equipment_spec",
+        )
+        if existing is not None:
+            for meta_key in lore_meta_keys:
+                if meta_key in existing and meta_key not in meta:
+                    payload[meta_key] = existing[meta_key]
+        for meta_key in lore_meta_keys:
+            if meta_key not in meta:
+                continue
+            value = meta[meta_key]
+            if meta_key == "value":
+                try:
+                    payload["value"] = max(1, int(value))
+                except (TypeError, ValueError):
+                    continue
+            elif meta_key == "tags":
+                payload["tags"] = sorted(
+                    {
+                        normalize_id(str(tag))
+                        for tag in coerce_list(value)
+                        if str(tag).strip()
+                    }
+                )
+            elif meta_key == "generated":
+                payload["generated"] = bool(value)
+            elif meta_key == "identified":
+                payload["identified"] = bool(value)
+            elif meta_key in {
+                "base_value",
+                "identification_fee",
+                "identified_turn",
+            }:
+                try:
+                    payload[meta_key] = max(0, int(value))
+                except (TypeError, ValueError):
+                    continue
+            elif meta_key in {"use_spec", "equipment_spec"}:
+                if isinstance(value, dict):
+                    payload[meta_key] = value
+            else:
+                payload[meta_key] = str(value)
+        self.state.item_lore[key] = payload
 
     @property
     def region(self) -> Region:

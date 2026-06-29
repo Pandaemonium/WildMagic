@@ -17,6 +17,17 @@ The LLM receives visible entities, terrain, inventory, and a compact `spell_anch
 
 Props do not add a separate spell system. They are environmental prompts for normal mechanics: center an `area_damage` on a brazier, create mist from a pool, reveal through a mirror, summon from a ritual circle, web/root from ropes or vines, curse through a notice or tablet, bind through a contract ledger, delay through a water clock, and so on. For attacks, prefer targeting creatures while using a prop as the center/origin; only target a prop directly when the spell explicitly destroys, animates, repairs, or transforms that object. Destroyed props remain as broken scenery with `broken`/`destroyed` tags so the consequence is inspectable.
 
+`reagents` contains carried items and gold that wild magic may spend as item costs.
+Each reagent card includes the inventory `name`, `quantity`, per-unit `value`,
+`total_value`, `material`, `tags`, and optional `spell_bias`. Higher-value reagents
+can justify stronger effects, while material and tags should color the effect. Item costs
+should use exact names from `reagents`.
+
+`protected_inventory` contains carried stacks the player has put in the spell-safe part of
+inventory. These items still exist for normal inventory, trade, quests, equipment, and manual
+use, but ordinary wild-magic costs should not consume them. The engine blocks protected item
+costs unless a resolution explicitly marks the cost as authorized for protected inventory.
+
 `active_curses` contains the controlled body's current curses as full cards. Unknown curses
 are semantic: the resolver should let their description bite by narrowing the spell's flavor,
 costs, compromises, and backfires according to the scene. Known mixed/mechanical curses also

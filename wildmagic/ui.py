@@ -2082,3 +2082,7 @@ class GameUI:
         surface = font.render(text, True, color)
         self.screen.blit(surface, (x, y))
         return y + surface.get_height() + 2
+
+
+def run_game(autoplay: bool = False) -> None:
+    GameUI(autoplay=autoplay).run()

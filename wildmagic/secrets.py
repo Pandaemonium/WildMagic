@@ -11,6 +11,8 @@ from __future__ import annotations
 import random
 from typing import Any
 
+from .item_generation import generate_curio
+
 
 # Searching takes in-game time; the danger clock keeps running. Uniform rule:
 # even apparently safe rooms cost these turns (towns, libraries, camps alike).
@@ -157,8 +159,15 @@ def decoration_menu(
 
 
 def choose_reward(slot: dict[str, Any], rng: random.Random) -> dict[str, Any]:
+    reward_tags = [str(tag) for tag in slot.get("possible_reward_tags", [])]
+    if "curio" in {tag.lower() for tag in reward_tags} or rng.random() < 0.35:
+        return generate_curio(
+            rng,
+            themes=[*reward_tags, str(slot.get("kind") or "")],
+            source="secret",
+        ).reward()
     pool: list[tuple[str, tuple[int, int]]] = []
-    for tag in slot.get("possible_reward_tags", []):
+    for tag in reward_tags:
         pool.extend(_REWARD_POOLS.get(str(tag), []))
     if not pool:
         pool = list(_DEFAULT_POOL)

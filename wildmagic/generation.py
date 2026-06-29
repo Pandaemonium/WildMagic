@@ -458,7 +458,7 @@ class _GenerationMixin:
         state = self.state
         state.depth = 1
         self._generate_dungeon_floor(preserve_player=False)
-        state.add_message("The dungeon exhales. Wild magic listens.")
+        state.add_message("The old stones lean close. Wild magic listens.")
         state.add_message("Type a spell in the right panel and press Enter.")
         self.update_fov()
 

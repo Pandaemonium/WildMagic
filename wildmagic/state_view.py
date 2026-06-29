@@ -27,6 +27,8 @@ from .capabilities import select_cards, selected_effect_types
 from .curses import curse_card
 from .equipment import EQUIPMENT_SLOTS, equipment_slot_for_item
 from .game_data import FOCUS_SPECS
+from .item_catalog import item_definition, reagent_card as catalog_reagent_card
+from .item_palettes import palette_label
 from .normalize import normalize_id
 from .models import (
     CharacterProfile,
@@ -57,15 +59,38 @@ def entity_card(entity: "Entity", engine: "GameEngine") -> dict[str, Any]:
 
 def item_card(entity: "Entity", engine: "GameEngine") -> dict[str, Any]:
     """Resolver-facing public view of an item lying on the floor."""
+    metadata = dict(entity.details.get("item_metadata") or {})
+    definition = catalog_reagent_card(
+        entity.item_type or entity.name,
+        entity.quantity,
+        lore={
+            **metadata,
+            **({"description": entity.description} if entity.description else {}),
+        },
+    )
     return {
         "id": entity.id,
         "name": entity.name,
         "item_type": entity.item_type,
-        "material": entity.material,
+        "material": metadata.get("material")
+        or entity.material
+        or definition.get("material"),
         "quantity": entity.quantity,
         "x": entity.x,
         "y": entity.y,
-        "tags": sorted(entity.tags),
+        "value": definition["value"],
+        "total_value": definition["total_value"],
+        "tags": sorted(
+            {
+                *entity.tags,
+                *[
+                    normalize_id(str(tag))
+                    for tag in metadata.get("tags", [])
+                    if str(tag).strip()
+                ],
+            }
+        ),
+        **({"description": entity.description} if entity.description else {}),
         **({"traits": list(entity.traits)} if entity.traits else {}),
     }
 
@@ -97,8 +122,48 @@ def resolve_foci(engine: "GameEngine") -> list[dict[str, Any]]:
             entry["themes"] = list(spec["themes"])
         if spec.get("power") is not None:
             entry["power"] = int(spec["power"])
+        definition = item_definition(item)
+        entry["value"] = definition.value
+        entry["material"] = definition.material
+        entry["tags"] = sorted(definition.tags)
         foci.append(entry)
     return foci
+
+
+def inventory_item_card(
+    engine: "GameEngine", name: str, quantity: int
+) -> dict[str, Any]:
+    """Shared carried-item presentation card."""
+    state = engine.state
+    protected = engine.is_item_protected(name)
+    lore = state.item_lore.get(normalize_id(name)) or {}
+    card = catalog_reagent_card(name, quantity, protected=protected, lore=lore)
+    equipment_slot = equipment_slot_for_item(name)
+    if equipment_slot is None and lore.get("identified"):
+        lore_slot = normalize_id(str(lore.get("equipment_slot") or ""))
+        equipment_slot = lore_slot if lore_slot in EQUIPMENT_SLOTS else None
+    if lore.get("identified"):
+        card["identified"] = True
+        card["ability_kind"] = lore.get("ability_kind") or "active"
+        for key in ("descriptor", "palette_id", "ability_summary", "ability_card_id"):
+            value = str(lore.get(key) or "").strip()
+            if value:
+                card[key] = value
+        if card.get("palette_id"):
+            card["palette_label"] = palette_label(card["palette_id"])
+        use_spec = lore.get("use_spec")
+        if isinstance(use_spec, dict) and use_spec.get("charges") is not None:
+            try:
+                card["charges"] = max(0, int(use_spec["charges"]))
+            except (TypeError, ValueError):
+                pass
+    card.update(
+        {
+            "equippable": equipment_slot is not None,
+            "equipment_slot": equipment_slot,
+        }
+    )
+    return card
 
 
 def equipment_inventory_view(engine: "GameEngine") -> dict[str, Any]:
@@ -123,20 +188,23 @@ def equipment_inventory_view(engine: "GameEngine") -> dict[str, Any]:
     for name, quantity in sorted(state.inventory.items()):
         if name == "gold":
             continue
-        equipment_slot = equipment_slot_for_item(name)
-        items.append(
-            {
-                "name": name,
-                "quantity": quantity,
-                "equippable": equipment_slot is not None,
-                "equipment_slot": equipment_slot,
-            }
-        )
+        items.append(inventory_item_card(engine, name, quantity))
+    gold = inventory_item_card(engine, "gold", state.inventory.get("gold", 0))
     return {
         "gold": state.inventory.get("gold", 0),
+        "gold_value": gold["value"],
+        "gold_total_value": gold["total_value"],
+        "gold_protected": gold["protected"],
         "slots": slots,
         "items": items,
     }
+
+
+def reagent_cards(
+    engine: "GameEngine", *, include_protected: bool = False
+) -> list[dict[str, Any]]:
+    """Spell-fuel cards derived from carried inventory."""
+    return engine.reagent_cards(include_protected=include_protected)
 
 
 def room_card(
@@ -381,6 +449,12 @@ def spell_context_view(
             else {}
         ),
         "inventory": engine.state.inventory,
+        "reagents": reagent_cards(engine),
+        "protected_inventory": [
+            card
+            for card in reagent_cards(engine, include_protected=True)
+            if card["protected"]
+        ],
         "experience": engine.state.experience,
         "curses": [curse.to_public_dict() for curse in engine.state.curses.values()],
         "active_curses": [curse_card(curse) for curse in engine.state.curses.values()],
@@ -482,6 +556,9 @@ def state_summary(engine: "GameEngine") -> dict[str, Any]:
         "visible_count": len(state.visible),
         "explored_count": len(state.explored),
         "inventory": dict(sorted(state.inventory.items())),
+        "protected_items": sorted(
+            item for item in player.protected_items if state.inventory.get(item, 0) > 0
+        ),
         "item_lore": {
             key: dict(value) for key, value in sorted(state.item_lore.items())
         },

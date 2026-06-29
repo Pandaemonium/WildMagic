@@ -63,6 +63,7 @@ def run_replay(path: Path) -> ReplayResult:
                 replay_promises=action.get("promises"),
                 replay_flesh=action.get("flesh"),
                 replay_canon=canon_replay,
+                replay_item_identification=action.get("item_identification"),
             )
         session.apply_recorded_promises(data.get("final_promises"))
         session.apply_recorded_flesh(data.get("final_flesh"))

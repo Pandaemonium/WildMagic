@@ -325,6 +325,7 @@ class Entity:
     # inventory with the body. GameState.inventory/curses are properties that
     # resolve to whichever entity is currently controlled.
     inventory: dict[str, int] = field(default_factory=dict)
+    protected_items: set[str] = field(default_factory=set)
     curses: dict[str, "Curse"] = field(default_factory=dict)
     profile: "CharacterProfile | None" = None
 
