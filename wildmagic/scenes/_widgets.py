@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pygame
 
-from ..ui_theme import (
+from ..rendering.theme import (
     ACCENT,
     DANGER,
     MUTED,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from wildmagic.models import Entity
 from wildmagic.rendering.map_view import ENTITY_COLORS, entity_color
-from wildmagic.ui_theme import BACKGROUND, blend_color
+from wildmagic.rendering.theme import BACKGROUND, blend_color
 
 
 def _entity(
