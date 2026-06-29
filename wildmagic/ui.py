@@ -35,6 +35,7 @@ from .rendering import book_popup as book_popup_view
 from .portraits import PortraitClient
 from .rendering.fonts import GameFonts
 from .rendering.frame import draw_game_frame
+from .rendering.inspect_tooltip import draw_inspect_tooltip
 from .rendering.layout import (
     LLM_PANEL_WIDTH,
     MAP_OFFSET_X,
@@ -75,8 +76,6 @@ from .ui_theme import (
     wrap_text,
 )
 from .models import (
-    TILE_NAMES,
-    TILE_TAGS,
     Entity,
 )
 
@@ -1460,207 +1459,7 @@ class GameUI:
         )
 
     def draw_inspect_tooltip(self) -> None:
-        tx, ty = self.inspect_tile  # type: ignore[misc]
-        engine = self.engine
-        state = engine.state
-
-        if not engine.is_explored(tx, ty):
-            self.inspect_tile = None
-            return
-
-        lines: list[tuple[str, tuple[int, int, int]]] = []
-
-        # ── Tile ──────────────────────────────────────────────────────────────
-        tile = state.tiles[ty][tx]
-        tile_name = TILE_NAMES.get(tile, tile).title()
-        base_tags = sorted(TILE_TAGS.get(tile, set()))
-        dyn_tags = list(state.tile_tags.get(f"{tx},{ty}", []))
-        all_tags = base_tags + [t for t in dyn_tags if t not in set(base_tags)]
-        lines.append((f"[{tile}] {tile_name}", ACCENT))
-        if all_tags:
-            lines.append(("  " + ", ".join(all_tags), MUTED))
-        room = engine.room_profile_at(tx, ty)
-        if room is not None:
-            lines.append((f"  {room.room_type} - {room.era}, {room.condition}", TEXT))
-            topics = ", ".join(room.topics[:2])
-            if topics:
-                lines.append((f"  {topics}", MUTED))
-
-        # ── Entities ──────────────────────────────────────────────────────────
-        buttons: list[tuple[int, str]] = []  # (line index, command)
-        player = state.player
-
-        def _detail_summary(entity_id: str) -> str | None:
-            for tier in ("close", "far"):
-                record = state.canon_records.get(f"canon_detail_{entity_id}_{tier}")
-                if record is not None and record.summary:
-                    return record.summary
-            return None
-
-        visible = engine.is_visible(tx, ty)
-        for entity in sorted(state.entities.values(), key=lambda e: e.id):
-            if entity.x != tx or entity.y != ty:
-                continue
-            if not entity.alive and entity.kind not in {"item", "prop"}:
-                continue
-            if (
-                not visible
-                and "revealed" not in entity.statuses
-                and entity.id != state.player_id
-            ):
-                continue
-
-            lines.append(("", MUTED))
-
-            if entity.kind == "prop":
-                lines.append((f"[{entity.char}] {entity.name.title()}", GOLD))
-                if "book" in entity.tags:
-                    # Books show their materialized title (the name above) and, once
-                    # read/prewarmed, their summary — never the verbose grammar
-                    # placeholder. Until the title call lands, say so.
-                    if not entity.details.get("title_materialized"):
-                        lines.append(("  You can't read the title yet.", MUTED))
-                    if (
-                        entity.details.get("summary_materialized")
-                        and entity.description
-                    ):
-                        for part in wrap_text(entity.description, 34):
-                            lines.append((f"  {part}", TEXT))
-                elif entity.description:
-                    for part in wrap_text(entity.description, 34):
-                        lines.append((f"  {part}", TEXT))
-                if entity.tags:
-                    lines.append(("  " + ", ".join(sorted(entity.tags)), MUTED))
-
-            elif entity.kind == "item":
-                lines.append((f"[{entity.char}] {entity.name.title()}", GOLD))
-                details = [p for p in [entity.item_type, entity.material] if p]
-                if details:
-                    lines.append(("  " + ", ".join(details), TEXT))
-                if entity.tags:
-                    lines.append(("  " + ", ".join(sorted(entity.tags)), MUTED))
-
-            elif entity.id == state.player_id:
-                lines.append((f"[{entity.char}] You", (246, 240, 200)))
-                lines.append(
-                    (
-                        f"  HP {entity.hp}/{entity.max_hp}  MP {entity.mana}/{entity.max_mana}",
-                        TEXT,
-                    )
-                )
-                if entity.statuses:
-                    status_str = ", ".join(
-                        entity.status_display.get(k, k) for k in sorted(entity.statuses)
-                    )
-                    for part in wrap_text(status_str, 34):
-                        lines.append((f"  {part}", MUTED))
-
-            elif entity.kind == "npc":
-                profile = state.npc_profiles.get(entity.id)
-                role_str = f" — {profile.role}" if profile and profile.role else ""
-                lines.append((f"[{entity.char}] {entity.name}{role_str}", ACCENT))
-                lines.append(
-                    (f"  HP {entity.hp}/{entity.max_hp}  [{entity.faction}]", TEXT)
-                )
-                if profile and profile.appearance:
-                    for part in wrap_text(profile.appearance, 34):
-                        lines.append((f"  {part}", TEXT))
-
-            else:  # actor: enemy / ally / neutral
-                ent_color = (
-                    DANGER
-                    if entity.faction == "enemy"
-                    else ACCENT
-                    if entity.faction == "ally"
-                    else TEXT
-                )
-                lines.append((f"[{entity.char}] {entity.name}", ent_color))
-                lines.append(
-                    (f"  HP {entity.hp}/{entity.max_hp}  [{entity.faction}]", TEXT)
-                )
-                if entity.statuses:
-                    status_str = ", ".join(
-                        entity.status_display.get(k, k) for k in sorted(entity.statuses)
-                    )
-                    for part in wrap_text(status_str, 34):
-                        lines.append((f"  {part}", MUTED))
-                if entity.tags:
-                    lines.append(("  " + ", ".join(sorted(entity.tags)), MUTED))
-
-            # Learned canon and study/read affordances for everything but you.
-            if entity.id != state.player_id:
-                summary = _detail_summary(entity.id)
-                if summary:
-                    for part in wrap_text(summary, 34):
-                        lines.append((f"  {part}", (150, 170, 150)))
-                distance = max(abs(entity.x - player.x), abs(entity.y - player.y))
-                if entity.kind == "npc" and "bound" in entity.tags and distance <= 1:
-                    buttons.append((len(lines), "free"))
-                    lines.append(("  [ Free ]", (130, 185, 225)))
-                if entity.kind == "npc":
-                    profile = state.npc_profiles.get(entity.id)
-                    if profile is not None and profile.wares:
-                        buttons.append((len(lines), f"wares {entity.id}"))
-                        lines.append(("  [ Wares ]", (130, 185, 225)))
-                if entity.kind == "prop" and "book" in entity.tags and distance <= 1:
-                    buttons.append((len(lines), f"read {entity.name}"))
-                    lines.append(("  [ Read ]", (130, 185, 225)))
-                buttons.append((len(lines), f"investigate {entity.id}"))
-                lines.append(("  [ Investigate ]", (130, 185, 225)))
-
-        # Targeting affordance: mark this square (or clear it if already marked).
-        lines.append(("", MUTED))
-        if (state.target_x, state.target_y) == (tx, ty):
-            buttons.append((len(lines), "untarget"))
-            lines.append(("  [ Clear target ]", (225, 175, 130)))
-        else:
-            buttons.append((len(lines), f"target {tx} {ty}"))
-            lines.append(("  [ + Target this ]", (130, 185, 225)))
-
-        if not lines:
-            self.inspect_button_rects = []
-            return
-
-        # ── Draw box ──────────────────────────────────────────────────────────
-        pad = 12
-        tooltip_w = 310
-        line_h = self.small_font.get_linesize() + 2
-        total_h = pad * 2 + sum(4 if t == "" else line_h for t, _ in lines)
-
-        tile_px = MAP_OFFSET_X + tx * TILE_SIZE
-        tile_py = ty * TILE_SIZE
-        bx = tile_px + TILE_SIZE + 4
-        by = tile_py
-
-        if bx + tooltip_w > WINDOW_WIDTH:
-            bx = tile_px - tooltip_w - 4
-        if by + total_h > WINDOW_HEIGHT:
-            by = WINDOW_HEIGHT - total_h
-        if by < 0:
-            by = 0
-
-        pygame.draw.rect(
-            self.screen, (20, 22, 30), (bx, by, tooltip_w, total_h), border_radius=6
-        )
-        pygame.draw.rect(
-            self.screen, PANEL_EDGE, (bx, by, tooltip_w, total_h), 1, border_radius=6
-        )
-
-        button_commands = dict(buttons)
-        self.inspect_button_rects = []
-        cy = by + pad
-        for index, (text, color) in enumerate(lines):
-            if text == "":
-                cy += 4
-                continue
-            surf = self.small_font.render(text, True, color)
-            self.screen.blit(surf, (bx + pad, cy))
-            command = button_commands.get(index)
-            if command:
-                rect = pygame.Rect(bx + pad, cy - 1, surf.get_width() + 8, line_h)
-                pygame.draw.rect(self.screen, (70, 95, 120), rect, 1, border_radius=4)
-                self.inspect_button_rects.append((rect, command))
-            cy += line_h
+        draw_inspect_tooltip(self)
 
     def draw_book_popup(self) -> None:
         """A parchment page for reading books, modal over everything else.

@@ -45,7 +45,8 @@ delegates full-screen scene drawing before the game frame is drawn. `text.py` co
 small reusable text rendering helpers used through the host wrapper. `book_popup.py`
 renders the modal parchment reader and keeps its pagination state synchronized.
 `queue_debug.py` renders the F7 background-generation queue overlay and synchronizes its
-scroll bounds.
+scroll bounds. `inspect_tooltip.py` renders map-tile inspection details and clickable
+inspect/target affordances.
 
 ### `wildmagic/scenes/`
 Self-contained Pygame full-screen scenes driven by `GameUI`: character creation,
