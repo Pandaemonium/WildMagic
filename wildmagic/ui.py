@@ -33,6 +33,7 @@ from .normalize import normalize_id
 from .rendering import llm_panel
 from .portraits import PortraitClient
 from .rendering.fonts import GameFonts
+from .rendering.frame import draw_game_frame
 from .rendering.layout import (
     LLM_PANEL_WIDTH,
     MAP_OFFSET_X,
@@ -48,13 +49,13 @@ from .rendering import hud_panel
 from .rendering.hud_panel import is_player_damage_message
 from .rendering.map_view import draw_map
 from .rendering.overlays import draw_autoplay_overlay, draw_resolving_indicator
+from .rendering.text import draw_text
 from .scenes.character_creation_scene import CharacterCreationScene
 from .scenes.character_view_scene import CharacterViewScene
 from .scenes.menu_scene import MenuScene
 from .scenes.standing_scene import StandingScene
 from .ui_theme import (
     ACCENT,
-    BACKGROUND,
     DANGER,
     GOLD,
     MANA,
@@ -1444,26 +1445,7 @@ class GameUI:
         self.execute_command(command)
 
     def draw(self) -> None:
-        scene = self._active_scene()
-        if scene is not None:
-            scene.draw()
-            return
-        self.screen.fill(BACKGROUND)
-        self.draw_llm_panel()
-        self.draw_map()
-        self.draw_panel()
-        self.draw_autoplay_overlay()
-        if self._awaiting_command():
-            self.draw_resolving_indicator()
-        if self.inspect_tile is not None:
-            self.draw_inspect_tooltip()
-        self.draw_curse_tooltip()
-        if self.menu_active:
-            self.draw_menu()
-        if self.book_popup is not None:
-            self.draw_book_popup()
-        if self.queue_debug_active:
-            self.draw_queue_debug()
+        draw_game_frame(self)
 
     def draw_resolving_indicator(self) -> None:
         """A small banner over the map while an urgent command resolves, so the player
@@ -2079,9 +2061,7 @@ class GameUI:
         font: pygame.font.Font,
         color: tuple[int, int, int],
     ) -> int:
-        surface = font.render(text, True, color)
-        self.screen.blit(surface, (x, y))
-        return y + surface.get_height() + 2
+        return draw_text(self.screen, text, x, y, font, color)
 
 
 def run_game(autoplay: bool = False) -> None:

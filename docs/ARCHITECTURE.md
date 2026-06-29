@@ -40,7 +40,9 @@ surface, frame presentation, runtime UI scale toggling, key-repeat setup, and Py
 init/quit lifecycle.
 `fonts.py` owns construction of the Pygame font bundle used by the host, scenes, and
 rendering helpers. `overlays.py` renders small map-area overlays such as the resolving
-banner and AI watch status panel.
+banner and AI watch status panel. `frame.py` composes the normal in-game render pass and
+delegates full-screen scene drawing before the game frame is drawn. `text.py` contains
+small reusable text rendering helpers used through the host wrapper.
 
 ### `wildmagic/scenes/`
 Self-contained Pygame full-screen scenes driven by `GameUI`: character creation,
