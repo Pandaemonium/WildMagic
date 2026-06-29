@@ -12,7 +12,7 @@ import random
 import pygame
 
 from ..character import ORIGINS
-from ..ui_theme import ACCENT, BACKGROUND, GOLD, MUTED, TEXT
+from ..rendering.theme import ACCENT, BACKGROUND, GOLD, MUTED, TEXT
 from ._widgets import (
     GENDER_OPTIONS,
     draw_gender_field,

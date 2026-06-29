@@ -30,7 +30,8 @@ geometry and physical-to-logical UI scaling live in `wildmagic/rendering/layout.
 Pygame rendering support modules shared by UI components. `layout.py` owns the base tile,
 panel, and window dimensions, chooses the default integer UI scale from the desktop size,
 and converts mouse input from scaled physical window coordinates back into logical UI
-coordinates. `map_view.py` renders the explored dungeon tiles, visible/revealed entities,
+coordinates. `theme.py` owns the shared rendering palette and pure text/color helpers.
+`map_view.py` renders the explored dungeon tiles, visible/revealed entities,
 map glyph placement, and target reticle. `hud_panel.py` renders the right-side HUD,
 including bars, statuses, visible enemies, floor items, inventory, curses, standing,
 message log, and spell/input box. `llm_panel.py` renders the left-side LLM/debug panel,

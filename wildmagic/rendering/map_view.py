@@ -22,7 +22,7 @@ from wildmagic.models import (
     Entity,
 )
 from wildmagic.rendering.layout import MAP_OFFSET_X, TILE_SIZE
-from wildmagic.ui_theme import BACKGROUND, blend_color
+from wildmagic.rendering.theme import BACKGROUND, blend_color
 
 
 TILE_COLORS = {

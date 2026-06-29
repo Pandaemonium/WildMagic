@@ -5,7 +5,7 @@ from typing import Any
 import pygame
 
 from wildmagic.rendering.layout import WINDOW_HEIGHT, WINDOW_WIDTH
-from wildmagic.ui_theme import wrap_text
+from wildmagic.rendering.theme import wrap_text
 
 
 def draw_book_popup(host: Any) -> None:

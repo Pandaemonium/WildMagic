@@ -8,7 +8,7 @@ from wildmagic.rendering.layout import (
     MAP_PIXEL_WIDTH,
     WINDOW_HEIGHT,
 )
-from wildmagic.ui_theme import ACCENT, PANEL_EDGE, TEXT, wrap_text
+from wildmagic.rendering.theme import ACCENT, PANEL_EDGE, TEXT, wrap_text
 
 
 def draw_resolving_indicator(

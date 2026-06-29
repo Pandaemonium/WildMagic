@@ -119,7 +119,7 @@ same profile to bias its canned anchors so the stats still bite without an LLM.
    `finish_creation(profile)` callback that calls `GameEngine.restamp_player` (the world
    was already built with a random default player, so it's restamped in place at turn 0,
    not regenerated). Autoplay skips the scene.
-   - Shared palette/helpers live in `wildmagic/ui_theme.py` so scene modules don't import
+   - Shared palette/helpers live in `wildmagic/rendering/theme.py` so scene modules don't import
      `ui.py` (which imports them) — avoiding a cycle. This is the first extracted scene;
      others can follow the same pattern.
 7. **Tests** — `tests/test_character.py` (9 tests, no LLM). Full suite green (167).

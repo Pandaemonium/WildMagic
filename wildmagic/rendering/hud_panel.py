@@ -15,7 +15,7 @@ from wildmagic.rendering.layout import (
     WINDOW_HEIGHT,
     WINDOW_WIDTH,
 )
-from wildmagic.ui_theme import (
+from wildmagic.rendering.theme import (
     ACCENT,
     DANGER,
     GOLD,

@@ -7,7 +7,7 @@ from ..config import DEFAULT_MODEL, get_config_value, set_config_value
 from ..item_palettes import palette_colors
 from ..llm_client import fetch_ollama_models
 from ..rendering.layout import WINDOW_HEIGHT, WINDOW_WIDTH
-from ..ui_theme import ACCENT, GOLD, MUTED, PANEL_EDGE, TEXT, wrap_text
+from ..rendering.theme import ACCENT, GOLD, MUTED, PANEL_EDGE, TEXT, wrap_text
 
 
 # ---------------------------------------------------------------------------

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from wildmagic.ui_theme import BACKGROUND
+from wildmagic.rendering.theme import BACKGROUND
 
 
 def draw_game_frame(host: Any) -> None:

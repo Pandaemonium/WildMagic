@@ -57,7 +57,7 @@ from .scenes.character_creation_scene import CharacterCreationScene
 from .scenes.character_view_scene import CharacterViewScene
 from .scenes.menu_scene import MenuScene
 from .scenes.standing_scene import StandingScene
-from .ui_theme import (
+from .rendering.theme import (
     ACCENT,
     DANGER,
     GOLD,

@@ -5,7 +5,7 @@ from __future__ import annotations
 import pygame
 
 from ..actions import describe_standing
-from ..ui_theme import (
+from ..rendering.theme import (
     ACCENT,
     BACKGROUND,
     DANGER,

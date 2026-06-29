@@ -14,7 +14,7 @@ import random
 import pygame
 
 from ..character import CREATION_POINTS, ORIGINS, STAT_CAP, STATS, build_profile
-from ..ui_theme import (
+from ..rendering.theme import (
     ACCENT,
     BACKGROUND,
     GOLD,

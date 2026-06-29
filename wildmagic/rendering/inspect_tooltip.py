@@ -11,7 +11,15 @@ from wildmagic.rendering.layout import (
     WINDOW_HEIGHT,
     WINDOW_WIDTH,
 )
-from wildmagic.ui_theme import ACCENT, DANGER, GOLD, MUTED, PANEL_EDGE, TEXT, wrap_text
+from wildmagic.rendering.theme import (
+    ACCENT,
+    DANGER,
+    GOLD,
+    MUTED,
+    PANEL_EDGE,
+    TEXT,
+    wrap_text,
+)
 
 
 def draw_inspect_tooltip(host: Any) -> None:

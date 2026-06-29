@@ -11,7 +11,7 @@ from wildmagic.config import audit_dir
 from wildmagic.game_data import _TOWN_GEN_TIMEOUT
 from wildmagic.normalize import normalize_id
 from wildmagic.rendering.layout import LLM_PANEL_WIDTH, WINDOW_HEIGHT
-from wildmagic.ui_theme import (
+from wildmagic.rendering.theme import (
     ACCENT,
     DANGER,
     GOLD,

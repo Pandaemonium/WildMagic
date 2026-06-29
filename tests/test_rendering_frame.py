@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 from wildmagic.rendering.frame import draw_game_frame
-from wildmagic.ui_theme import BACKGROUND
+from wildmagic.rendering.theme import BACKGROUND
 
 
 class FakeScreen:
