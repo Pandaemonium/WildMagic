@@ -31,6 +31,8 @@ geometry and physical-to-logical UI scaling live in `wildmagic/rendering/layout.
 Pygame rendering support modules shared by UI components. The package `__init__.py` is the
 public integration surface for callers such as `wildmagic.ui`, re-exporting stable draw
 entry points, layout/window objects, theme values, and LLM-debug interaction helpers.
+`context.py` defines `RenderContext`, the small rendering-facing view of the Pygame host
+used by frame-level renderers that only need surfaces, fonts, engine state, and overlay text.
 `layout.py` owns the base tile, panel, and window dimensions, chooses the default integer UI
 scale from the desktop size, computes fit-to-monitor viewports, and converts mouse input
 from scaled or letterboxed physical window coordinates back into logical UI coordinates.

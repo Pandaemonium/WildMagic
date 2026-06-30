@@ -21,6 +21,7 @@ from wildmagic.models import (
     WATER,
     Entity,
 )
+from wildmagic.rendering.context import RenderContext
 from wildmagic.rendering.layout import MAP_OFFSET_X, TILE_SIZE
 from wildmagic.rendering.theme import BACKGROUND, blend_color
 
@@ -79,6 +80,12 @@ def draw_map(
             color = _dim_color(color)
         draw_glyph(screen, tile_font, entity.char, entity.x, entity.y, color)
     draw_target_reticle(screen, state)
+
+
+def draw_map_layer(context: RenderContext) -> None:
+    """Draw the map layer from a frame render context."""
+
+    draw_map(context.screen, context.tile_font, context.engine)
 
 
 def draw_target_reticle(screen: pygame.Surface, state: Any) -> None:

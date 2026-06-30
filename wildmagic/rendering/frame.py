@@ -18,18 +18,15 @@ def draw_game_frame(host: Any) -> None:
         scene.draw()
         return
 
+    context = rendering.RenderContext.from_host(host)
     host.screen.fill(BACKGROUND)
     if host._llm_debug_embedded():
         rendering.draw_llm_panel(host)
-    rendering.draw_map(host.screen, host.tile_font, host.engine)
+    rendering.draw_map_layer(context)
     rendering.draw_hud_panel(host)
-    rendering.draw_autoplay_overlay(
-        host.screen, host.small_font, host.autoplay.overlay_lines()
-    )
+    rendering.draw_autoplay_overlay_layer(context)
     if host._awaiting_command():
-        rendering.draw_resolving_indicator(
-            host.screen, host.small_font, host._command_label
-        )
+        rendering.draw_resolving_indicator_layer(context)
     if host.inspect_tile is not None:
         rendering.draw_inspect_tooltip(host)
     rendering.draw_curse_tooltip(host)

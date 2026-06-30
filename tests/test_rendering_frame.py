@@ -39,6 +39,9 @@ class FakeHost:
     def _awaiting_command(self) -> bool:
         return self.awaiting_command
 
+    def _llm_debug_embedded(self) -> bool:
+        return True
+
     def draw_menu(self) -> None:
         self.calls.append("menu")
 
@@ -49,12 +52,12 @@ def _spy_frame_rendering(monkeypatch, host: FakeHost) -> None:
     )
     monkeypatch.setattr(
         rendering,
-        "draw_map",
-        lambda screen, font, engine: (
+        "draw_map_layer",
+        lambda context: (
             host.calls.append("map")
-            if screen is host.screen
-            and font is host.tile_font
-            and engine is host.engine
+            if context.screen is host.screen
+            and context.tile_font is host.tile_font
+            and context.engine is host.engine
             else None
         ),
     )
@@ -63,21 +66,23 @@ def _spy_frame_rendering(monkeypatch, host: FakeHost) -> None:
     )
     monkeypatch.setattr(
         rendering,
-        "draw_autoplay_overlay",
-        lambda screen, font, lines: (
+        "draw_autoplay_overlay_layer",
+        lambda context: (
             host.calls.append("autoplay")
-            if screen is host.screen
-            and font is host.small_font
-            and lines == ["watching"]
+            if context.screen is host.screen
+            and context.small_font is host.small_font
+            and context.autoplay_overlay_lines == ["watching"]
             else None
         ),
     )
     monkeypatch.setattr(
         rendering,
-        "draw_resolving_indicator",
-        lambda screen, font, label: (
+        "draw_resolving_indicator_layer",
+        lambda context: (
             host.calls.append("resolving")
-            if screen is host.screen and font is host.small_font and label == "cast"
+            if context.screen is host.screen
+            and context.small_font is host.small_font
+            and context.command_label == "cast"
             else None
         ),
     )

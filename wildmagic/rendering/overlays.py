@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pygame
 
+from wildmagic.rendering.context import RenderContext
 from wildmagic.rendering.layout import (
     MAP_OFFSET_X,
     MAP_PIXEL_HEIGHT,
@@ -34,6 +35,16 @@ def draw_resolving_indicator(
     screen.blit(surface, (x + pad, y + pad))
 
 
+def draw_resolving_indicator_layer(context: RenderContext) -> None:
+    """Draw the resolving overlay from a frame render context."""
+
+    draw_resolving_indicator(
+        context.screen,
+        context.small_font,
+        context.command_label,
+    )
+
+
 def draw_autoplay_overlay(
     screen: pygame.Surface,
     font: pygame.font.Font,
@@ -64,3 +75,13 @@ def draw_autoplay_overlay(
         surface = font.render(text, True, color)
         screen.blit(surface, (x + 10, cursor_y))
         cursor_y += line_height
+
+
+def draw_autoplay_overlay_layer(context: RenderContext) -> None:
+    """Draw the autoplay overlay from a frame render context."""
+
+    draw_autoplay_overlay(
+        context.screen,
+        context.small_font,
+        context.autoplay_overlay_lines,
+    )

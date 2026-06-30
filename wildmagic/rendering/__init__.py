@@ -9,6 +9,7 @@ for callers such as ``wildmagic.ui`` and scene hosts.
 from __future__ import annotations
 
 from .book_popup import draw_book_popup
+from .context import RenderContext
 from .fonts import GameFonts
 from .frame import draw_game_frame
 from .hud_panel import (
@@ -62,10 +63,16 @@ from .map_view import (
     ENTITY_COLORS,
     draw_glyph,
     draw_map,
+    draw_map_layer,
     draw_target_reticle,
     entity_color,
 )
-from .overlays import draw_autoplay_overlay, draw_resolving_indicator
+from .overlays import (
+    draw_autoplay_overlay,
+    draw_autoplay_overlay_layer,
+    draw_resolving_indicator,
+    draw_resolving_indicator_layer,
+)
 from .queue_debug import draw_queue_debug
 from .text import draw_text
 from .theme import (
@@ -112,6 +119,7 @@ __all__ = [
     "PANEL",
     "PANEL_EDGE",
     "PANEL_WIDTH",
+    "RenderContext",
     "SELECTED",
     "TEXT",
     "TILE_SIZE",
@@ -124,6 +132,7 @@ __all__ = [
     "blend_color",
     "build_llm_lines",
     "draw_autoplay_overlay",
+    "draw_autoplay_overlay_layer",
     "draw_book_popup",
     "draw_curse_tooltip",
     "draw_game_frame",
@@ -135,8 +144,10 @@ __all__ = [
     "draw_llm_panel",
     "draw_llm_scrollbar",
     "draw_map",
+    "draw_map_layer",
     "draw_queue_debug",
     "draw_resolving_indicator",
+    "draw_resolving_indicator_layer",
     "draw_target_reticle",
     "draw_text",
     "entity_color",
