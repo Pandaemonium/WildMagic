@@ -2,9 +2,35 @@ from __future__ import annotations
 
 import pygame
 
+from wildmagic.rendering.layout import WINDOW_HEIGHT, WINDOW_WIDTH
 from wildmagic.rendering.theme import ACCENT, PANEL_EDGE
 
 SCROLLBAR_TRACK = (20, 22, 27)
+
+
+def draw_fullscreen_backdrop(
+    screen: pygame.Surface,
+    color: tuple[int, int, int, int],
+    *,
+    width: int = WINDOW_WIDTH,
+    height: int = WINDOW_HEIGHT,
+) -> None:
+    """Draw a translucent full-screen backdrop over the logical render surface."""
+
+    overlay = pygame.Surface((width, height), pygame.SRCALPHA)
+    overlay.fill(color)
+    screen.blit(overlay, (0, 0))
+
+
+def centered_rect(width: int, height: int) -> pygame.Rect:
+    """Return a rect centered in the logical game window."""
+
+    return pygame.Rect(
+        (WINDOW_WIDTH - width) // 2,
+        (WINDOW_HEIGHT - height) // 2,
+        width,
+        height,
+    )
 
 
 def draw_vertical_scrollbar(
