@@ -53,6 +53,7 @@ def test_game_window_create_sets_caption_and_scaled_display(monkeypatch) -> None
         return DisplaySurface(size)
 
     monkeypatch.setattr(pygame.display, "set_mode", set_mode)
+    monkeypatch.setattr(pygame.display, "get_window_id", lambda: 7, raising=False)
     monkeypatch.setattr(pygame, "Surface", lambda size: SimpleNamespace(size=size))
     monkeypatch.setattr(pygame.time, "Clock", Clock)
 
@@ -64,6 +65,7 @@ def test_game_window_create_sets_caption_and_scaled_display(monkeypatch) -> None
     assert calls["display_size"] == (200, 100)
     assert calls["flags"] == pygame.RESIZABLE
     assert window.ui_scale == 2
+    assert window.window_id == 7
     assert window.screen.size == (100, 50)
 
 
@@ -196,3 +198,96 @@ def test_game_window_fullscreen_uses_desktop_size(monkeypatch) -> None:
     assert window.fullscreen is True
     assert calls["display_size"] == (1920, 1080)
     assert calls["flags"] == pygame.FULLSCREEN
+
+
+def test_game_window_ignores_events_from_other_windows() -> None:
+    window = GameWindow(
+        display=DisplaySurface((100, 50)),
+        screen=SimpleNamespace(),
+        clock=Clock(),
+        ui_scale=1,
+        window_id=10,
+    )
+
+    assert window.owns_event(pygame.event.Event(pygame.WINDOWRESIZED, {"window": 10}))
+    assert not window.owns_event(
+        pygame.event.Event(pygame.WINDOWRESIZED, {"window": 99})
+    )
+
+
+def test_game_window_without_window_id_rejects_tagged_foreign_events() -> None:
+    window = GameWindow(
+        display=DisplaySurface((100, 50)),
+        screen=SimpleNamespace(),
+        clock=Clock(),
+        ui_scale=1,
+    )
+
+    assert window.owns_event(pygame.event.Event(pygame.MOUSEBUTTONDOWN, {}))
+    assert not window.owns_event(
+        pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"window": 99})
+    )
+
+
+def test_game_window_resize_event_refreshes_surface_without_recreating_window(
+    monkeypatch,
+) -> None:
+    original = DisplaySurface((100, 50))
+    resized = DisplaySurface((300, 150))
+    set_modes: list[tuple[tuple[int, int], int]] = []
+    monkeypatch.setattr(
+        pygame.display,
+        "set_mode",
+        lambda size, flags=0: set_modes.append((size, flags)) or DisplaySurface(size),
+    )
+    monkeypatch.setattr(pygame.display, "get_surface", lambda: resized)
+    window = GameWindow(
+        display=original,
+        screen=SimpleNamespace(),
+        clock=Clock(),
+        ui_scale=1,
+        layout=WindowLayout(width=100, height=50),
+        base_view_rect=pygame.Rect(0, 0, 100, 50),
+        active_view_rect=pygame.Rect(0, 0, 100, 50),
+        window_id=10,
+    )
+
+    handled = window.handle_window_event(
+        pygame.event.Event(pygame.WINDOWSIZECHANGED, {"window": 10, "size": (300, 150)})
+    )
+
+    assert handled is True
+    assert window.display is resized
+    assert set_modes == []
+    assert window.content_rect == pygame.Rect(0, 0, 300, 150)
+
+
+def test_game_window_videoresize_recreates_legacy_resizable_display(
+    monkeypatch,
+) -> None:
+    set_modes: list[tuple[tuple[int, int], int]] = []
+    monkeypatch.setattr(
+        pygame.display,
+        "set_mode",
+        lambda size, flags=0: set_modes.append((size, flags)) or DisplaySurface(size),
+    )
+    monkeypatch.setattr(pygame.display, "get_window_id", lambda: 12, raising=False)
+    window = GameWindow(
+        display=DisplaySurface((100, 50)),
+        screen=SimpleNamespace(),
+        clock=Clock(),
+        ui_scale=1,
+        layout=WindowLayout(width=100, height=50),
+        base_view_rect=pygame.Rect(0, 0, 100, 50),
+        active_view_rect=pygame.Rect(0, 0, 100, 50),
+        window_id=10,
+    )
+
+    handled = window.handle_window_event(
+        pygame.event.Event(pygame.VIDEORESIZE, {"window": 10, "size": (300, 150)})
+    )
+
+    assert handled is True
+    assert set_modes == [((300, 150), pygame.RESIZABLE)]
+    assert window.display.get_size() == (300, 150)
+    assert window.window_id == 12

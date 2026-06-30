@@ -1005,7 +1005,10 @@ class GameUI(rendering.LlmDebugHostAdapter):
             # Ctrl acts as a temporary Controls modifier so letter hotkeys (incl. Ctrl+c
             # for the character sheet) work without leaving Wild Spell mode. Copy still
             # works, but only when text is actually selected; Ctrl+A select-all stays.
-            hovering_llm = self.llm_content_rect.collidepoint(self._logical_mouse_pos())
+            hovering_llm = (
+                self._llm_debug_embedded()
+                and self.llm_content_rect.collidepoint(self._logical_mouse_pos())
+            )
             if event.key == pygame.K_c:
                 if (
                     self.llm_selection_anchor is not None
@@ -1189,6 +1192,11 @@ class GameUI(rendering.LlmDebugHostAdapter):
                 self.book_popup = None
             return
 
+        if self.menu_active:
+            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                self.menu_scene.handle_mouse(event.pos)
+            return
+
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 3:
             mx, my = event.pos
             for rect, curse_id in self.curse_rects:
@@ -1245,35 +1253,38 @@ class GameUI(rendering.LlmDebugHostAdapter):
                 self._log_scroll_to_fraction(fraction)
                 self.log_dragging_scrollbar = True
                 return
-            if (
-                self.llm_scrollbar_thumb_rect
-                and self.llm_scrollbar_thumb_rect.collidepoint(event.pos)
-            ):
-                self.llm_dragging_scrollbar = True
-                self.llm_drag_grab_dy = event.pos[1] - self.llm_scrollbar_thumb_rect.y
-                return
-            if (
-                self.llm_scrollbar_track_rect
-                and self.llm_scrollbar_track_rect.collidepoint(event.pos)
-            ):
-                thumb = self.llm_scrollbar_thumb_rect
-                self.llm_drag_grab_dy = thumb.height // 2 if thumb else 0
-                track = self.llm_scrollbar_track_rect
-                thumb_height = thumb.height if thumb else 0
-                usable = max(1, track.height - thumb_height)
-                fraction = (event.pos[1] - self.llm_drag_grab_dy - track.y) / usable
-                self._llm_scroll_to_fraction(fraction)
-                self.llm_dragging_scrollbar = True
-                return
-            for rect, entry_index in self.llm_call_button_rects:
-                if rect.collidepoint(event.pos):
-                    if self._activate_llm_call_button(entry_index):
-                        self.dragging_llm_selection = False
-                        self.dragging_log_selection = False
-                        self.log_selection_anchor = None
-                        self.log_selection_focus = None
-                        self.input_active = False
+            if self._llm_debug_embedded():
+                if (
+                    self.llm_scrollbar_thumb_rect
+                    and self.llm_scrollbar_thumb_rect.collidepoint(event.pos)
+                ):
+                    self.llm_dragging_scrollbar = True
+                    self.llm_drag_grab_dy = (
+                        event.pos[1] - self.llm_scrollbar_thumb_rect.y
+                    )
                     return
+                if (
+                    self.llm_scrollbar_track_rect
+                    and self.llm_scrollbar_track_rect.collidepoint(event.pos)
+                ):
+                    thumb = self.llm_scrollbar_thumb_rect
+                    self.llm_drag_grab_dy = thumb.height // 2 if thumb else 0
+                    track = self.llm_scrollbar_track_rect
+                    thumb_height = thumb.height if thumb else 0
+                    usable = max(1, track.height - thumb_height)
+                    fraction = (event.pos[1] - self.llm_drag_grab_dy - track.y) / usable
+                    self._llm_scroll_to_fraction(fraction)
+                    self.llm_dragging_scrollbar = True
+                    return
+                for rect, entry_index in self.llm_call_button_rects:
+                    if rect.collidepoint(event.pos):
+                        if self._activate_llm_call_button(entry_index):
+                            self.dragging_llm_selection = False
+                            self.dragging_log_selection = False
+                            self.log_selection_anchor = None
+                            self.log_selection_focus = None
+                            self.input_active = False
+                        return
             for rect, mode in self.mode_label_rects:
                 if rect.collidepoint(event.pos):
                     self.input_mode = mode
@@ -1297,16 +1308,17 @@ class GameUI(rendering.LlmDebugHostAdapter):
                 self.llm_selection_anchor = None
                 self.llm_selection_focus = None
                 return
-            llm_index = self.llm_line_index_at(event.pos)
-            if llm_index is not None:
-                self.llm_selection_anchor = llm_index
-                self.llm_selection_focus = llm_index
-                self.dragging_llm_selection = True
-                self.dragging_log_selection = False
-                self.log_selection_anchor = None
-                self.log_selection_focus = None
-                self.input_active = False
-                return
+            if self._llm_debug_embedded():
+                llm_index = self.llm_line_index_at(event.pos)
+                if llm_index is not None:
+                    self.llm_selection_anchor = llm_index
+                    self.llm_selection_focus = llm_index
+                    self.dragging_llm_selection = True
+                    self.dragging_log_selection = False
+                    self.log_selection_anchor = None
+                    self.log_selection_focus = None
+                    self.input_active = False
+                    return
             index = self.log_line_index_at(event.pos)
             if index is not None:
                 self.log_selection_anchor = index
@@ -1324,12 +1336,20 @@ class GameUI(rendering.LlmDebugHostAdapter):
             if fraction is not None:
                 self._log_scroll_to_fraction(fraction)
             return
-        if event.type == pygame.MOUSEMOTION and self.llm_dragging_scrollbar:
+        if (
+            event.type == pygame.MOUSEMOTION
+            and self._llm_debug_embedded()
+            and self.llm_dragging_scrollbar
+        ):
             fraction = self._llm_scrollbar_fraction_at(event.pos[1])
             if fraction is not None:
                 self._llm_scroll_to_fraction(fraction)
             return
-        if event.type == pygame.MOUSEMOTION and self.dragging_llm_selection:
+        if (
+            event.type == pygame.MOUSEMOTION
+            and self._llm_debug_embedded()
+            and self.dragging_llm_selection
+        ):
             index = self.llm_line_index_at(event.pos)
             if index is not None:
                 self.llm_selection_focus = index
@@ -1343,10 +1363,10 @@ class GameUI(rendering.LlmDebugHostAdapter):
             if self.log_dragging_scrollbar:
                 self.log_dragging_scrollbar = False
                 return
-            if self.llm_dragging_scrollbar:
+            if self._llm_debug_embedded() and self.llm_dragging_scrollbar:
                 self.llm_dragging_scrollbar = False
                 return
-            if self.dragging_llm_selection:
+            if self._llm_debug_embedded() and self.dragging_llm_selection:
                 index = self.llm_line_index_at(event.pos)
                 if index is not None:
                     self.llm_selection_focus = index
@@ -1716,7 +1736,7 @@ class GameUI(rendering.LlmDebugHostAdapter):
             )
             return
         pos = self._logical_mouse_pos()
-        if self.llm_content_rect.collidepoint(pos):
+        if self._llm_debug_embedded() and self.llm_content_rect.collidepoint(pos):
             self.llm_scroll_offset -= event.y * 3
             self.llm_scroll_offset = max(
                 0, min(self.llm_scroll_offset, self._llm_max_scroll)

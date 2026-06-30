@@ -45,3 +45,19 @@ def test_game_ui_llm_debug_state_reset_restores_compatibility_defaults() -> None
     assert ui._llm_lines_cache is None
     assert ui.llm_selection_anchor is None
     assert ui.llm_autoscroll is True
+
+
+def test_game_ui_main_wheel_ignores_external_llm_debug_rect() -> None:
+    ui = _ui()
+    ui._active_scene = lambda: None
+    ui._llm_debug_embedded = lambda: False
+    ui._logical_mouse_pos = lambda: (5, 5)
+    ui.queue_debug_active = False
+    ui.log_area = pygame.Rect(20, 20, 10, 10)
+    ui.llm_content_rect = pygame.Rect(0, 0, 100, 100)
+    ui.llm_scroll_offset = 6
+    ui._llm_max_scroll = 20
+
+    ui.handle_mouse_wheel(pygame.event.Event(pygame.MOUSEWHEEL, {"y": 1}))
+
+    assert ui.llm_scroll_offset == 6

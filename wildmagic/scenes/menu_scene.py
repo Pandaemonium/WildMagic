@@ -271,6 +271,27 @@ class MenuScene:
         elif event.key == pygame.K_ESCAPE:
             self._close_menu()
 
+    def handle_mouse(self, pos: tuple[int, int]) -> None:
+        if self.menu_page not in {"main", "config", "model"}:
+            return
+        items = self.items()
+        if not items:
+            return
+        row_h = 32
+        padding = 24
+        box_w = 480
+        box_h = padding * 2 + 28 + len(items) * row_h + 20
+        bx = (WINDOW_WIDTH - box_w) // 2
+        by = (WINDOW_HEIGHT - box_h) // 2
+        x, y = pos
+        if not pygame.Rect(bx, by, box_w, box_h).collidepoint(x, y):
+            return
+        first_row_y = by + padding + 30
+        index = (y - first_row_y) // row_h
+        if 0 <= index < len(items):
+            self.menu_cursor = int(index)
+            self.select(items)
+
     def cycle(self, items: list[dict], direction: int) -> None:
         """Left/right arrow: cycle a config value in-place."""
         if self.menu_cursor >= len(items):

@@ -62,13 +62,14 @@ class GameWindow:
             fullscreen,
             view_rect.copy(),
             view_rect.copy(),
+            window_id=_display_window_id(),
         )
         window._refresh_content_rect()
         return window
 
     def owns_event(self, event: pygame.event.Event) -> bool:
         if self.window_id is None:
-            return True
+            return _event_window_id(event) is None
         event_window = _event_window_id(event)
         return event_window is None or event_window == self.window_id
 
@@ -92,7 +93,11 @@ class GameWindow:
         )
         if not size or size[0] <= 0 or size[1] <= 0:
             return True
-        self.display = pygame.display.set_mode(size, pygame.RESIZABLE)
+        if event.type == pygame.VIDEORESIZE:
+            self.display = pygame.display.set_mode(size, pygame.RESIZABLE)
+            self.window_id = _display_window_id()
+        else:
+            self.display = pygame.display.get_surface() or self.display
         self._refresh_content_rect()
         return True
 
@@ -117,6 +122,7 @@ class GameWindow:
                 windowed_fit_size(rect.size, self.ui_scale, self.layout),
                 pygame.RESIZABLE,
             )
+            self.window_id = _display_window_id()
         self._refresh_content_rect()
 
     def set_active_view_rect(self, rect: pygame.Rect | None) -> None:
@@ -133,6 +139,7 @@ class GameWindow:
                 windowed_fit_size(view.size, self.ui_scale, self.layout),
                 pygame.RESIZABLE,
             )
+            self.window_id = _display_window_id()
         self._refresh_content_rect()
 
     def toggle_fullscreen(self) -> None:
@@ -147,6 +154,7 @@ class GameWindow:
                 windowed_fit_size(view.size, self.ui_scale, self.layout),
                 pygame.RESIZABLE,
             )
+        self.window_id = _display_window_id()
         self._refresh_content_rect()
 
     def fits_view_at_1x(self, rect: pygame.Rect) -> bool:
@@ -188,5 +196,15 @@ def _event_window_id(event: pygame.event.Event) -> int | None:
         return event_window
     try:
         return int(event_window.id)
+    except Exception:
+        return None
+
+
+def _display_window_id() -> int | None:
+    get_window_id = getattr(pygame.display, "get_window_id", None)
+    if get_window_id is None:
+        return None
+    try:
+        return int(get_window_id())
     except Exception:
         return None
