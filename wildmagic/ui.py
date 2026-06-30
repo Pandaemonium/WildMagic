@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import concurrent.futures
-from datetime import datetime, timezone
+from datetime import datetime
 import os
 import time
 from typing import Any
@@ -367,7 +367,7 @@ class VisualAutoplayController:
         return lines[:4]
 
 
-class GameUI:
+class GameUI(rendering.LlmDebugHostAdapter):
     def __init__(self, autoplay: bool = False, fullscreen: bool = False) -> None:
         self.window = GameWindow.create("Wild Magic", fullscreen=fullscreen)
         # GameWindow disables pygame key auto-repeat: this is a turn-based game, so one
@@ -410,27 +410,7 @@ class GameUI:
         )
         self.input_line_rects: list[tuple[pygame.Rect, int, int, str, int]] = []
 
-        self.llm_debug_entries: list[dict[str, Any]] = []
-        self.llm_debug_started_at = datetime.now(timezone.utc)
-        self.llm_debug_seen: set[str] = set()
-        self._llm_lines_cache: list[tuple[str, tuple[int, int, int]]] | None = None
-        self.llm_block_ranges: list[tuple[int, int]] = []
-        self.llm_entry_block_ranges: dict[int, dict[str, tuple[int, int]]] = {}
-        self.llm_call_button_rects: list[tuple[pygame.Rect, int]] = []
-        self.llm_selected_call_index: int | None = None
-        self.llm_selected_call_part = "response"
-        self.llm_scroll_offset = 0
-        self.llm_autoscroll = True
-        self.llm_dragging_scrollbar = False
-        self.llm_drag_grab_dy = 0
-        self.llm_content_rect = pygame.Rect(0, 0, LLM_PANEL_WIDTH, WINDOW_HEIGHT)
-        self.llm_scrollbar_track_rect: pygame.Rect | None = None
-        self.llm_scrollbar_thumb_rect: pygame.Rect | None = None
-        self._llm_max_scroll = 0
-        self.llm_line_rects: list[tuple[pygame.Rect, int]] = []
-        self.llm_selection_anchor: int | None = None
-        self.llm_selection_focus: int | None = None
-        self.dragging_llm_selection = False
+        self.llm_debug = rendering.LlmDebugState.create()
         self.llm_debug_mode = "embedded"
         self.llm_debug_window: LlmDebugWindow | None = None
         self._full_view_rect = pygame.Rect(0, 0, WINDOW_WIDTH, WINDOW_HEIGHT)
@@ -670,7 +650,7 @@ class GameUI:
             getattr(pygame, "WINDOWRESIZED", None),
             getattr(pygame, "WINDOWSIZECHANGED", None),
         }:
-            self._llm_lines_cache = None
+            self.llm_debug.invalidate_lines()
             return True
         if event.type == pygame.KEYDOWN:
             self._handle_llm_debug_key(event)
@@ -1450,8 +1430,8 @@ class GameUI:
     def _after_command(self, result: ActionResult | None) -> None:
         """Main-thread post-processing shared by inline and worker-resolved commands."""
         self._refresh_llm_debug_entries()
-        self._llm_lines_cache = None
-        self.llm_autoscroll = True
+        self.llm_debug.invalidate_lines()
+        self.llm_debug.autoscroll = True
         if result is None:
             return
         if result.wild_magic:
@@ -1498,21 +1478,7 @@ class GameUI:
         self._auto_talk_mode = False
         self._last_trade_active = False
         self.provider_label = self.session.provider_label
-        self.llm_debug_entries = []
-        self.llm_debug_started_at = datetime.now(timezone.utc)
-        self.llm_debug_seen = set()
-        self._llm_lines_cache = None
-        self.llm_block_ranges = []
-        self.llm_entry_block_ranges = {}
-        self.llm_call_button_rects = []
-        self.llm_selected_call_index = None
-        self.llm_selected_call_part = "response"
-        self.llm_scroll_offset = 0
-        self.llm_autoscroll = True
-        self.llm_line_rects = []
-        self.llm_selection_anchor = None
-        self.llm_selection_focus = None
-        self.dragging_llm_selection = False
+        self.llm_debug.reset()
         self.standing_scene.active = False
         self.autoplay.reset_session_state()
 

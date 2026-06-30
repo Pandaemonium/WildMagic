@@ -4,6 +4,7 @@ import wildmagic.rendering as rendering
 from wildmagic.rendering import hud_panel, llm_panel, map_view
 from wildmagic.rendering.context import RenderContext
 from wildmagic.rendering.fonts import GameFonts
+from wildmagic.rendering.llm_debug_state import LlmDebugHostAdapter, LlmDebugState
 from wildmagic.rendering.overlays import (
     draw_autoplay_overlay_layer,
     draw_resolving_indicator_layer,
@@ -14,6 +15,8 @@ from wildmagic.rendering.window import GameWindow
 def test_rendering_package_exposes_stable_host_api() -> None:
     assert rendering.GameFonts is GameFonts
     assert rendering.GameWindow is GameWindow
+    assert rendering.LlmDebugHostAdapter is LlmDebugHostAdapter
+    assert rendering.LlmDebugState is LlmDebugState
     assert rendering.RenderContext is RenderContext
     assert rendering.draw_map is map_view.draw_map
     assert rendering.draw_map_layer is map_view.draw_map_layer

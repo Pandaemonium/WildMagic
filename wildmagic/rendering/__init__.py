@@ -35,6 +35,7 @@ from .layout import (
     logical_mouse_pos,
     toggled_ui_scale,
 )
+from .llm_debug_state import LlmDebugHostAdapter, LlmDebugState
 from .llm_panel import (
     activate_call_button as activate_llm_call_button,
     audit_record_to_debug_entry,
@@ -106,6 +107,8 @@ __all__ = [
     "GameFonts",
     "GameWindow",
     "LLM_PANEL_WIDTH",
+    "LlmDebugHostAdapter",
+    "LlmDebugState",
     "MANA",
     "MAP_OFFSET_X",
     "MAP_PIXEL_HEIGHT",
