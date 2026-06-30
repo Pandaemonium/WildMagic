@@ -4,7 +4,8 @@ from typing import Any
 
 import pygame
 
-from wildmagic.rendering.layout import WINDOW_HEIGHT, WINDOW_WIDTH
+from wildmagic.rendering.layout import WINDOW_HEIGHT
+from wildmagic.rendering.primitives import centered_rect, draw_fullscreen_backdrop
 from wildmagic.rendering.theme import (
     ACCENT,
     GOLD,
@@ -29,14 +30,12 @@ def draw_queue_debug(host: Any) -> None:
     """Draw the F7 background-generation queue overlay."""
     snap = host.session.canon_queue_snapshot()
 
-    overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
-    overlay.fill((0, 0, 0, 180))
-    host.screen.blit(overlay, (0, 0))
+    draw_fullscreen_backdrop(host.screen, (0, 0, 0, 180))
 
     box_w = 780
     box_h = min(700, WINDOW_HEIGHT - 60)
-    bx = (WINDOW_WIDTH - box_w) // 2
-    by = (WINDOW_HEIGHT - box_h) // 2
+    box = centered_rect(box_w, box_h)
+    bx, by = box.topleft
     pad = 22
     row_h = host.small_font.get_linesize()
     pygame.draw.rect(host.screen, PANEL, (bx, by, box_w, box_h), border_radius=6)

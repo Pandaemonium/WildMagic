@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pygame
+
 from wildmagic.scenes import menu_scene
 from wildmagic.scenes.menu_scene import MenuScene
+from wildmagic.ui import GameUI
 
 
 class Host(SimpleNamespace):
@@ -103,3 +106,28 @@ def test_menu_scene_select_opens_config_page() -> None:
     assert host.menu_prev_page == "main"
     assert host.menu_page == "config"
     assert host.menu_cursor == 0
+
+
+def test_menu_scene_mouse_selects_clicked_main_item() -> None:
+    host = Host()
+    scene = MenuScene(host)
+    # Main menu rows are centered in the same 480px box used by draw().
+    scene.handle_mouse((850, 343))
+
+    assert host.scaled is True
+    assert host.menu_cursor == 1
+
+
+def test_game_ui_routes_mouse_clicks_to_active_menu() -> None:
+    ui = GameUI.__new__(GameUI)
+    clicked: list[tuple[int, int]] = []
+    ui._active_scene = lambda: None
+    ui.book_popup = None
+    ui.menu_active = True
+    ui.menu_scene = SimpleNamespace(handle_mouse=lambda pos: clicked.append(pos))
+
+    ui.handle_mouse(
+        pygame.event.Event(pygame.MOUSEBUTTONDOWN, {"button": 1, "pos": (5, 6)})
+    )
+
+    assert clicked == [(5, 6)]

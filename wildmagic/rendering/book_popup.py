@@ -4,7 +4,8 @@ from typing import Any
 
 import pygame
 
-from wildmagic.rendering.layout import WINDOW_HEIGHT, WINDOW_WIDTH
+from wildmagic.rendering.layout import WINDOW_HEIGHT
+from wildmagic.rendering.primitives import centered_rect, draw_fullscreen_backdrop
 from wildmagic.rendering.theme import wrap_text
 
 
@@ -15,9 +16,7 @@ def draw_book_popup(host: Any) -> None:
     author = str(host.book_popup["author"])
     text = str(host.book_popup["text"])
 
-    overlay = pygame.Surface((WINDOW_WIDTH, WINDOW_HEIGHT), pygame.SRCALPHA)
-    overlay.fill((10, 8, 4, 180))
-    host.screen.blit(overlay, (0, 0))
+    draw_fullscreen_backdrop(host.screen, (10, 8, 4, 180))
 
     parchment = (233, 222, 196)
     parchment_edge = (140, 112, 72)
@@ -28,8 +27,8 @@ def draw_book_popup(host: Any) -> None:
     box_h = min(640, WINDOW_HEIGHT - 60)
     pad = 36
     wrap_width = 58
-    bx = (WINDOW_WIDTH - box_w) // 2
-    by = (WINDOW_HEIGHT - box_h) // 2
+    box = centered_rect(box_w, box_h)
+    bx, by = box.topleft
     title_h = host.book_title_font.get_linesize()
     body_h = host.book_font.get_linesize()
     small_h = host.book_small_font.get_linesize()
